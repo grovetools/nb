@@ -2,7 +2,7 @@
 
 # Build variables
 BINARY_NAME=nb
-BUILD_DIR=.
+BUILD_DIR=bin
 GO=go
 GOFLAGS=-tags "fts5"
 
@@ -13,7 +13,8 @@ all: build
 # Build the binary with FTS5 support
 .PHONY: build
 build:
-	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/nb
+	@mkdir -p $(BUILD_DIR)
+	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .
 
 # Install binary to /usr/local/bin
 .PHONY: install
@@ -23,7 +24,7 @@ install: build
 # Clean build artifacts
 .PHONY: clean
 clean:
-	rm -f $(BUILD_DIR)/$(BINARY_NAME)
+	rm -rf $(BUILD_DIR)
 
 # Run tests
 .PHONY: test
@@ -60,7 +61,8 @@ bench:
 # Development build with race detector
 .PHONY: dev
 dev:
-	$(GO) build $(GOFLAGS) -race -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/nb
+	@mkdir -p $(BUILD_DIR)
+	$(GO) build $(GOFLAGS) -race -o $(BUILD_DIR)/$(BINARY_NAME) .
 
 # Lint the code
 .PHONY: lint
@@ -71,7 +73,7 @@ lint:
 # Check if FTS5 is working
 .PHONY: check-fts5
 check-fts5: build
-	./$(BINARY_NAME) init --minimal
+	$(BUILD_DIR)/$(BINARY_NAME) init --minimal
 	@echo "FTS5 check passed!"
 
 # Help

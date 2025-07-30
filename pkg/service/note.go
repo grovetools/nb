@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/nb/pkg/frontmatter"
-	"github.com/mattsolo1/nb/pkg/models"
+	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
+	"github.com/mattsolo1/grove-notebook/pkg/models"
 )
 
 const (

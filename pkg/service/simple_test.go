@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mattsolo1/nb/pkg/models"
+	"github.com/mattsolo1/grove-notebook/pkg/models"
 )
 
 // TestSimpleListNotes tests listing notes without workspace complexity

@@ -3,19 +3,28 @@ package main
 import (
 	"os"
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/spf13/cobra"
+	"github.com/mattsolo1/grove-notebook/cmd"
 )
 
 func main() {
 	rootCmd := cli.NewStandardCommand(
 		"nb",
-		"Notebook and documentation management",
+		"A workspace-based note-taking system",
 	)
-
-	rootCmd.Run = func(cmd *cobra.Command, args []string) {
-		cmd.Println("TODO: Implement nb")
-	}
-
+	
+	// Add subcommands
+	rootCmd.AddCommand(cmd.NewNewCmd())
+	rootCmd.AddCommand(cmd.NewQuickCmd())
+	rootCmd.AddCommand(cmd.NewWorkspaceCmd())
+	rootCmd.AddCommand(cmd.NewSearchCmd())
+	rootCmd.AddCommand(cmd.NewListCmd())
+	rootCmd.AddCommand(cmd.NewArchiveCmd())
+	rootCmd.AddCommand(cmd.NewContextCmd())
+	rootCmd.AddCommand(cmd.NewInitCmd())
+	rootCmd.AddCommand(cmd.NewMigrateCmd())
+	rootCmd.AddCommand(cmd.NewMoveCmd())
+	rootCmd.AddCommand(cmd.NewObsidianCmd())
+	
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}

@@ -1,7 +1,7 @@
 package migration
 
 import (
-	"github.com/mattsolo1/nb/pkg/frontmatter"
+	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
 )
 
 // Maintain compatibility aliases for existing code

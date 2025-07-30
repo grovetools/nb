@@ -7,8 +7,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/mattsolo1/nb/pkg/models"
-	"github.com/mattsolo1/nb/pkg/workspace"
+	"github.com/mattsolo1/grove-notebook/pkg/models"
+	"github.com/mattsolo1/grove-notebook/pkg/workspace"
 )
 
 // Index manages the search index

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/nb/pkg/models"
-	"github.com/mattsolo1/nb/pkg/search"
-	"github.com/mattsolo1/nb/pkg/workspace"
+	"github.com/mattsolo1/grove-notebook/pkg/models"
+	"github.com/mattsolo1/grove-notebook/pkg/search"
+	"github.com/mattsolo1/grove-notebook/pkg/workspace"
 )
 
 // Service is the core note service

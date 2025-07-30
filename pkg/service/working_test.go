@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mattsolo1/nb/pkg/models"
-	"github.com/mattsolo1/nb/pkg/workspace"
+	"github.com/mattsolo1/grove-notebook/pkg/models"
+	"github.com/mattsolo1/grove-notebook/pkg/workspace"
 )
 
 // TestWorkingListNotes uses a simplified approach for testing
