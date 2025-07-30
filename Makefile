@@ -1,80 +1,92 @@
-# Makefile for nb
+# nb - Note System Makefile
 
+# Build variables
 BINARY_NAME=nb
-INSTALL_PATH=/usr/local/bin
-BIN_DIR=bin
+BUILD_DIR=.
+GO=go
+GOFLAGS=-tags "fts5"
 
-.PHONY: all build install uninstall test clean fmt vet lint run
-
+# Default target
+.PHONY: all
 all: build
 
+# Build the binary with FTS5 support
+.PHONY: build
 build:
-	@mkdir -p $(BIN_DIR)
-	@echo "Building $(BINARY_NAME)..."
-	@go build -o $(BIN_DIR)/$(BINARY_NAME) .
+	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/nb
 
+# Install binary to /usr/local/bin
+.PHONY: install
 install: build
-	@echo "Installing $(BINARY_NAME) to $(INSTALL_PATH)..."
-	@sudo cp $(BIN_DIR)/$(BINARY_NAME) $(INSTALL_PATH)/
-	@echo "Installed successfully!"
+	sudo cp $(BUILD_DIR)/$(BINARY_NAME) /usr/local/bin/
 
-uninstall:
-	@echo "Uninstalling $(BINARY_NAME)..."
-	@sudo rm -f $(INSTALL_PATH)/$(BINARY_NAME)
-	@echo "Uninstalled successfully!"
-
-test:
-	@echo "Running tests..."
-	@go test -v ./...
-
+# Clean build artifacts
+.PHONY: clean
 clean:
-	@echo "Cleaning..."
-	@go clean
-	@rm -rf $(BIN_DIR)
-	@rm -f $(BINARY_NAME)
-	@rm -f coverage.out
+	rm -f $(BUILD_DIR)/$(BINARY_NAME)
 
-fmt:
-	@echo "Formatting code..."
-	@go fmt ./...
+# Run tests
+.PHONY: test
+test:
+	$(GO) test $(GOFLAGS) ./...
 
-vet:
-	@echo "Running go vet..."
-	@go vet ./...
+# Run tests with verbose output
+.PHONY: test-verbose
+test-verbose:
+	$(GO) test $(GOFLAGS) -v ./...
 
-lint:
-	@echo "Running linter..."
-	@if command -v golangci-lint > /dev/null; then \
-		golangci-lint run; \
-	else \
-		echo "golangci-lint not installed. Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
-	fi
+# Run tests with coverage
+.PHONY: test-coverage
+test-coverage:
+	$(GO) test $(GOFLAGS) -coverprofile=coverage.out ./...
+	$(GO) tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
 
-# Run the CLI
-run: build
-	@$(BIN_DIR)/$(BINARY_NAME) $(ARGS)
+# Run tests for a specific package
+.PHONY: test-pkg
+test-pkg:
+	$(GO) test $(GOFLAGS) -v ./$(PKG)
 
-# Run all checks
-check: fmt vet test
+# Run a specific test
+.PHONY: test-run
+test-run:
+	$(GO) test $(GOFLAGS) -v -run $(TEST) ./...
+
+# Run benchmarks
+.PHONY: bench
+bench:
+	$(GO) test $(GOFLAGS) -bench=. -benchmem ./...
 
 # Development build with race detector
+.PHONY: dev
 dev:
-	@mkdir -p $(BIN_DIR)
-	@echo "Building $(BINARY_NAME) with race detector..."
-	@go build -race -o $(BIN_DIR)/$(BINARY_NAME) .
+	$(GO) build $(GOFLAGS) -race -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/nb
 
-# Show available targets
+# Lint the code
+.PHONY: lint
+lint:
+	@echo "Running linter..."
+	golangci-lint run ./...
+
+# Check if FTS5 is working
+.PHONY: check-fts5
+check-fts5: build
+	./$(BINARY_NAME) init --minimal
+	@echo "FTS5 check passed!"
+
+# Help
+.PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  make build       - Build the binary"
-	@echo "  make install     - Build and install to $(INSTALL_PATH)"
-	@echo "  make uninstall   - Remove from $(INSTALL_PATH)"
-	@echo "  make test        - Run tests"
-	@echo "  make clean       - Clean build artifacts"
-	@echo "  make fmt         - Format code"
-	@echo "  make vet         - Run go vet"
-	@echo "  make lint        - Run linter"
-	@echo "  make run ARGS=.. - Run the CLI with arguments"
-	@echo "  make check       - Run all checks"
-	@echo "  make dev         - Build with race detector"
-	@echo "  make help        - Show this help"
+	@echo "  make build          - Build nb with FTS5 support"
+	@echo "  make install        - Build and install to /usr/local/bin"
+	@echo "  make clean          - Remove build artifacts"
+	@echo "  make test           - Run all tests"
+	@echo "  make test-verbose   - Run tests with verbose output"
+	@echo "  make test-coverage  - Run tests with coverage report"
+	@echo "  make test-pkg PKG=pkg/service - Test specific package"
+	@echo "  make test-run TEST=TestName   - Run specific test"
+	@echo "  make bench          - Run benchmarks"
+	@echo "  make dev            - Build with race detector"
+	@echo "  make lint           - Run the linter"
+	@echo "  make check-fts5     - Verify FTS5 support"

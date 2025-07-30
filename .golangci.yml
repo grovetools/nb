@@ -1,0 +1,42 @@
+# .golangci.yml
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - goimports
+    - govet
+    - revive
+    - staticcheck
+    - stylecheck
+    - unconvert
+    - unused
+    - goconst
+    - gocyclo
+    - gofmt
+    - ineffassign
+    - tparallel
+
+linters-settings:
+  gocyclo:
+    # Set a higher cyclomatic complexity threshold
+    min-complexity: 50
+  goimports:
+    # Set the local prefix for this project
+    local-prefixes: github.com/mattsolo1/nb
+  revive:
+    rules:
+      # This rule can be noisy and is often disabled
+      - name: unexported-return
+        disabled: true
+
+issues:
+  # Exclude vendor directory
+  exclude-dirs:
+    - vendor
+  # Don't require constants for simple strings in tests
+  exclude-rules:
+    - path: _test\.go$
+      linters:
+        - goconst

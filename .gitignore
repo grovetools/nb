@@ -1,8 +1,28 @@
-# Binaries
-bin/
+# Binary
+nb
 
-# Go test binary
+# Test artifacts
+coverage.out
+coverage.html
 *.test
 
-# Go coverage
-*.out
+# Go build cache
+.cache/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependencies
+vendor/
+
+# Local config
+.env
+.env.local

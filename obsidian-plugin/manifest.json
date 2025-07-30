@@ -1,0 +1,10 @@
+{
+  "id": "nb-integration",
+  "name": "NB Integration",
+  "version": "0.0.1",
+  "minAppVersion": "1.5.0",
+  "description": "Integrate NB note system with Obsidian",
+  "author": "Your Name",
+  "authorUrl": "https://github.com/yourusername",
+  "isDesktopOnly": true
+}
