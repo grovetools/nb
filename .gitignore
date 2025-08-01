@@ -26,3 +26,5 @@ vendor/
 # Local config
 .env
 .env.local
+
+.grove
