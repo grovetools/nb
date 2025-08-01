@@ -24,6 +24,7 @@ func NewWorkspaceCmd() *cobra.Command {
 		newWorkspaceListCmd(),
 		newWorkspaceRemoveCmd(),
 		newWorkspaceCurrentCmd(),
+		doctorCmd,
 	)
 
 	return cmd

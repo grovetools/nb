@@ -166,13 +166,18 @@ func (r *Registry) FindByPath(path string) (*Workspace, error) {
 	var bestMatch *Workspace
 	bestMatchLen := 0
 
+	// Convert to lowercase for case-insensitive comparison
+	lowerAbsPath := strings.ToLower(absPath)
+
 	for _, w := range workspaces {
 		wsAbsPath, err := filepath.Abs(w.Path)
 		if err != nil {
 			continue
 		}
 
-		if strings.HasPrefix(absPath, wsAbsPath) && len(wsAbsPath) > bestMatchLen {
+		// Case-insensitive comparison to handle filesystem case variations
+		lowerWsAbsPath := strings.ToLower(wsAbsPath)
+		if strings.HasPrefix(lowerAbsPath, lowerWsAbsPath) && len(wsAbsPath) > bestMatchLen {
 			bestMatch = w
 			bestMatchLen = len(wsAbsPath)
 		}

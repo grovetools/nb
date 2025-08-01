@@ -95,6 +95,19 @@ func (w *Workspace) Validate() error {
 		w.NotebookDir = filepath.Join(home, w.NotebookDir[1:])
 	}
 
+	// Normalize paths to absolute paths to ensure consistency
+	absPath, err := filepath.Abs(w.Path)
+	if err != nil {
+		return fmt.Errorf("invalid workspace path: %w", err)
+	}
+	w.Path = absPath
+
+	absNotebookDir, err := filepath.Abs(w.NotebookDir)
+	if err != nil {
+		return fmt.Errorf("invalid notebook directory: %w", err)
+	}
+	w.NotebookDir = absNotebookDir
+
 	return nil
 }
 
