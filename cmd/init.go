@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/mattsolo1/grove-notebook/cmd/config"
@@ -19,8 +18,7 @@ func NewInitCmd() *cobra.Command {
 	
 This command will:
 - Register the current directory as a workspace
-- Create necessary directory structure
-- Set up git hooks if in a git repository`,
+- Create necessary directory structure`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Initialize config and service
 			config.InitConfig()
@@ -53,19 +51,6 @@ This command will:
 			}
 
 			fmt.Printf("Initialized workspace '%s' at %s\n", ws.Name, ws.Path)
-
-			// If in git repo, offer to install hooks
-			if _, err := os.Stat(filepath.Join(cwd, ".git")); err == nil {
-				fmt.Println("\nDetected git repository. Would you like to install git hooks? [y/N]")
-				var response string
-				_, _ = fmt.Scanln(&response)
-
-				if response == "y" || response == "Y" {
-					// TODO: Install git hooks
-					fmt.Println("Git hooks installation not yet implemented")
-				}
-			}
-
 			fmt.Println("\nReady to use! Try 'nb new' to create your first note.")
 
 			return nil
