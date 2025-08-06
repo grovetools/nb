@@ -1,6 +1,3 @@
-# Binary
-nb
-
 # Test artifacts
 coverage.out
 coverage.html
@@ -28,3 +25,4 @@ vendor/
 .env.local
 
 .grove
+bin
