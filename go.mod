@@ -3,7 +3,6 @@ module github.com/mattsolo1/grove-notebook
 go 1.24
 
 
-replace github.com/mattsolo1/grove-core => ../grove-core
 
 require (
 	github.com/mattn/go-sqlite3 v1.14.19
