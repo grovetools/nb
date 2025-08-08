@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/mattn/go-sqlite3 v1.14.22
+	github.com/mattsolo1/grove-core v0.2.4
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.10.0
