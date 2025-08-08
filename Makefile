@@ -5,6 +5,25 @@ BINARY_NAME=nb
 BUILD_DIR=bin
 GO=go
 GOFLAGS=-tags "fts5"
+VERSION_PKG=github.com/mattsolo1/grove-core/version
+
+# --- Versioning ---
+# For dev builds, we construct a version string from git info.
+# For release builds, VERSION is passed in by the CI/CD pipeline (e.g., VERSION=v1.2.3)
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
+GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
+GIT_DIRTY  ?= $(shell test -n "`git status --porcelain`" && echo "-dirty")
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# If VERSION is not set, default to a dev version string
+VERSION ?= $(GIT_BRANCH)-$(GIT_COMMIT)$(GIT_DIRTY)
+
+# Go LDFLAGS to inject version info at compile time
+LDFLAGS = -ldflags="\
+-X '$(VERSION_PKG).Version=$(VERSION)' \
+-X '$(VERSION_PKG).Commit=$(GIT_COMMIT)' \
+-X '$(VERSION_PKG).Branch=$(GIT_BRANCH)' \
+-X '$(VERSION_PKG).BuildDate=$(BUILD_DATE)'"
 
 # Default target
 .PHONY: all build test clean fmt vet lint run check dev build-all help
@@ -13,7 +32,8 @@ all: build
 # Build the binary with FTS5 support
 build:
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .
+	@echo "Building $(BINARY_NAME) version $(VERSION)..."
+	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .
 
 # Clean build artifacts
 clean:
@@ -48,7 +68,8 @@ bench:
 # Development build with race detector
 dev:
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -race -o $(BUILD_DIR)/$(BINARY_NAME) .
+	@echo "Building $(BINARY_NAME) version $(VERSION) with race detector..."
+	$(GO) build $(GOFLAGS) -race $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .
 
 # Lint the code
 lint:
@@ -59,6 +80,21 @@ lint:
 check-fts5: build
 	$(BUILD_DIR)/$(BINARY_NAME) init --minimal
 	@echo "FTS5 check passed!"
+
+# Cross-compilation targets
+PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
+DIST_DIR ?= dist
+
+build-all:
+	@echo "Building for multiple platforms into $(DIST_DIR)..."
+	@mkdir -p $(DIST_DIR)
+	@for platform in $(PLATFORMS); do \
+		os=$$(echo $$platform | cut -d'/' -f1); \
+		arch=$$(echo $$platform | cut -d'/' -f2); \
+		output_name="$(BINARY_NAME)-$${os}-$${arch}"; \
+		echo "  -> Building $${output_name} version $(VERSION)"; \
+		GOOS=$$os GOARCH=$$arch $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(DIST_DIR)/$${output_name} .; \
+	done
 
 # Help
 help:
@@ -73,3 +109,4 @@ help:
 	@echo "  make bench          - Run benchmarks"
 	@echo "  make dev            - Build with race detector"
 	@echo "  make lint           - Run the linter"
+	@echo "  make build-all      - Build for multiple platforms"

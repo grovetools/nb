@@ -24,6 +24,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewMigrateCmd())
 	rootCmd.AddCommand(cmd.NewMoveCmd())
 	rootCmd.AddCommand(cmd.NewObsidianCmd())
+	rootCmd.AddCommand(cmd.NewVersionCmd())
 	
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
