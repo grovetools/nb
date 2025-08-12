@@ -56,8 +56,8 @@ github.com/magiconair/properties v1.8.9 h1:nWcCbLq1N2v/cpNsy5WvQ37Fb+YElfq20WJ/a
 github.com/magiconair/properties v1.8.9/go.mod h1:Dhd985XPs7jluiymwWYZ0G4Z61jb3vdS329zhj2hYo0=
 github.com/mattn/go-sqlite3 v1.14.22 h1:2gZY6PC6kBnID23Tichd1K+Z0oS6nE/XwU+Vz/5o4kU=
 github.com/mattn/go-sqlite3 v1.14.22/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
-github.com/mattsolo1/grove-core v0.2.9 h1:ptB3dt4wvY+Oz0Tqx6EyCbFqNkib/wc/SdHRp1HQwXk=
-github.com/mattsolo1/grove-core v0.2.9/go.mod h1:jCZmYXEo3os2MXGH79K7c5xDtuM+/GooNyD96twXMgM=
+github.com/mattsolo1/grove-core v0.2.10 h1:9lQyqHiarE3SbdWJE47kWLbQifEnw9gHs6SiaV2XU4M=
+github.com/mattsolo1/grove-core v0.2.10/go.mod h1:jCZmYXEo3os2MXGH79K7c5xDtuM+/GooNyD96twXMgM=
 github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
 github.com/moby/docker-image-spec v1.3.1 h1:jMKff3w6PgbfSa69GfNg+zN/XLhfXJGnEx3Nl2EsFP0=
