@@ -41,6 +41,13 @@ func TestWorkingListNotes(t *testing.T) {
 		t.Fatalf("Failed to add global workspace: %v", err)
 	}
 
+	// Change to the test workspace directory so DetectCurrent finds it
+	oldCwd, _ := os.Getwd()
+	defer os.Chdir(oldCwd)
+	if err := os.Chdir(home); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+
 	// Create notes in the global workspace
 	notesDir := filepath.Join(globalNotebookDir, "global", "current")
 	if err := os.MkdirAll(notesDir, 0755); err != nil {
