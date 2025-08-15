@@ -1,3 +1,25 @@
+## v0.2.5 (2025-08-15)
+
+### Bug Fixes
+
+* resolve CI test failures (#1)
+* remove GOPROXY=direct
+
+### Continuous Integration
+
+* switch to Linux runners to reduce costs
+* consolidate to single test job on macOS
+* reduce test matrix to macOS with Go 1.24.4 only
+
+### Chores
+
+* bump deps
+
+### Features
+
+* add interactive note manager with TUI
+* add ci.yml
+
 ## v0.2.4 (2025-08-12)
 
 ### Chores
