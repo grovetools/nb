@@ -1,3 +1,14 @@
+## v0.2.6 (2025-08-25)
+
+### Chores
+
+* bump dependencies
+
+### Continuous Integration
+
+* add Git LFS disable to release workflow
+* disable Git LFS and linting in workflow
+
 ## v0.2.5 (2025-08-15)
 
 ### Bug Fixes
