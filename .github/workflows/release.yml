@@ -42,6 +42,7 @@ jobs:
 
       - name: Build binaries
         run: |
+          export CGO_ENABLED=1
           make build-all VERSION=${{ github.ref_name }}
 
       - name: Generate checksums

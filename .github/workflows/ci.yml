@@ -48,10 +48,12 @@ jobs:
 
       - name: Build
         run: |
+          export CGO_ENABLED=1
           make build
 
       - name: Run unit tests
         run: |
+          export CGO_ENABLED=1
           make test
 
 
