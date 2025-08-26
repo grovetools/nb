@@ -1,3 +1,9 @@
+## v0.2.11 (2025-08-26)
+
+### Bug Fixes
+
+* add back cross compilation!
+
 ## v0.2.10 (2025-08-26)
 
 ### Bug Fixes
