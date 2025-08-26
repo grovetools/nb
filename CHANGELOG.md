@@ -1,3 +1,10 @@
+## v0.2.9 (2025-08-26)
+
+### Bug Fixes
+
+* binary name
+* binary name and cross-compilation in release
+
 ## v0.2.8 (2025-08-26)
 
 ### Bug Fixes
