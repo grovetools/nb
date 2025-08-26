@@ -1,3 +1,9 @@
+## v0.2.8 (2025-08-26)
+
+### Bug Fixes
+
+* disable CGO for cross-compilation in build-all target
+
 ## v0.2.7 (2025-08-26)
 
 ### Continuous Integration
