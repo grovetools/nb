@@ -1,3 +1,9 @@
+## v0.2.12 (2025-08-26)
+
+### Bug Fixes
+
+* add checkout step to release job for gh release create
+
 ## v0.2.11 (2025-08-26)
 
 ### Bug Fixes
