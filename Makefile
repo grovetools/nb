@@ -93,7 +93,7 @@ build-all:
 		arch=$$(echo $$platform | cut -d'/' -f2); \
 		output_name="$(BINARY_NAME)-$${os}-$${arch}"; \
 		echo "  -> Building $${output_name} version $(VERSION)"; \
-		GOOS=$$os GOARCH=$$arch $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(DIST_DIR)/$${output_name} .; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(DIST_DIR)/$${output_name} .; \
 	done
 
 # Help
