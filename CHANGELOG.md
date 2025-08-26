@@ -1,3 +1,9 @@
+## v0.2.7 (2025-08-26)
+
+### Continuous Integration
+
+* enable CGO for SQLite builds in CI workflows
+
 ## v0.2.6 (2025-08-25)
 
 ### Chores
