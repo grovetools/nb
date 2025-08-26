@@ -49,7 +49,8 @@ jobs:
       - name: Build
         run: |
           export CGO_ENABLED=1
-          make build
+          # Build only for the native architecture in CI
+          go build -tags "fts5" -o bin/nb .
 
       - name: Run unit tests
         run: |

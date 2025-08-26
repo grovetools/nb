@@ -87,6 +87,8 @@ check-fts5: build
 	@echo "FTS5 check passed!"
 
 # Cross-compilation targets
+# Note: Cross-compilation with CGO requires appropriate C compilers for target platforms
+# For CI/CD, we use native runners for each platform instead
 PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
 DIST_DIR ?= dist
 
