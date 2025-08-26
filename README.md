@@ -1,174 +1,128 @@
-# nb - Workspace-Based Note System Prototype
+# grove notebook
 
-This is a prototype implementation of the alternative architecture for a workspace-based note-taking system.
+A command-line note-taking system for the grove ecosystem.
+
+[![CI](https://github.com/mattsolo1/grove-notebook/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-notebook/actions/workflows/ci.yml)
+
+`nb` is a note-taking tool that organizes notes based on project workspaces, integrates with Git branches, and provides search capabilities through SQLite. It's built for the command line and integrates with Neovim and Obsidian.
 
 ## Features
 
-- **Workspace Registry**: No symlinks - workspaces are registered and auto-detected
-- **SQLite Search**: Full-text search with FTS5
-- **Git Integration**: Branch-aware note organization
-- **CLI Tool**: Complete command-line interface
-- **Neovim Plugin**: Seamless editor integration
+-   **Workspace-Aware**: Automatically associates notes with your project directories.
+-   **Git Integration**: Scopes notes to your current Git branch, keeping feature work organized.
+-   **Full-Text Search**: Instant and powerful search across all notes with SQLite FTS5.
+-   **Rich CLI**: A comprehensive set of commands for managing notes, workspaces, and more.
+-   **Interactive TUI**: A terminal UI (`nb manage`) for browsing and bulk-managing notes.
+-   **Editor Integration**: Seamless experience with official [Neovim](#neovim) and [Obsidian](#obsidian) plugins.
+-   **Data Integrity Tools**: `nb migrate` and `nb doctor` help standardize and repair your notes.
+-   **Flexible Note Types**: Organize notes by category (`current`, `llm`, `learn`, `issues`, etc.) with support for custom nested types.
+
+## Installation
+
+**Note**: The build process requires SQLite with the FTS5 extension enabled, which is standard on most modern systems.
 
 ## Quick Start
 
-### Build and Install
+1.  **Initialize `nb`:**
+    This sets up the global configuration and notebook directory (`~/.local/share/nb` and `~/Documents/nb`).
+    ```bash
+    nb init
+    ```
 
-```bash
-cd nb-prototype
+2.  **Register a workspace:**
+    Navigate to your project directory and register it.
+    ```bash
+    cd ~/projects/my-project
+    nb workspace add .
+    ```
 
-# Option 1: Using Make (recommended)
-make build              # Build with FTS5 support
-make install            # Build and install to /usr/local/bin
+3.  **Create your first note:**
+    This creates a new note and opens it in your default `$EDITOR`.
+    ```bash
+    nb new "API design ideas"
+    ```
 
-# Option 2: Manual build
-go build -tags "fts5" -o nb ./cmd/nb
-sudo mv nb /usr/local/bin/  # Or add to PATH
+4.  **List your notes:**
+    ```bash
+    nb list
+    ```
 
-# Initialize
-nb init
-```
+5.  **Search your notes:**
+    ```bash
+    nb search "api"          # Search current workspace
+    nb search "api" --all    # Search all workspaces
+    ```
 
-**Important**: The `-tags "fts5"` flag is required for SQLite full-text search support.
+## Command Overview
 
-### Basic Usage
+`nb` provides a rich set of commands for all your note-taking needs.
 
-```bash
-# Create notes
-nb new                      # Create timestamped note
-nb new "meeting notes"      # Create with title
-nb new -t llm "chat"       # Create LLM note
+### Core Commands
 
-# Workspace management
-nb workspace add .          # Register current directory
-nb workspace list           # List all workspaces
-nb workspace current        # Show current workspace
+| Command           | Description                                                        |
+| ----------------- | ------------------------------------------------------------------ |
+| `nb new [title]`  | Create a new note. Use `-t <type>` for different categories.       |
+| `nb quick "..."`  | Create a quick, one-line note without opening an editor.           |
+| `nb list [type]`  | List notes. Flags: `--all`, `--workspaces`, `--all-branches`.      |
+| `nb search <q>`   | Search notes using SQLite FTS5.                                    |
+| `nb archive`      | Archive notes, either by name or with `--older-than <days>`.       |
+| `nb manage`       | Open an interactive terminal UI to browse and manage notes.        |
 
-# Search
-nb search "authentication"  # Search current workspace
-nb search "api" --all       # Search all workspaces
+### Workspace & Context
 
-# List and archive
-nb list                     # List current notes
-nb archive --older-than 30  # Archive old notes
-```
+| Command                  | Description                                            |
+| ------------------------ | ------------------------------------------------------ |
+| `nb init`                | Initializes the `nb` configuration and directories.    |
+| `nb workspace add [path]`| Registers a directory as a workspace.                  |
+| `nb workspace list`      | Lists all registered workspaces.                       |
+| `nb workspace remove`    | Removes a workspace registration.                      |
+| `nb context`             | Shows information about the current workspace context. |
 
-### 4. Quick Note Capture
+### Utility Commands
 
-**Impact**: Frictionless note creation
+| Command                  | Description                                                      |
+| ------------------------ | ---------------------------------------------------------------- |
+| `nb move <src> <dest>`   | Move notes between types, branches, or workspaces.               |
+| `nb migrate`             | Standardize frontmatter, filenames, and tags of existing notes.  |
+| `nb doctor`              | Check for and fix common configuration issues.                   |
+| `nb version`             | Show version information.                                        |
 
-```bash
-# Add quick flag for instant notes
-$ nb quick "Remember to review PR #123"
-# Creates note with timestamp title, no editor
+## Editor Integration
 
-# Or pipe from stdin
-$ echo "Quick thought" | nb new --stdin
-```
+### Neovim
 
-### Neovim Integration
+The official `nb.nvim` plugin provides a seamless integration with Neovim.
 
-Add to your Neovim config:
+**Installation (lazy.nvim):**
 
 ```lua
--- Install the plugin (using lazy.nvim)
 {
-  dir = "~/path/to/nb-prototype/nvim-plugin",
+  dir = "~/path/to/grove-notebook/nvim-plugin",
   config = function()
     require('nb').setup({
-      nb_command = "nb",  -- path to nb binary
-      mappings = {
-        current = '<leader>ni',
-        llm = '<leader>nc',
-        learn = '<leader>nl',
-        new = '<leader>nn',
-        quick = '<leader>nq',
-        path = '<leader>cp',
-        search = '<leader>ns',
-        archive = '<leader>na',
-      },
+      -- path to your nb binary if not in PATH
+      nb_command = "nb",
     })
   end,
 }
 ```
 
-## Architecture
+**Key Mappings:**
 
-### No Symlinks
+-   `<leader>nn`: Create a new note (with a type selection picker).
+-   `<leader>ns`: Search notes in the current repository.
+-   `<leader>ng`: Search global notes.
+-   `<leader>na`: Search all notes across all workspaces.
+-   For a full list of features and mappings, see the [plugin's README](./nvim-plugin/README.md).
 
-Instead of creating symlinks in every project, workspaces are registered:
+### Obsidian
 
-```yaml
-# ~/.local/share/nb/workspaces.db
-- name: backend
-  path: /home/user/projects/backend
-  type: git-repo
-  notebook: /home/user/Documents/nb
-```
-
-### Directory Structure
-
-```
-~/Documents/nb/
-├── repos/
-│   └── backend/
-│       └── main/
-│           ├── current/
-│           ├── llm/
-│           └── archive/
-└── global/
-    ├── current/
-    └── learn/
-```
-
-### Full-Text Search
-
-SQLite FTS5 provides instant search across all notes:
-
-```sql
-CREATE VIRTUAL TABLE notes_fts USING fts5(
-    path, workspace, branch, type, title, content
-);
-```
+An experimental Obsidian plugin is available for development and testing. It provides a sidebar view to browse your `nb` repositories and notes. See the [plugin's README](./obsidian-plugin/README.md) for setup instructions.
 
 ## Development
 
-### Project Structure
+-   **Build:** `make build`
+-   **Test:** `make test`
+-   **Lint:** `make lint` (requires `golangci-lint`)
 
-```
-nb-prototype/
-├── cmd/nb/           # CLI commands
-├── pkg/
-│   ├── workspace/    # Workspace registry
-│   ├── service/      # Core service layer
-│   └── search/       # Search indexing
-└── nvim-plugin/      # Neovim integration
-```
-
-### Adding Features
-
-1. **New Commands**: Add to `cmd/nb/`
-2. **Core Logic**: Update `pkg/service/`
-3. **Neovim Features**: Extend `nvim-plugin/lua/nb/`
-
-## Limitations
-
-This is a prototype demonstrating the core concepts:
-
-- Basic error handling
-- Limited git integration
-- No web UI yet
-- No plugin system
-- Basic templates only
-
-## Next Steps
-
-To build a production version:
-
-1. Add comprehensive error handling
-2. Implement git hooks
-3. Add web server mode
-4. Create plugin architecture
-5. Add LLM integration
-6. Implement performance optimizations
-7. Add comprehensive tests
+All common development tasks are defined in the `Makefile`.
