@@ -2,23 +2,28 @@ name: Release
 on:
   push:
     tags: ['v*']
-    
+
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
-      - name: Configure Git LFS
-        run: |
-          # Disable Git LFS to avoid permission issues with dependencies
-          git config --global filter.lfs.process ""
-          git config --global filter.lfs.required false
-          git config --global filter.lfs.clean ""
-          git config --global filter.lfs.smudge ""
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -30,20 +35,44 @@ jobs:
           git config --global url."https://${{ secrets.GROVE_PAT }}@github.com/".insteadOf "https://github.com/"
           go env -w GOPRIVATE=github.com/mattsolo1/*
           go env -w GOPROXY=direct
-          
+
       - name: Update dependencies
         run: |
           rm -f go.sum
           go mod download
           go mod tidy
 
-      - name: Create dist directory
-        run: mkdir -p dist
-
-      - name: Build binaries
+      - name: Build binary
         run: |
           export CGO_ENABLED=1
-          make build-all VERSION=${{ github.ref_name }}
+          make build GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} VERSION=${{ github.ref_name }}
+
+      - name: Rename binary for release
+        run: |
+          mkdir -p dist
+          mv bin/nb dist/nb-${{ matrix.goos }}-${{ matrix.goarch }}
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download all release assets
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-assets-*
+          merge-multiple: true
 
       - name: Generate checksums
         run: |
