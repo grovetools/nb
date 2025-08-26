@@ -33,7 +33,12 @@ all: build
 build:
 	@mkdir -p $(BUILD_DIR)
 	@echo "Building $(BINARY_NAME) version $(VERSION)..."
-	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .
+	@if [ -n "$(GOOS)" ] && [ -n "$(GOARCH)" ]; then \
+		echo "Cross-compiling for $(GOOS)/$(GOARCH)..."; \
+		GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .; \
+	else \
+		$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .; \
+	fi
 
 # Clean build artifacts
 clean:

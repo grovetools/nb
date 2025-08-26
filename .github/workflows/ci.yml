@@ -55,5 +55,3 @@ jobs:
         run: |
           export CGO_ENABLED=1
           make test
-
-
