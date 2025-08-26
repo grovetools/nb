@@ -50,7 +50,7 @@ jobs:
       - name: Rename binary for release
         run: |
           mkdir -p dist
-          mv bin/nb dist/nb-${{ matrix.goos }}-${{ matrix.goarch }}
+          mv bin/nb dist/grove-notebook-${{ matrix.goos }}-${{ matrix.goarch }}
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4

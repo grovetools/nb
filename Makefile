@@ -2,6 +2,7 @@
 
 # Build variables
 BINARY_NAME=nb
+RELEASE_ASSET_NAME=grove-notebook
 BUILD_DIR=bin
 GO=go
 GOFLAGS=-tags "fts5"
@@ -91,7 +92,7 @@ build-all:
 	@for platform in $(PLATFORMS); do \
 		os=$$(echo $$platform | cut -d'/' -f1); \
 		arch=$$(echo $$platform | cut -d'/' -f2); \
-		output_name="$(BINARY_NAME)-$${os}-$${arch}"; \
+		output_name="$(RELEASE_ASSET_NAME)-$${os}-$${arch}"; \
 		echo "  -> Building $${output_name} version $(VERSION)"; \
 		GOOS=$$os GOARCH=$$arch $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(DIST_DIR)/$${output_name} .; \
 	done
