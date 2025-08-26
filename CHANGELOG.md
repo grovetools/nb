@@ -1,3 +1,13 @@
+## v0.2.10 (2025-08-26)
+
+### Bug Fixes
+
+* revert workflows
+
+### Chores
+
+* standardize release asset naming to use BINARY_NAME
+
 ## v0.2.9 (2025-08-26)
 
 ### Bug Fixes
