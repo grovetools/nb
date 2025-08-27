@@ -1,10 +1,11 @@
 # grove notebook
 
-A command-line note-taking system for the grove ecosystem.
+![grove-notebook](https://github.com/user-attachments/assets/e43f97b0-9d06-48ad-aa41-29e3a94fb499)
+
 
 [![CI](https://github.com/mattsolo1/grove-notebook/actions/workflows/ci.yml/badge.svg)](https://github.com/mattsolo1/grove-notebook/actions/workflows/ci.yml)
 
-`nb` is a note-taking tool that organizes notes based on project workspaces, integrates with Git branches, and provides search capabilities through SQLite. It's built for the command line and integrates with Neovim and Obsidian.
+`nb` is a command-line note-taking system for use with the the grove LLM coding ecosystem. It organizes notes based on project workspaces, integrates with Git branches, and provides search capabilities through SQLite. It's built for the command line and integrates with Neovim and Obsidian.
 
 ## Features
 
