@@ -334,6 +334,19 @@ function M.setup(config)
       return
     end
 
+    -- First, calculate max width for the note type column
+    local max_type_width = 0
+    for _, note in ipairs(notes) do
+      local note_type = note.type or "unknown"
+      local note_type_len = #note_type
+      if note_type_len > max_type_width then
+        max_type_width = note_type_len
+      end
+    end
+
+    -- Add 3 for brackets and a space
+    local format_str = string.format("%%s %%-%ds  %%s  %%s", max_type_width + 3)
+
     -- Convert notes to picker items
     local items = {}
     for _, note in ipairs(notes) do
@@ -370,14 +383,13 @@ function M.setup(config)
           end
         end
         
-        -- Format the display text with fixed-width columns
+        -- Format the display text with dynamic width columns
         local formatted_mtime = ""
         if mtime > 0 then
           formatted_mtime = os.date("%Y-%m-%d %H:%M", mtime)
         end
         
-        -- Use 20 chars for note type to accommodate nested paths
-        local display_text = string.format("%s %-20s  %s  %s", emoji, "[" .. note_type .. "]", formatted_mtime, title)
+        local display_text = string.format(format_str, emoji, "[" .. note_type .. "]", formatted_mtime, title)
         
         table.insert(items, {
           text = display_text,
@@ -417,6 +429,19 @@ function M.setup(config)
       return
     end
 
+    -- First, calculate max width for the note type column
+    local max_type_width = 0
+    for _, note in ipairs(notes) do
+      local note_type = note.type or "unknown"
+      local note_type_len = #note_type
+      if note_type_len > max_type_width then
+        max_type_width = note_type_len
+      end
+    end
+
+    -- Add 3 for brackets and a space
+    local format_str = string.format("%%s %%-%ds  %%s  %%s", max_type_width + 3)
+
     -- Convert notes to picker items
     local items = {}
     for _, note in ipairs(notes) do
@@ -453,14 +478,13 @@ function M.setup(config)
           end
         end
         
-        -- Format the display text with fixed-width columns
+        -- Format the display text with dynamic width columns
         local formatted_mtime = ""
         if mtime > 0 then
           formatted_mtime = os.date("%Y-%m-%d %H:%M", mtime)
         end
         
-        -- Pad note type to 10 chars
-        local display_text = string.format("%s %-10s  %s  %s", emoji, "[" .. note_type .. "]", formatted_mtime, title)
+        local display_text = string.format(format_str, emoji, "[" .. note_type .. "]", formatted_mtime, title)
         
         table.insert(items, {
           text = display_text,
@@ -499,6 +523,29 @@ function M.setup(config)
       vim.notify("Failed to parse notes list", vim.log.levels.ERROR)
       return
     end
+
+    -- First pass: calculate max widths for the note type and location columns
+    local max_type_width = 0
+    local max_location_width = 0
+    for _, note in ipairs(notes) do
+      local note_type = note.type or "unknown"
+      local workspace = note.workspace or "global"
+      local branch = note.branch or ""
+      local location = workspace
+      if branch ~= "" then
+        location = location .. "/" .. branch
+      end
+      
+      if #note_type > max_type_width then
+        max_type_width = #note_type
+      end
+      if #location > max_location_width then
+        max_location_width = #location
+      end
+    end
+
+    -- Add padding for brackets and spacing
+    local format_str = string.format("%%s %%-%ds %%-%ds %%s  %%s%%s", max_type_width + 3, max_location_width + 2)
 
     -- Convert notes to picker items
     local items = {}
@@ -555,8 +602,8 @@ function M.setup(config)
             formatted_mtime = os.date("%Y-%m-%d", mtime)
           end
           
-          -- Format: emoji [type] workspace/branch mtime title tags
-          local display_text = string.format("%s %-20s %-20s %s  %s%s", 
+          -- Format with dynamic widths
+          local display_text = string.format(format_str, 
             emoji, 
             "[" .. note_type .. "]", 
             location,
@@ -661,6 +708,26 @@ function M.setup(config)
       return
     end
 
+    -- First pass: calculate max widths for note type and branch columns
+    local max_type_width = 0
+    local max_branch_width = 0
+    for _, note in ipairs(notes) do
+      local note_type = note.type or "unknown"
+      local branch = note.branch or "main"
+      
+      if #note_type > max_type_width then
+        max_type_width = #note_type
+      end
+      if #branch > max_branch_width then
+        max_branch_width = #branch
+      end
+    end
+
+    -- Add padding for brackets "()" and "[]"
+    local type_col_width = max_type_width + 2 -- for "[]"
+    local branch_col_width = max_branch_width + 2 -- for "()"
+    local format_str = string.format("%%s %%-%ds %%-%ds %%s  %%s", type_col_width, branch_col_width)
+
     -- Convert notes to picker items
     local items = {}
     for _, note in ipairs(notes) do
@@ -699,8 +766,8 @@ function M.setup(config)
           formatted_mtime = os.date("%Y-%m-%d %H:%M", mtime)
         end
         
-        -- Format: emoji [type] (branch) mtime title
-        local display_text = string.format("%s %-15s %-15s %s  %s", 
+        -- Format with dynamic widths
+        local display_text = string.format(format_str, 
           emoji, 
           "[" .. note_type .. "]", 
           "(" .. branch .. ")", 
