@@ -1,3 +1,19 @@
+## v0.2.13 (2025-09-12)
+
+### Chores
+
+* add Grove ecosystem files
+* update readme
+
+### Bug Fixes
+
+* **nvim:** dynamically calculate column widths in note pickers
+
+### Documentation
+
+* **changelog:** update CHANGELOG.md for v0.2.14
+* **changelog:** update CHANGELOG.md for v0.2.13
+
 ## v0.2.14 (2025-08-28)
 
 ### Bug Fixes
