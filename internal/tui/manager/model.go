@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
@@ -17,18 +19,24 @@ import (
 
 // Model represents the state of the note manager TUI
 type Model struct {
-	table        table.Model
-	notes        []*models.Note
-	selected     map[string]struct{} // Set of selected note paths
-	service      *service.Service
-	context      *service.WorkspaceContext
-	quitting     bool
-	confirming   bool // Confirmation mode for archiving
-	message      string
-	width        int
-	height       int
-	lastCursor   int  // For shift+click selection
-	sortNewest   bool // true = newest first, false = oldest first
+	table         table.Model
+	allNotes      []*models.Note      // Master unfiltered list
+	notes         []*models.Note      // Currently visible (potentially filtered) list
+	selected      map[string]struct{} // Set of selected note paths
+	service       *service.Service
+	context       *service.WorkspaceContext
+	quitting      bool
+	confirming    bool // Confirmation mode for archiving
+	message       string
+	width         int
+	height        int
+	lastCursor    int  // For shift+click selection
+	sortNewest    bool // true = newest first, false = oldest first
+	filtering     bool // Whether filter mode is active
+	filterInput   textinput.Model
+	selectingType bool       // Whether type selection mode is active
+	typeList      list.Model // List for type selection
+	activeFilter  string     // Currently active type filter
 }
 
 // Styles
@@ -59,6 +67,43 @@ var (
 		Foreground(lipgloss.Color("214"))
 )
 
+// typeItem implements list.Item for the type selection list
+type typeItem struct {
+	name  string
+	count int
+}
+
+func (i typeItem) FilterValue() string { return i.name }
+func (i typeItem) Title() string       { return i.name }
+func (i typeItem) Description() string { return fmt.Sprintf("%d notes", i.count) }
+
+// getUniqueTypes extracts unique types from notes with counts
+func getUniqueTypes(notes []*models.Note) []list.Item {
+	typeCounts := make(map[string]int)
+	for _, note := range notes {
+		typeCounts[string(note.Type)]++
+	}
+	
+	// Add "All" option at the beginning
+	items := []list.Item{
+		typeItem{name: "All", count: len(notes)},
+	}
+	
+	// Sort types alphabetically
+	var types []string
+	for t := range typeCounts {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	
+	// Create list items
+	for _, t := range types {
+		items = append(items, typeItem{name: t, count: typeCounts[t]})
+	}
+	
+	return items
+}
+
 // New creates a new Model instance
 func New(notes []*models.Note, svc *service.Service, ctx *service.WorkspaceContext) Model {
 	// Sort notes by modified date (newest first)
@@ -66,9 +111,21 @@ func New(notes []*models.Note, svc *service.Service, ctx *service.WorkspaceConte
 		return notes[i].ModifiedAt.After(notes[j].ModifiedAt)
 	})
 
+	// Calculate dynamic width for TYPE column
+	maxTypeWidth := 10 // Minimum width
+	for _, note := range notes {
+		if len(string(note.Type)) > maxTypeWidth {
+			maxTypeWidth = len(string(note.Type))
+		}
+	}
+	if maxTypeWidth > 25 { // Cap the width
+		maxTypeWidth = 25
+	}
+	maxTypeWidth += 2 // Add padding
+
 	columns := []table.Column{
-		{Title: "SEL", Width: 3},
-		{Title: "TYPE", Width: 10},
+		{Title: "", Width: 4},              // Hidden SEL header, slightly wider for spacing
+		{Title: "TYPE", Width: maxTypeWidth},
 		{Title: "TITLE", Width: 50},
 		{Title: "MODIFIED", Width: 16},
 	}
@@ -103,14 +160,37 @@ func New(notes []*models.Note, svc *service.Service, ctx *service.WorkspaceConte
 		Bold(false)
 	t.SetStyles(s)
 
+	// Initialize text input for filtering
+	ti := textinput.New()
+	ti.Placeholder = "Search notes..."
+	ti.CharLimit = 100
+
+	// Initialize type selection list
+	typeItems := getUniqueTypes(notes)
+	typeListDelegate := list.NewDefaultDelegate()
+	typeListDelegate.ShowDescription = true
+	typeList := list.New(typeItems, typeListDelegate, 0, 0)
+	typeList.Title = "Select Type to Filter"
+	typeList.SetShowHelp(false)
+	typeList.SetFilteringEnabled(false)
+	
+	// Style the list
+	typeList.Styles.Title = headerStyle
+
 	return Model{
-		table:      t,
-		notes:      notes,
-		selected:   make(map[string]struct{}),
-		service:    svc,
-		context:    ctx,
-		lastCursor: 0,
-		sortNewest: true,
+		table:         t,
+		allNotes:      notes,
+		notes:         notes, // Initially, visible list is the full list
+		selected:      make(map[string]struct{}),
+		service:       svc,
+		context:       ctx,
+		lastCursor:    0,
+		sortNewest:    true,
+		filtering:     false,
+		filterInput:   ti,
+		selectingType: false,
+		typeList:      typeList,
+		activeFilter:  "",
 	}
 }
 
@@ -170,6 +250,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.table.SetHeight(m.height - 8) // Leave space for header and help
+		// Also resize the type list
+		m.typeList.SetWidth(m.width / 2)
+		m.typeList.SetHeight(m.height / 2)
 		return m, nil
 
 	case editorFinishedMsg:
@@ -183,10 +266,83 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleConfirmation(msg)
 		}
 
+		// Handle type selection mode
+		if m.selectingType {
+			switch msg.String() {
+			case "enter":
+				// Apply selected type filter
+				if selectedItem, ok := m.typeList.SelectedItem().(typeItem); ok {
+					if selectedItem.name == "All" {
+						m.activeFilter = ""
+					} else {
+						m.activeFilter = selectedItem.name
+					}
+					m.applyTypeFilter()
+					m.message = fmt.Sprintf("Filter: %s", selectedItem.name)
+				}
+				m.selectingType = false
+				return m, nil
+			case "esc", "q":
+				// Cancel type selection
+				m.selectingType = false
+				return m, nil
+			default:
+				// Pass to type list
+				m.typeList, cmd = m.typeList.Update(msg)
+				return m, cmd
+			}
+		}
+
+		// Handle filtering mode
+		if m.filtering {
+			switch msg.String() {
+			case "enter":
+				// Exit filter mode
+				m.filtering = false
+				m.filterInput.Blur()
+				return m, nil
+			case "esc":
+				// Clear filter and exit filter mode
+				m.filterInput.SetValue("")
+				m.applyFilter()
+				m.filtering = false
+				m.filterInput.Blur()
+				return m, nil
+			default:
+				// Update filter input
+				var filterCmd tea.Cmd
+				m.filterInput, filterCmd = m.filterInput.Update(msg)
+				m.applyFilter()
+				return m, filterCmd
+			}
+		}
+
 		switch msg.String() {
 		case "q", "esc", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
+		
+		case "t":
+			// Enter type selection mode
+			m.selectingType = true
+			// Update the type list with current notes
+			m.typeList.SetItems(getUniqueTypes(m.allNotes))
+			return m, nil
+		
+		case "c":
+			// Clear all filters
+			m.activeFilter = ""
+			m.filterInput.SetValue("")
+			m.notes = m.allNotes
+			m.sortNotes()
+			m.message = "Filters cleared"
+			return m, nil
+		
+		case "/":
+			// Enter filter mode
+			m.filtering = true
+			m.filterInput.Focus()
+			return m, textinput.Blink
 
 		case "enter":
 			// Open the note under cursor in editor
@@ -329,7 +485,14 @@ func (m *Model) archiveSelected() error {
 
 // removeArchivedNotes removes archived notes from the display
 func (m *Model) removeArchivedNotes() {
-	// Create new slice without archived notes
+	// Create new slices without archived notes
+	var remainingAllNotes []*models.Note
+	for _, note := range m.allNotes {
+		if _, archived := m.selected[note.Path]; !archived {
+			remainingAllNotes = append(remainingAllNotes, note)
+		}
+	}
+	
 	var remainingNotes []*models.Note
 	for _, note := range m.notes {
 		if _, archived := m.selected[note.Path]; !archived {
@@ -337,6 +500,7 @@ func (m *Model) removeArchivedNotes() {
 		}
 	}
 	
+	m.allNotes = remainingAllNotes
 	m.notes = remainingNotes
 	m.updateTableRows()
 	
@@ -362,6 +526,11 @@ func (m Model) View() string {
 		return ""
 	}
 
+	// If in type selection mode, show only the type list
+	if m.selectingType {
+		return m.typeList.View()
+	}
+
 	var s strings.Builder
 
 	// Header with workspace context
@@ -381,8 +550,20 @@ func (m Model) View() string {
 	header := headerStyle.Render(fmt.Sprintf("  Notes Manager - %s %s  ", contextStr, sortIndicator))
 	s.WriteString(header + "\n\n")
 
+	// Show active type filter if any
+	if m.activeFilter != "" {
+		s.WriteString(messageStyle.Render(fmt.Sprintf("Type Filter: %s", m.activeFilter)) + "\n\n")
+	}
+
+	// Filter input (if in filter mode)
+	if m.filtering {
+		s.WriteString("Search: " + m.filterInput.View() + "\n\n")
+	} else if m.filterInput.Value() != "" {
+		s.WriteString(dimStyle.Render(fmt.Sprintf("Search: %s", m.filterInput.Value())) + "\n\n")
+	}
+
 	// Message
-	if m.message != "" {
+	if m.message != "" && !m.selectingType {
 		if m.confirming {
 			s.WriteString(warningStyle.Render(m.message) + "\n\n")
 		} else {
@@ -398,15 +579,26 @@ func (m Model) View() string {
 	s.WriteString(dimStyle.Render(status) + "\n\n")
 
 	// Help
-	help := []string{
-		"enter: open",
-		"space: toggle",
-		"shift+↑/↓: multi-select",
-		"a: all",
-		"n: none",
-		"s: sort",
-		"x: archive",
-		"q: quit",
+	var help []string
+	if m.filtering {
+		help = []string{
+			"enter: apply filter",
+			"esc: cancel filter",
+		}
+	} else {
+		help = []string{
+			"enter: open",
+			"space: toggle",
+			"shift+↑/↓: multi-select",
+			"t: type filter",
+			"/: search",
+			"c: clear filter",
+			"a: all",
+			"n: none",
+			"s: sort",
+			"x: archive",
+			"q: quit",
+		}
 	}
 	s.WriteString(helpStyle.Render(strings.Join(help, " • ")))
 
@@ -468,4 +660,53 @@ func (m *Model) sortNotes() {
 	// Reset cursor to top
 	m.table.SetCursor(0)
 	m.lastCursor = 0
+}
+
+// applyFilter filters the notes based on the current filter input
+func (m *Model) applyFilter() {
+	filterValue := m.filterInput.Value()
+	
+	if filterValue == "" {
+		// No filter, show all notes
+		m.notes = m.allNotes
+	} else {
+		// Filter notes by searching across multiple fields (case-insensitive)
+		filterLower := strings.ToLower(filterValue)
+		var filtered []*models.Note
+		for _, note := range m.allNotes {
+			// Search in type, title, and path
+			typeMatch := strings.Contains(strings.ToLower(string(note.Type)), filterLower)
+			titleMatch := strings.Contains(strings.ToLower(note.Title), filterLower)
+			pathMatch := strings.Contains(strings.ToLower(note.Path), filterLower)
+			
+			// Include note if any field matches
+			if typeMatch || titleMatch || pathMatch {
+				filtered = append(filtered, note)
+			}
+		}
+		m.notes = filtered
+	}
+	
+	// Resort after filtering
+	m.sortNotes()
+}
+
+// applyTypeFilter filters the notes based on the selected type
+func (m *Model) applyTypeFilter() {
+	if m.activeFilter == "" {
+		// No filter, show all notes
+		m.notes = m.allNotes
+	} else {
+		// Filter notes by exact type match
+		var filtered []*models.Note
+		for _, note := range m.allNotes {
+			if string(note.Type) == m.activeFilter {
+				filtered = append(filtered, note)
+			}
+		}
+		m.notes = filtered
+	}
+	
+	// Resort after filtering
+	m.sortNotes()
 }
