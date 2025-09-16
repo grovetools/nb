@@ -1,3 +1,30 @@
+## v0.2.13 (2025-09-16)
+
+### Chores
+
+* bump dependencies
+* update Grove dependencies to latest versions
+* add Grove ecosystem files
+* update readme
+
+### Features
+
+* enhance nb manage with improved filtering capabilities
+
+### Bug Fixes
+
+* **nvim:** dynamically calculate column widths in note pickers
+
+### Documentation
+
+* **changelog:** update CHANGELOG.md for v0.2.13
+* **changelog:** update CHANGELOG.md for v0.2.13
+* **changelog:** update CHANGELOG.md for v0.2.13
+* **changelog:** update CHANGELOG.md for v0.2.13
+* **changelog:** update CHANGELOG.md for v0.2.13
+* **changelog:** update CHANGELOG.md for v0.2.14
+* **changelog:** update CHANGELOG.md for v0.2.13
+
 ## v0.2.13 (2025-09-13)
 
 ### Documentation
