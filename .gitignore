@@ -27,3 +27,10 @@ vendor/
 .grove
 bin
 .grove-worktrees
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Don't ignore CLAUDE.md
+!CLAUDE.md
