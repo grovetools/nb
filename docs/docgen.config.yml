@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mattsolo1/grove-docgen/main/schema/docgen.config.schema.json
+category: Developer Tools
+description: A command-line, workspace-aware note-taking system for developers that integrates with Git and provides powerful search capabilities.
+enabled: true
+sections:
+  - name: introduction
+    order: 1
+    output: 01-introduction.md
+    prompt: prompts/01-introduction.md
+    title: Introduction
+  - name: installation
+    order: 2
+    output: 02-installation.md
+    prompt: prompts/02-installation.md
+    title: Installation
+  - name: quick-start
+    order: 3
+    output: 03-quick-start.md
+    prompt: prompts/03-quick-start.md
+    title: Quick Start
+  - name: core-concepts
+    order: 4
+    output: 04-core-concepts.md
+    prompt: prompts/04-core-concepts.md
+    title: Core Concepts
+  - name: command-reference
+    order: 5
+    output: 05-command-reference.md
+    prompt: prompts/05-command-reference.md
+    title: Command Reference
+  - name: configuration
+    order: 6
+    output: 06-configuration.md
+    prompt: prompts/06-configuration.md
+    title: Configuration
+  - name: editor-integrations
+    order: 7
+    output: 07-editor-integrations.md
+    prompt: prompts/07-editor-integrations.md
+    title: Editor Integrations
+  - name: migration-guide
+    order: 8
+    output: 08-migration-guide.md
+    prompt: prompts/08-migration-guide.md
+    title: Migration Guide
+  - name: architecture
+    order: 9
+    output: 09-architecture.md
+    prompt: prompts/09-architecture.md
+    title: Architecture
+  - name: contributing
+    order: 10
+    output: 10-contributing.md
+    prompt: prompts/10-contributing.md
+    title: Contributing
+settings:
+  model: gemini-2.5-pro
+  output_dir: docs
+  regeneration_mode: scratch
+  rules_file: docs.rules
+  structured_output_file: pkg/docs/docs.json
+  system_prompt: default
+title: Grove Notebook (nb)
