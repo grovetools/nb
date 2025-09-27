@@ -1,16 +1,16 @@
-# Introduction to nb
+# Grove-Notebook: Workspace-Aware Note-Taking System
 
-`nb` is a command-line, workspace-aware note-taking system designed specifically for developers who live in the terminal. It seamlessly integrates with your existing development workflow, organizing notes within the context of your software projects while maintaining full Git branch awareness.
+The `nb` command, provided by the `grove-notebook` repository, is a command-line, workspace-aware note-taking system designed specifically for developers who live in the terminal. It seamlessly integrates with your existing development workflow, organizing notes within the context of your software projects while maintaining full Git branch awareness.
 
-## The Problem nb Solves
+## Core Philosophy: Context-Driven Note Organization
 
-Modern software development involves juggling multiple projects, branches, and contexts. Traditional note-taking systems fail to capture this complexity, leading to:
-- Notes scattered across different applications and directories
-- Lost context when switching between projects or branches
-- Difficulty finding relevant information when you need it
-- Manual organization overhead that interrupts your flow
+Grove-Notebook is built on the principle that notes should automatically organize themselves around your development context. Instead of forcing developers to maintain separate note-taking systems, it integrates directly into their workflow, ensuring that thoughts and documentation naturally align with the code and projects they're working on.
 
-`nb` solves these problems by automatically organizing your notes based on your current working context. Whether you're debugging a feature branch, documenting an API design, or capturing a quick thought, `nb` ensures your notes are always in the right place and easily discoverable.
+The tool serves developers who value speed, efficiency, and keyboard-driven interfaces while maintaining the sophisticated organization needed for complex software projects.
+
+## Dual Role: Note Organizer and Workflow Enhancer
+
+The `nb` system serves as both an intelligent note organizer that understands your project structure and a workflow enhancer that bridges the gap between quick thoughts and structured documentation.
 
 ## Key Features
 

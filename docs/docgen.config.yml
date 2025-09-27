@@ -3,11 +3,11 @@ category: Developer Tools
 description: A command-line, workspace-aware note-taking system for developers that integrates with Git and provides powerful search capabilities.
 enabled: true
 sections:
-  - name: introduction
+  - name: overview
     order: 1
-    output: 01-introduction.md
-    prompt: prompts/01-introduction.md
-    title: Introduction
+    output: 01-overview.md
+    prompt: prompts/01-overview.md
+    title: Overview
   - name: installation
     order: 2
     output: 02-installation.md
