@@ -1,4 +1,6 @@
-# Grove Notebook: A Developer's Knowledge Base
+# Grove Notebook
+
+<img src="./images/grove-notebook-inkscape.svg" width="60%" />
 
 `grove-notebook` (`nb`) is a command-line note-taking system designed for the Grove Ecosystem. It organizes notes around your project workspaces and Git branches, providing a fast, searchable, and version-controlled way to manage development knowledge. It integrates with tools like Neovim, Obsidian, and the broader Grove ecosystem.
 
