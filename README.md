@@ -34,16 +34,15 @@ Requires the `grove` meta-CLI. See the [Grove Installation Guide](https://github
 
 <!-- DOCGEN:OVERVIEW:END -->
 
-
 <!-- DOCGEN:TOC:START -->
 
 See the [documentation](docs/) for detailed usage instructions:
-- [Overview](docs/01-overview.md) - <img src="./images/grove-notebook-inkscape.svg" width="60%" />
-- [Examples](docs/02-examples.md) - This document provides a series of practical examples to demonstrate how to u...
-- [Neovim Plugin](docs/03-neovim-plugin.md) - The `nb.nvim` plugin provides a cohesive experience for managing `grove-noteb...
-- [Obsidian Integration](docs/04-obsidian-integration.md) - `grove-notebook` works effectively with GUI-based Markdown editors like Obsid...
-- [Grove Flow Integration](docs/05-grove-flow-integration.md) - `grove-notebook` can serve as a persistent storage backend for `grove-flow`, ...
-- [Configuration](docs/06-configuration.md) - The `nb` command-line tool can be configured through a YAML file, environment...
-- [Command Reference](docs/07-command-reference.md) - This document provides a comprehensive reference for all `nb` command-line in...
+- [Overview](docs/01-overview.md)
+- [Examples](docs/02-examples.md)
+- [Neovim Plugin](docs/03-neovim-plugin.md)
+- [Obsidian Integration](docs/04-obsidian-integration.md)
+- [Grove Flow Integration](docs/05-grove-flow-integration.md)
+- [Configuration](docs/06-configuration.md)
+- [Command Reference](docs/07-command-reference.md)
 
 <!-- DOCGEN:TOC:END -->
