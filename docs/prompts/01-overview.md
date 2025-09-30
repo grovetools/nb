@@ -19,7 +19,8 @@ Create a comprehensive overview that includes:
    - Can serve as unified storage for grove-flow plans and chats
    - Neovim plugin enables executing AI chats directly on markdown files
    - Compatible with Obsidian for enhanced visualization (note: plugin requires source installation)
-6. **Installation**: Include brief installation instructions at the bottom
+6. **How it works**: Provide a more technical description and exactly what happens under the hood
+7. **Installation**: Include brief installation instructions at the bottom
 
 ## Installation Format
 Include this condensed installation section at the bottom:
