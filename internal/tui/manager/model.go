@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
@@ -43,28 +44,28 @@ type Model struct {
 var (
 	baseStyle = lipgloss.NewStyle().
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240"))
+		BorderForeground(theme.DefaultColors.Border)
 
 	headerStyle = lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57"))
+		Foreground(theme.DefaultColors.LightText).
+		Background(theme.DefaultColors.SelectedBackground)
 
 	selectedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57"))
+		Foreground(theme.DefaultColors.LightText).
+		Background(theme.DefaultColors.SelectedBackground)
 
 	dimStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+		Foreground(theme.DefaultColors.MutedText)
 
 	helpStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241"))
+		Foreground(theme.DefaultColors.MutedText)
 
 	messageStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("86"))
+		Foreground(theme.DefaultColors.Green)
 
 	warningStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214"))
+		Foreground(theme.DefaultColors.Yellow)
 )
 
 // typeItem implements list.Item for the type selection list
@@ -151,12 +152,12 @@ func New(notes []*models.Note, svc *service.Service, ctx *service.WorkspaceConte
 	s := table.DefaultStyles()
 	s.Header = s.Header.
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
+		BorderForeground(theme.DefaultColors.Border).
 		BorderBottom(true).
 		Bold(false)
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
+		Foreground(theme.DefaultColors.LightText).
+		Background(theme.DefaultColors.SelectedBackground).
 		Bold(false)
 	t.SetStyles(s)
 
