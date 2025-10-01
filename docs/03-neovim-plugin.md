@@ -1,83 +1,84 @@
 # Neovim Integration
 
-The `nb.nvim` plugin provides a cohesive experience for managing `grove-notebook` directly within Neovim. It is designed to integrate with the developer's workflow, making it simple to create, find, and manage notes without leaving the editor.
+The `nb.nvim` plugin provides functions for managing `grove-notebook` files within Neovim. It uses the `nb` command-line tool to determine the correct workspace, branch, and file paths for note operations.
 
 ## Installation
 
-The plugin is intended to be installed locally from the `grove-notebook` repository.
+The plugin is installed from a local clone of the `grove-notebook` repository.
 
 **Using `lazy.nvim`:**
 
 ```lua
 {
-  -- Assumes grove-notebook is cloned locally
+  -- Path to the local grove-notebook repository
   dir = "~/path/to/grove-notebook/nvim-plugin",
   dependencies = {
     'stevearc/oil.nvim', -- Optional, for directory browsing
   },
   config = function()
     require('nb').setup({
-      -- Path to your nb binary if it's not in your shell's PATH
+      -- Path to the nb binary if not in shell's PATH
       nb_command = "nb",
     })
   end,
 }
 ```
 
-## Key Features
+## Features
 
--   **Context-Aware Note Creation**: Use a picker to create new notes of any type (`current`, `llm`, `issues`, etc.). The plugin automatically determines the correct workspace and branch context.
--   **Advanced Note Searching**: The plugin includes several Snack-powered pickers for different search scopes, all with live previews:
-    -   Search global notes (`<leader>ng`).
-    -   Search all notes from all branches within the current repository (`<leader>nb`).
--   **Interactive Management**: Archive notes directly from any search picker using a keybinding (`<C-x>`), with support for multi-selection.
+*   **Note Creation**: A picker interface allows creating new notes. The plugin determines the correct storage path based on the current workspace and Git branch context.
+*   **Note Searching**: The plugin provides several pickers for searching notes, each with a live preview:
+    *   Search within the current repository.
+    *   Search global notes, which are not associated with a repository.
+    *   Search all notes across all registered workspaces.
+    *   Search all notes from all branches within the current repository.
+*   **Note Management**: Notes can be archived from any search picker, with support for selecting multiple notes.
 
 ## Commands and Keybindings
 
-The plugin exposes both Vim commands and configurable key mappings for common actions.
+The plugin provides Vim commands and a set of default key mappings.
 
 ### Default Keybindings
 
-| Keybinding      | Action                                                   |
-| --------------- | -------------------------------------------------------- |
-| `<leader>nn`    | Create a new note (opens a type selection picker).       |
-| `<leader>ns`    | Search for notes in the current repository.              |
-| `<leader>ng`    | Search for global notes.                                 |
-| `<leader>na`    | Search for all notes across all workspaces.              |
-| `<leader>nb`    | Search for all notes across all branches in this repository. |
-| `<leader>nr`    | Archive the current note or notes older than 30 days.    |
-| `<leader>ni`    | Open the directory for `current` notes.                  |
-| `<leader>nc`    | Open the directory for `llm` (chat) notes.               |
-| `<leader>nl`    | Open the directory for `learn` notes.                    |
+| Keybinding | Action |
+| --- | --- |
+| `<leader>nn` | Opens a picker to select a note type and create a new note. |
+| `<leader>ns` | Searches for notes in the current repository. |
+| `<leader>ng` | Searches for global notes. |
+| `<leader>na` | Searches for all notes across all workspaces. |
+| `<leader>nb` | Searches for all notes from all branches in the current repository. |
+| `<leader>nr` | Archives the current note or notes older than 30 days. |
+| `<leader>ni` | Opens the directory for `current` notes. |
+| `<leader>nc` | Opens the directory for `llm` (chat) notes. |
+| `<leader>nl` | Opens the directory for `learn` notes. |
 
 ### Vim Commands
 
-| Command                 | Description                                    |
-| ----------------------- | ---------------------------------------------- |
-| `:NbNew [title]`        | Creates a new note.                            |
-| `:NbQuick "content"`    | Creates a quick, one-line note.                |
-| `:NbList [type]`        | Lists notes of a specific type in the quickfix window. |
-| `:NbSearch <query>`     | Searches notes and populates the quickfix window. |
-| `:NbArchive [file]`     | Archives the specified note or the current note. |
-| `:NbContext`            | Displays the current workspace context.        |
+| Command | Description |
+| --- | --- |
+| `:NbNew [title]` | Creates a new note. |
+| `:NbQuick "content"` | Creates a quick, one-line note. |
+| `:NbList [type]` | Lists notes of a specific type in the quickfix window. |
+| `:NbSearch <query>` | Searches notes and populates the quickfix window. |
+| `:NbArchive [file]` | Archives the specified note or the current note. |
+| `:NbContext` | Displays the current workspace context. |
 
 ## Grove Flow Integration
 
-`grove-notebook` serves as the persistent storage layer for `grove-flow` plans and chats, and the Neovim plugin streamlines this interaction. The `llm` note type in `nb.nvim` directly corresponds to the chat files used by `grove-flow`.
+`grove-notebook` can be configured as the storage location for `grove-flow` plans and chats. The `nb.nvim` plugin creates files that can then be used by `grove-flow`.
 
 ### Managing Plans and Chats
 
--   **Start a New Chat**: Run `<leader>nn` and select the `llm` note type. This creates a new Markdown file in the appropriate directory, ready to be used with the `flow chat run` command.
--   **Browse Existing Plans**: Use the search pickers (`<leader>ns` or `<leader>na`) to find and open chat or plan files. The live preview makes it easy to review job prompts and outputs without leaving Neovim.
+*   **Start a New Chat**: Running the create note command (`<leader>nn`) and selecting the `llm` note type creates a new Markdown file. This file is formatted as a `grove-flow` chat job and can be executed from the terminal with `flow chat run`.
+*   **Browse Existing Plans**: The search pickers (`<leader>ns`, `<leader>na`) can find and open `grove-flow` plan and chat files stored within the notebook directory. The live preview shows job prompts and outputs.
 
+## Configuration Example
 
-## Full Configuration Example
-
-The plugin's mappings and behavior can be customized in the `setup` function.
+The plugin's mappings and the path to the `nb` binary can be set in the `setup` function.
 
 ```lua
 require('nb').setup({
-  -- Use a custom path if the 'nb' binary is not in your PATH
+  -- Use a custom path if the 'nb' binary is not in the shell's PATH
   nb_command = vim.fn.expand("~/path/to/grove-notebook/bin/nb"),
   mappings = {
     current = '<leader>ni',       -- Open current notes

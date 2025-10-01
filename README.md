@@ -2,21 +2,35 @@
 
 <img src="docs/images/grove-notebook-inkscape.svg" width="60%" />
 
-`grove-notebook` (`nb`) is a command-line note-taking system designed for the Grove Ecosystem. It organizes notes around your project workspaces and Git branches, providing a fast, searchable, and version-controlled way to manage development knowledge. It integrates with tools like Neovim, Obsidian, and the broader Grove ecosystem.
+`grove-notebook` (`nb`) is a command-line note-taking system that organizes notes in Markdown files based on project workspaces and Git branches.
 
 <!-- placeholder for animated gif -->
 
-## The Central Knowledge Base
+## Central Knowledge Base
 
-A core concept of `grove-notebook` is the creation of a central, persistent knowledge base. By default, the main notebook directory (`~/Documents/nb`) is stored outside of any specific Git repository. This design allows your notes to function like a [Zettelkasten](https://en.wikipedia.org/wiki/Zettelkasten), creating a personal development knowledge graph that grows over time.
+The main notebook directory (default: `~/Documents/nb`) is intended to be stored outside of any specific Git repository. This design allows notes to persist across different projects, creating a central knowledge base that is not tied to a single repository's lifecycle.
 
 ## Key Features
 
-*   **Markdown-Based Notes**: All notes are plain Markdown files, making them portable, versionable, and easy to edit with any tool.
-*   **`grove-flow` Storage Backend**: Acts as the central storage system for `grove-flow` plans and AI chat sessions, unifying your development notes and AI-assisted workflows in one place.
-*   **Neovim Plugin**: A Neovim plugin allows you to create notes, search your knowledge base, and execute `grove-flow` commands (like running chats or adding jobs to a plan) directly from the editor.
-*   **Obsidian Compatibility**: The notebook directory can be opened as an Obsidian vault, giving you a graphical interface for visualizing, linking, and working with your notes using Obsidian's extensive plugin ecosystem.
-*   **Simple CLI**: A clean and efficient command-line interface makes it fast to create, find, and manage notes without leaving the terminal.
+*   **Note Organization**: Notes are stored as Markdown files.
+*   **Search**: Provides full-text search capabilities using a SQLite FTS5 index.
+*   **`grove-flow` Storage**: Can be configured as a storage location for `grove-flow` plans and chat sessions.
+*   **Editor Integration**: Includes a Neovim plugin for creating and searching notes.
+*   **Obsidian Compatibility**: The notebook directory can be opened as an Obsidian vault.
+*   **CLI**: A command-line interface for creating and managing notes.
+
+## How It Works
+
+`nb` uses a SQLite database (`workspaces.db`) in its data directory (`~/.local/share/nb`) to register project directories as workspaces. When a command is run, `nb` detects the current workspace by traversing up from the current directory to find a registered path.
+
+Notes are stored in a hierarchical directory structure, typically `NOTEBOOK_DIR/TYPE/WORKSPACE_NAME/BRANCH_NAME/NOTE_TYPE/`. For example, a note of type `current` for the `main` branch of the `my-api` repository would be stored in `~/Documents/nb/repos/my-api/main/current/`. A SQLite database (`index.db`) is used to index notes for search.
+
+## Ecosystem Integration
+
+`grove-notebook` can function as a storage backend for other tools in the Grove ecosystem.
+
+*   **`grove-flow`**: The `plans_directory` and `chat_directory` in `grove-flow`'s configuration can be set to paths within the `nb` directory structure. This stores all `flow` plans and chat logs in the central notebook.
+*   **Neovim Plugin**: The `nb.nvim` plugin provides commands to create notes and execute searches from within the editor. It can also be used to create files that are then used by `grove-flow` commands.
 
 ## Installation
 

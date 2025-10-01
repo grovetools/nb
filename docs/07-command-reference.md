@@ -1,6 +1,6 @@
 # Command Reference
 
-This document provides a comprehensive reference for all `nb` command-line interface commands, organized by function.
+This document provides a reference for all `nb` command-line interface commands, organized by function.
 
 ---
 
@@ -59,7 +59,7 @@ nb quick "<content>"
 
 **Description**
 
-This command is a shortcut for creating a note of type `quick`. It takes the note's content as a single argument, generates a timestamped title, and saves the file without opening an editor. It is ideal for capturing fleeting thoughts or reminders from the command line.
+This command is a shortcut for creating a note of type `quick`. It takes the note's content as a single argument, generates a timestamped title, and saves the file without opening an editor. It is for capturing thoughts or reminders from the command line.
 
 **Arguments & Flags**
 
@@ -134,7 +134,7 @@ nb search <query> [flags]
 
 **Description**
 
-Searches the content and titles of notes using SQLite's FTS5 extension for fast and relevant results. The search is scoped to the current workspace by default.
+Searches the content and titles of notes using SQLite's FTS5 extension for full-text queries. The search is scoped to the current workspace by default.
 
 **Arguments & Flags**
 
@@ -159,7 +159,7 @@ nb search "database" --all -t learn
 
 ### `nb manage`
 
-Launches an interactive Terminal UI (TUI) to browse and manage notes.
+Launches a terminal user interface (TUI) to browse and manage notes.
 
 **Usage**
 
@@ -169,7 +169,7 @@ nb manage [flags]
 
 **Description**
 
-This command starts a full-screen TUI that provides a powerful way to interact with your notes. You can navigate, filter, select, and perform bulk operations like archiving.
+This command starts a full-screen TUI for interacting with notes. It allows for navigation, filtering, selection, and bulk operations like archiving.
 
 **Arguments & Flags**
 
@@ -233,7 +233,7 @@ nb move <file> <destination> [flags]
 
 **Description**
 
-Provides a flexible way to reorganize notes. The source is a file path, and the destination can be a note type (like `learn`), a full directory path, or a combination of workspace, branch, and type flags. By default, it also applies the `migrate` logic to standardize the note in its new location.
+Reorganizes notes by moving or copying them. The source is a file path, and the destination can be a note type (like `learn`), a full directory path, or a combination of workspace, branch, and type flags. By default, it also applies the `migrate` logic to standardize the note in its new location.
 
 **Arguments & Flags**
 
@@ -276,23 +276,26 @@ nb migrate [paths...] [flags]
 
 **Description**
 
-Analyzes notes and fixes common formatting and metadata issues. This is useful for importing notes from other systems or cleaning up an existing collection. It can fix missing titles, dates, IDs, and tags, and standardize filenames.
+Analyzes notes and fixes common formatting and metadata issues, which is useful for importing notes from other systems or cleaning up an existing collection. It can fix missing titles, dates, IDs, and tags, and standardize filenames.
 
 **Arguments & Flags**
 
-| Flag              | Shorthand | Description                                                        | Default    |
-| ----------------- | --------- | ------------------------------------------------------------------ | ---------- |
-| `[paths...]`      | (Arg)     | Optional list of specific files or directories to migrate.         | (current)  |
-| `--all`           |           | Apply all available fixes.                                         | `false`    |
-| `--fix-titles`    |           | Add missing `title` fields to frontmatter.                         | `false`    |
-| `--fix-dates`     |           | Add missing `created` and `modified` timestamps.                   | `false`    |
-| `--fix-tags`      |           | Add tags based on the note's directory structure.                  | `false`    |
-| `--fix-ids`       |           | Add a unique ID if one is missing.                                 | `false`    |
-| `--fix-filenames` |           | Rename files to the `YYYYMMDD-title.md` standard.                  | `false`    |
-| `--dry-run`       |           | Preview all changes without modifying any files.                   | `false`    |
-| `--workspace`     |           | Limit the migration to a specific workspace by name.               | (current)  |
-| `--global`        |           | Run the migration on the global workspace only.                    | `false`    |
-| `--all-workspaces`|           | Run the migration on all registered workspaces.                    | `false`    |
+| Flag                 | Shorthand | Description                                                        | Default    |
+| -------------------- | --------- | ------------------------------------------------------------------ | ---------- |
+| `[paths...]`         | (Arg)     | Optional list of specific files or directories to migrate.         | (current)  |
+| `--all`              |           | Apply all available fixes.                                         | `false`    |
+| `--fix-titles`       |           | Add missing `title` fields to frontmatter.                         | `false`    |
+| `--fix-dates`        |           | Add missing `created` and `modified` timestamps.                   | `false`    |
+| `--fix-tags`         |           | Add tags based on the note's directory structure.                  | `false`    |
+| `--fix-ids`          |           | Add a unique ID if one is missing.                                 | `false`    |
+| `--fix-filenames`    |           | Rename files to the `YYYYMMDD-title.md` standard.                  | `false`    |
+| `--dry-run`          |           | Preview all changes without modifying any files.                   | `false`    |
+| `--workspace`        |           | Limit the migration to a specific workspace by name.               | (current)  |
+| `--global`           |           | Run the migration on the global workspace only.                    | `false`    |
+| `--all-workspaces`   |           | Run the migration on all registered workspaces.                    | `false`    |
+| `--no-backup`        |           | Do not create backup files.                                        | `false`    |
+| `--preserve-timestamps` |        | Preserve original file modification times.                         | `true`     |
+| `--index-sqlite`     |           | Create or update SQLite entries for the notes.                     | `false`    |
 
 **Example**
 
@@ -315,7 +318,7 @@ nb workspace <subcommand>
 
 **Description**
 
-A collection of commands to manage how `nb` recognizes and interacts with your project directories.
+A collection of commands to manage how `nb` recognizes and interacts with project directories.
 
 **Subcommands**
 
@@ -359,7 +362,7 @@ nb doctor [flags]
 
 **Description**
 
-Scans your workspace registration database for problems like duplicate entries, invalid paths, or inconsistent path casing and provides an option to fix them automatically.
+Scans the workspace registration database for problems like duplicate entries, invalid paths, or inconsistent path casing and provides an option to fix them automatically.
 
 **Arguments & Flags**
 
