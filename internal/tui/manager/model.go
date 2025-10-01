@@ -8,15 +8,57 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/tui/components/help"
+	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
+
+// Keymap for the note manager TUI
+type managerKeyMap struct {
+	keymap.Base
+}
+
+func (k managerKeyMap) ShortHelp() []key.Binding {
+	// Return empty to show no help in footer - all help goes in popup
+	return []key.Binding{}
+}
+
+func (k managerKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{
+			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Navigation")),
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓, j/k", "Move cursor")),
+			key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "Page up")),
+			key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "Page down")),
+			key.NewBinding(key.WithKeys("g"), key.WithHelp("gg", "Go to top")),
+			key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "Go to bottom")),
+			key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "Toggle sort order")),
+			key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "Search notes")),
+			key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "Filter by type")),
+			key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "Clear all filters")),
+		},
+		{
+			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "Open note in editor")),
+			key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "Toggle selection")),
+			key.NewBinding(key.WithKeys("shift+up", "shift+down"), key.WithHelp("shift+↑/↓", "Select range")),
+			key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "Select all")),
+			key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "Deselect all")),
+			key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "Archive selected")),
+			key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "Quit")),
+		},
+	}
+}
+
+var managerKeys = managerKeyMap{Base: keymap.NewBase()}
 
 // Model represents the state of the note manager TUI
 type Model struct {
@@ -38,6 +80,7 @@ type Model struct {
 	selectingType bool       // Whether type selection mode is active
 	typeList      list.Model // List for type selection
 	activeFilter  string     // Currently active type filter
+	help          help.Model
 }
 
 // Styles
@@ -178,6 +221,11 @@ func New(notes []*models.Note, svc *service.Service, ctx *service.WorkspaceConte
 	// Style the list
 	typeList.Styles.Title = headerStyle
 
+	helpModel := help.NewBuilder().
+		WithKeys(managerKeys).
+		WithTitle("📝 Note Manager - Help").
+		Build()
+
 	return Model{
 		table:         t,
 		allNotes:      notes,
@@ -192,6 +240,7 @@ func New(notes []*models.Note, svc *service.Service, ctx *service.WorkspaceConte
 		selectingType: false,
 		typeList:      typeList,
 		activeFilter:  "",
+		help:          helpModel,
 	}
 }
 
@@ -263,6 +312,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.help.ShowAll {
+			m.help.Toggle() // Any key closes help
+			return m, nil
+		}
+
 		if m.confirming {
 			return m.handleConfirmation(msg)
 		}
@@ -319,6 +373,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "?":
+			m.help.Toggle()
+			return m, nil
+
 		case "q", "esc", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
@@ -527,6 +585,12 @@ func (m Model) View() string {
 		return ""
 	}
 
+	// If help is visible, show it and return
+	if m.help.ShowAll {
+		m.help.SetSize(m.width, m.height)
+		return m.help.View()
+	}
+
 	// If in type selection mode, show only the type list
 	if m.selectingType {
 		return m.typeList.View()
@@ -580,28 +644,7 @@ func (m Model) View() string {
 	s.WriteString(dimStyle.Render(status) + "\n\n")
 
 	// Help
-	var help []string
-	if m.filtering {
-		help = []string{
-			"enter: apply filter",
-			"esc: cancel filter",
-		}
-	} else {
-		help = []string{
-			"enter: open",
-			"space: toggle",
-			"shift+↑/↓: multi-select",
-			"t: type filter",
-			"/: search",
-			"c: clear filter",
-			"a: all",
-			"n: none",
-			"s: sort",
-			"x: archive",
-			"q: quit",
-		}
-	}
-	s.WriteString(helpStyle.Render(strings.Join(help, " • ")))
+	s.WriteString(helpStyle.Render("Press ? for help"))
 
 	return s.String()
 }
