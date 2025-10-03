@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -53,7 +54,7 @@ You can select multiple notes for archiving or other bulk operations.`,
 
 			// Create and run the TUI
 			model := manager.New(notes, svc, ctx)
-			p := tea.NewProgram(model, tea.WithAltScreen())
+			p := tea.NewProgram(model, tea.WithOutput(os.Stderr))
 
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("error running TUI: %w", err)

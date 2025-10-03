@@ -311,6 +311,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case editFileAndQuitMsg:
+		// Print protocol string and quit - Neovim plugin will handle the file opening
+		fmt.Printf("EDIT_FILE:%s\n", msg.filePath)
+		return m, tea.Quit
+
 	case tea.KeyMsg:
 		if m.help.ShowAll {
 			m.help.Toggle() // Any key closes help
@@ -408,6 +413,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cursor := m.table.Cursor()
 			if cursor < len(m.notes) {
 				note := m.notes[cursor]
+				// Check if running inside Neovim plugin
+				if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
+					return m, func() tea.Msg {
+						return editFileAndQuitMsg{filePath: note.Path}
+					}
+				}
 				return m, m.openInEditor(note.Path)
 			}
 
@@ -672,6 +683,11 @@ func (m Model) openInEditor(path string) tea.Cmd {
 // editorFinishedMsg is sent when the editor closes
 type editorFinishedMsg struct {
 	err error
+}
+
+// editFileAndQuitMsg signals to quit and let neovim plugin handle opening
+type editFileAndQuitMsg struct {
+	filePath string
 }
 
 // selectRange selects all notes between start and end indices
