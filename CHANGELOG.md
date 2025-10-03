@@ -1,3 +1,5 @@
+## v0.3.1-nightly.403ebaa (2025-10-03)
+
 ## v0.2.14 (2025-10-01)
 
 This release introduces documentation for `grove-notebook`, covering everything from initial setup and examples to integration with Neovim, Obsidian, and `grove-flow` (6979f17, 460a70b). The documentation generation process itself was improved with support for table of contents generation and other configuration updates (30fe0d0, c47ad2c, 57cd2c3). The release workflow has also been updated to extract release notes directly from the `CHANGELOG.md` file for better consistency (6a4871b).
