@@ -60,8 +60,8 @@ github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6T
 github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
 github.com/mattn/go-sqlite3 v1.14.22 h1:2gZY6PC6kBnID23Tichd1K+Z0oS6nE/XwU+Vz/5o4kU=
 github.com/mattn/go-sqlite3 v1.14.22/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
-github.com/mattsolo1/grove-core v0.4.0 h1:3Ggg/njGye9QFhf0j3F7oMMf/naaYKBV8zwfwvDxJz8=
-github.com/mattsolo1/grove-core v0.4.0/go.mod h1:+densY71b+POikhRVYwOY3tt+MAeu2OXs3/KQzQfuq8=
+github.com/mattsolo1/grove-core v0.4.1-nightly.8d7daf2 h1:hXnM43A2eo62LTx4rrO+8YDvDxVy0RIDv/r5wLtqgIw=
+github.com/mattsolo1/grove-core v0.4.1-nightly.8d7daf2/go.mod h1:+densY71b+POikhRVYwOY3tt+MAeu2OXs3/KQzQfuq8=
 github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
 github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 h1:ZK8zHtRHOkbHy6Mmr5D264iyp3TiX5OmNcI5cIARiQI=
