@@ -7,7 +7,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-
 	"github.com/mattsolo1/grove-notebook/cmd/config"
 	"github.com/mattsolo1/grove-notebook/pkg/workspace"
 )
@@ -24,7 +23,10 @@ func NewWorkspaceCmd() *cobra.Command {
 		newWorkspaceListCmd(),
 		newWorkspaceRemoveCmd(),
 		newWorkspaceCurrentCmd(),
-		doctorCmd,
+		newWorkspaceSyncCmd(),
+		newWorkspaceMigrateDbCmd(),
+		newWorkspaceUpdateNotebookDirCmd(),
+		// doctorCmd is removed - workspace health checks are now in grove CLI
 	)
 
 	return cmd
@@ -41,7 +43,7 @@ func newWorkspaceAddCmd() *cobra.Command {
 		Use:   "add [path]",
 		Short: "Add a new workspace",
 		Long: `Register a new workspace. If no path is provided, uses current directory.
-	
+
 Examples:
   nb workspace add                     # Register current directory
   nb workspace add ~/projects/myapp    # Register specific path
@@ -74,14 +76,24 @@ Examples:
 			// Determine notebook directory
 			notebook := wsNotebook
 			if notebook == "" {
-				home, _ := os.UserHomeDir()
-				notebook = filepath.Join(home, "Documents", "nb")
+				notebook = workspace.GetDefaultNotebookDir()
+			}
+
+			// Determine type
+			workspaceType := workspace.Type(wsType)
+			if workspaceType == "" {
+				// Autodetect
+				if _, err := os.Stat(filepath.Join(absPath, ".git")); err == nil {
+					workspaceType = workspace.TypeGitRepo
+				} else {
+					workspaceType = workspace.TypeDirectory
+				}
 			}
 
 			ws := &workspace.Workspace{
 				Name:        name,
 				Path:        absPath,
-				Type:        workspace.Type(wsType),
+				Type:        workspaceType,
 				NotebookDir: notebook,
 				Settings:    map[string]any{},
 			}
@@ -96,7 +108,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&wsName, "name", "", "Workspace name (defaults to directory name)")
-	cmd.Flags().StringVar(&wsType, "type", "git-repo", "Workspace type (git-repo, directory, global)")
+	cmd.Flags().StringVar(&wsType, "type", "", "Workspace type (git-repo, directory, global). Autodetected if not provided.")
 	cmd.Flags().StringVar(&wsNotebook, "notebook", "", "Notebook directory (defaults to ~/Documents/nb)")
 
 	// Add global flags
@@ -129,12 +141,14 @@ func newWorkspaceListCmd() *cobra.Command {
 				return nil
 			}
 
+			currentWs, _ := svc.Registry.DetectCurrent()
+
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "NAME\tTYPE\tPATH\tLAST USED")
 
 			for _, ws := range workspaces {
 				active := ""
-				if ws.IsActive() {
+				if currentWs != nil && ws.Name == currentWs.Name {
 					active = " *"
 				}
 				fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\n",

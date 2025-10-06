@@ -225,9 +225,8 @@ func (r *Registry) AutoRegister(path string) (*Workspace, error) {
 		return w, nil
 	}
 
-	// Get default notebook directory
-	home, _ := os.UserHomeDir()
-	notebookDir := filepath.Join(home, "Documents", "nb")
+	// Get default notebook directory from config
+	notebookDir := GetDefaultNotebookDir()
 
 	w := &Workspace{
 		Name:        name,
@@ -265,7 +264,7 @@ func (r *Registry) Global() (*Workspace, error) {
 		Name:        "global",
 		Path:        home,
 		Type:        TypeGlobal,
-		NotebookDir: filepath.Join(home, "Documents", "nb"),
+		NotebookDir: GetDefaultNotebookDir(),
 		Settings:    map[string]any{},
 	}
 
@@ -313,3 +312,4 @@ func findGitRoot(path string) string {
 	}
 	return ""
 }
+

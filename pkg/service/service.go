@@ -184,6 +184,7 @@ func (s *Service) ListNotes(ctx *WorkspaceContext, noteType models.NoteType) ([]
 func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
 	// Get the root path for this workspace/branch
 	var rootPath string
+
 	if ctx.Workspace.Type == workspace.TypeGlobal {
 		rootPath = filepath.Join(ctx.Workspace.NotebookDir, "global")
 	} else {
