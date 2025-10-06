@@ -9,7 +9,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/mattn/go-sqlite3 v1.14.22
-	github.com/mattsolo1/grove-core v0.4.1-nightly.516efdf
+	github.com/mattsolo1/grove-core v0.4.0
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.10.0
