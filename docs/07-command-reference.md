@@ -173,15 +173,25 @@ This command starts a full-screen TUI for interacting with notes. It allows for 
 
 **Arguments & Flags**
 
-| Flag     | Shorthand | Description                                                | Default |
-| -------- | --------- | ---------------------------------------------------------- | ------- |
-| `--type` | `-t`      | Start the TUI with an initial filter for a specific type.  | (none)  |
+| Flag              | Shorthand | Description                                                                     | Default |
+| ----------------- | --------- | ------------------------------------------------------------------------------- | ------- |
+| `--type`          | `-t`      | Start the TUI with an initial filter for a specific type (prefix match).        | (none)  |
+| `--exclude-type`  | `-e`      | Exclude notes by type (prefix match, can be specified multiple times).          | (none)  |
 
-**Example**
+**Examples**
 
 ```bash
 # Open the interactive note manager for the current workspace
 nb manage
+
+# Show only LLM notes
+nb manage --type llm
+
+# Show all notes except plans
+nb manage --exclude-type plans
+
+# Exclude multiple types
+nb manage --exclude-type plans --exclude-type archive
 ```
 
 ---

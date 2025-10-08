@@ -737,8 +737,13 @@ function M.setup(config)
         local note_type = note.type or "unknown"
         local title_text = note.title or "untitled"
         local branch = note.branch or "main"
-        
+
         local base_type = note_type:match("^([^/]+)") or note_type
+
+        -- Skip plan type notes
+        if base_type == "plans" then
+          goto continue
+        end
         local type_emojis = {
           current = "📝",
           quick = "⚡",
@@ -783,6 +788,7 @@ function M.setup(config)
           mtime = mtime,
         })
       end
+      ::continue::
     end
       
     -- Sort items by modification time (newest first)

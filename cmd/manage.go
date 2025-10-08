@@ -14,7 +14,8 @@ import (
 
 func NewManageCmd() *cobra.Command {
 	var typeFilter string
-	
+	var excludeTypes []string
+
 	cmd := &cobra.Command{
 		Use:   "manage",
 		Short: "Interactively manage and archive notes in the current workspace",
@@ -52,6 +53,25 @@ You can select multiple notes for archiving or other bulk operations.`,
 				notes = filteredNotes
 			}
 
+			// Apply exclude filter if provided
+			if len(excludeTypes) > 0 {
+				var filteredNotes []*models.Note
+				for _, note := range notes {
+					excluded := false
+					for _, excludeType := range excludeTypes {
+						// Use prefix matching to allow excluding parent types
+						if strings.HasPrefix(string(note.Type), excludeType) {
+							excluded = true
+							break
+						}
+					}
+					if !excluded {
+						filteredNotes = append(filteredNotes, note)
+					}
+				}
+				notes = filteredNotes
+			}
+
 			// Create and run the TUI
 			model := manager.New(notes, svc, ctx)
 			p := tea.NewProgram(model, tea.WithOutput(os.Stderr))
@@ -65,6 +85,7 @@ You can select multiple notes for archiving or other bulk operations.`,
 	}
 
 	cmd.Flags().StringVarP(&typeFilter, "type", "t", "", "Filter notes by a specific type (prefix match is supported)")
+	cmd.Flags().StringSliceVarP(&excludeTypes, "exclude-type", "e", nil, "Exclude notes by type (prefix match is supported, can be specified multiple times)")
 	config.AddGlobalFlags(cmd)
 	return cmd
 }
