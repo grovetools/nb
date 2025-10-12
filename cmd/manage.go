@@ -30,7 +30,7 @@ You can select multiple notes for archiving or other bulk operations.`,
 			defer svc.Close()
 
 			// Get the current workspace context
-			ctx, err := svc.GetWorkspaceContext()
+			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
 			if err != nil {
 				return fmt.Errorf("failed to get workspace context: %w", err)
 			}

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/mattsolo1/grove-notebook/cmd/config"
@@ -29,28 +28,26 @@ This command will:
 			defer svc.Close()
 
 			if initMinimal {
-				// Just ensure global workspace exists
-				_, err := svc.Registry.Global()
+				// Verify global workspace context can be accessed
+				ctx, err := svc.GetWorkspaceContext("global")
 				if err != nil {
-					return err
+					return fmt.Errorf("could not access global workspace: %w", err)
 				}
-				fmt.Println("Initialized with global workspace")
+				fmt.Printf("Initialized with global workspace at %s\n", ctx.NotebookContextWorkspace.Path)
 				return nil
 			}
 
-			// Register current directory
-			cwd, err := os.Getwd()
+			// Verify current directory is recognized as a workspace
+			ctx, err := svc.GetWorkspaceContext("")
 			if err != nil {
-				return err
+				return fmt.Errorf("could not determine workspace context: %w", err)
 			}
 
-			// Auto-register current directory
-			ws, err := svc.Registry.AutoRegister(cwd)
-			if err != nil {
-				return err
+			fmt.Printf("Initialized workspace '%s' at %s\n", ctx.NotebookContextWorkspace.Name, ctx.NotebookContextWorkspace.Path)
+			fmt.Printf("Kind: %s\n", ctx.NotebookContextWorkspace.Kind)
+			if ctx.Branch != "" {
+				fmt.Printf("Branch: %s\n", ctx.Branch)
 			}
-
-			fmt.Printf("Initialized workspace '%s' at %s\n", ws.Name, ws.Path)
 			fmt.Println("\nReady to use! Try 'nb new' to create your first note.")
 
 			return nil

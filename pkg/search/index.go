@@ -8,7 +8,6 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/mattsolo1/grove-notebook/pkg/models"
-	"github.com/mattsolo1/grove-notebook/pkg/workspace"
 )
 
 // Index manages the search index
@@ -50,7 +49,7 @@ func (idx *Index) init() error {
 		has_todos BOOLEAN,
 		is_archived BOOLEAN
 	);
-	
+
 	CREATE INDEX IF NOT EXISTS idx_notes_meta_workspace ON notes_meta(workspace);
 	CREATE INDEX IF NOT EXISTS idx_notes_meta_type ON notes_meta(type);
 	CREATE INDEX IF NOT EXISTS idx_notes_meta_archived ON notes_meta(is_archived);
@@ -158,9 +157,9 @@ func (idx *Index) IndexNote(note *models.Note) error {
 
 // Options for searching
 type Options struct {
-	Workspace *workspace.Workspace
-	Type      string
-	Limit     int
+	WorkspaceName string
+	Type          string
+	Limit         int
 }
 
 // Search performs a full-text search
@@ -187,9 +186,9 @@ func (idx *Index) searchWithFTS(query string, opts *Options) ([]*models.Note, er
 	// Always search non-archived by default
 	conditions = append(conditions, "m.is_archived = 0")
 
-	if opts.Workspace != nil {
+	if opts.WorkspaceName != "" {
 		conditions = append(conditions, "m.workspace = ?")
-		args = append(args, opts.Workspace.Name)
+		args = append(args, opts.WorkspaceName)
 	}
 
 	if opts.Type != "" {
@@ -204,7 +203,7 @@ func (idx *Index) searchWithFTS(query string, opts *Options) ([]*models.Note, er
 
 	// Perform FTS search
 	searchQuery := fmt.Sprintf(`
-		SELECT 
+		SELECT
 			f.path, f.workspace, f.branch, f.type, f.title,
 			m.created_at, m.modified_at, m.word_count, m.has_todos, m.is_archived,
 			snippet(notes_fts, 5, '<match>', '</match>', '...', 32) as snippet
@@ -252,9 +251,9 @@ func (idx *Index) searchWithoutFTS(query string, opts *Options) ([]*models.Note,
 	// Always search non-archived by default
 	conditions = append(conditions, "is_archived = 0")
 
-	if opts.Workspace != nil {
+	if opts.WorkspaceName != "" {
 		conditions = append(conditions, "workspace = ?")
-		args = append(args, opts.Workspace.Name)
+		args = append(args, opts.WorkspaceName)
 	}
 
 	if opts.Type != "" {
@@ -271,7 +270,7 @@ func (idx *Index) searchWithoutFTS(query string, opts *Options) ([]*models.Note,
 
 	// Perform LIKE search
 	searchQuery := fmt.Sprintf(`
-		SELECT 
+		SELECT
 			path, workspace, branch, type, title,
 			created_at, modified_at, word_count, has_todos, is_archived
 		FROM notes_meta

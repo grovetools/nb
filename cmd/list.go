@@ -10,7 +10,6 @@ import (
 
 	"github.com/mattsolo1/grove-notebook/cmd/config"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
-	"github.com/mattsolo1/grove-notebook/pkg/workspace"
 )
 
 func NewListCmd() *cobra.Command {
@@ -28,7 +27,7 @@ func NewListCmd() *cobra.Command {
 		Short:   "List notes in current workspace",
 		Aliases: []string{"ls"},
 		Long: `List notes in the current workspace.
-	
+
 Examples:
   nb list              # List current notes
   nb list llm          # List LLM notes
@@ -42,26 +41,26 @@ Examples:
 			}
 			defer svc.Close()
 
-			// Get workspace context
-			ctx, err := svc.GetWorkspaceContext()
+			// Get workspace context, potentially overridden
+			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}
 
 			// Handle --all-branches flag
 			if listAllBranches {
-				if ctx.Workspace.Type != workspace.TypeGitRepo {
+				if !ctx.CurrentWorkspace.IsWorktree() && ctx.CurrentWorkspace.Kind != "StandaloneProject" { // Simplified check
 					return fmt.Errorf("--all-branches can only be used within a git repository workspace")
 				}
 
-				repoNotes, err := svc.ListAllNotesInWorkspace(ctx.Workspace)
+				repoNotes, err := svc.ListAllNotesInWorkspace(ctx.NotebookContextWorkspace)
 				if err != nil {
 					return err
 				}
 
 				if len(repoNotes) == 0 {
 					if !listJSON {
-						fmt.Printf("No notes found in any branch of the '%s' repository\n", ctx.Workspace.Name)
+						fmt.Printf("No notes found in any branch of the '%s' repository\n", ctx.NotebookContextWorkspace.Name)
 					} else {
 						fmt.Println("[]")
 					}

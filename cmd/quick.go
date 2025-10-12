@@ -32,7 +32,7 @@ Examples:
 			defer svc.Close()
 
 			// Get workspace context
-			ctx, err := svc.GetWorkspaceContext()
+			ctx, err := svc.GetWorkspaceContext("")
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}

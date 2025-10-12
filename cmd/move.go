@@ -112,14 +112,14 @@ Examples:
 				return fmt.Errorf("destination note type must be specified (e.g., 'current', 'learn', etc.)")
 			}
 
-			return moveNote(svc, sourcePath, destType, destWorkspace, destBranch, 
+			return moveNote(svc, sourcePath, destType, destWorkspace, destBranch,
 				moveApplyMigrate, moveDryRun, moveForce, moveCopy)
 		},
 	}
 
 	cmd.Flags().StringVar(&moveTargetWorkspace, "workspace", "", "Target workspace/repository")
 	cmd.Flags().StringVar(&moveTargetBranch, "branch", "", "Target branch (for git repositories)")
-	cmd.Flags().StringVar(&moveTargetType, "type", "", "Target note type (current, llm, learn, etc.)")
+	cmd.Flags().StringVarP(&moveTargetType, "type", "t", "", "Target note type (current, llm, learn, etc.)")
 	cmd.Flags().BoolVar(&moveApplyMigrate, "migrate", true, "Apply nb migrate to standardize the note")
 	cmd.Flags().BoolVar(&moveDryRun, "dry-run", false, "Preview changes without moving files")
 	cmd.Flags().BoolVar(&moveForce, "force", false, "Overwrite existing files at destination")
@@ -149,18 +149,14 @@ func moveNote(svc *service.Service, sourcePath, destType, destWorkspace, destBra
 	}
 
 	// Get current context if destination workspace/branch not specified
-	if destWorkspace == "" || (destBranch == "" && isGitRepo(destWorkspace)) {
-		ctx, err := svc.GetWorkspaceContext()
-		if err != nil && destWorkspace == "" {
-			// If we can't get context and no workspace specified, assume global
-			destWorkspace = globalStr
-		} else if err == nil {
-			if destWorkspace == "" {
-				destWorkspace = ctx.Workspace.Name
-			}
-			if destBranch == "" && ctx.Branch != "" {
-				destBranch = ctx.Branch
-			}
+	if destWorkspace == "" {
+		ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
+		if err != nil {
+			return fmt.Errorf("could not determine destination workspace context: %w", err)
+		}
+		destWorkspace = ctx.NotebookContextWorkspace.Name
+		if destBranch == "" {
+			destBranch = ctx.Branch
 		}
 	}
 
@@ -201,8 +197,7 @@ func moveNote(svc *service.Service, sourcePath, destType, destWorkspace, destBra
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
-	// If source is already in nb system and we're just moving types/locations, use rename
-	isInNbSystem := strings.Contains(absSource, "/Documents/nb/")
+	isInNbSystem := strings.Contains(absSource, "/nb/")
 
 	if copy {
 		// Always copy when --copy flag is used
@@ -336,11 +331,6 @@ func copyAndDelete(src, dst string) error {
 	}
 
 	return nil
-}
-
-func isGitRepo(workspace string) bool {
-	// Simple heuristic - could be improved
-	return workspace != globalStr && workspace != ""
 }
 
 func applyMigration(svc *service.Service, filePath string) (string, error) {

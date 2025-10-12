@@ -610,7 +610,7 @@ func (m Model) View() string {
 	var s strings.Builder
 
 	// Header with workspace context
-	workspace := m.context.Workspace.Name
+	workspace := m.context.NotebookContextWorkspace.Name
 	branch := m.context.Branch
 	contextStr := workspace
 	if branch != "" {

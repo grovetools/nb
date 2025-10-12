@@ -24,7 +24,7 @@ func NewArchiveCmd() *cobra.Command {
 		Use:   "archive [files...]",
 		Short: "Archive notes",
 		Long: `Move notes to the archive directory.
-	
+
 Examples:
   nb archive note1.md note2.md     # Archive specific files
   nb archive --older-than 30       # Archive notes older than 30 days
@@ -39,7 +39,7 @@ Examples:
 			defer svc.Close()
 
 			// Get workspace context
-			ctx, err := svc.GetWorkspaceContext()
+			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}
@@ -57,11 +57,10 @@ Examples:
 					}
 
 					// Otherwise, search the entire workspace for the file
-					found := false
-					workspaceRoot := filepath.Dir(ctx.Paths["current"]) // Get the workspace root (e.g., .../main/)
+					workspaceRoot := ctx.CurrentWorkspace.Path
 
 					_ = filepath.Walk(workspaceRoot, func(path string, info os.FileInfo, err error) error {
-						if err != nil || found {
+						if err != nil {
 							return nil
 						}
 
@@ -72,12 +71,11 @@ Examples:
 
 						if !info.IsDir() && filepath.Base(path) == arg {
 							filesToArchive = append(filesToArchive, path)
-							found = true
 						}
 						return nil
 					})
 
-					if !found {
+					if len(filesToArchive) == 0 {
 						return fmt.Errorf("file not found in workspace: %s", arg)
 					}
 				}

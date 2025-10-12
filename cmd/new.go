@@ -26,7 +26,7 @@ func NewNewCmd() *cobra.Command {
 		Use:   "new [title]",
 		Short: "Create a new note",
 		Long: `Create a new timestamped note in the current workspace.
-	
+
 Examples:
   nb new                     # Create note with timestamp only
   nb new "meeting notes"     # Create note with title
@@ -39,16 +39,16 @@ Examples:
   nb new -t prompts "code review" # Create reusable prompt
   nb new -g "todo list"      # Create global note
   nb new -g -t daily         # Create global daily note
-  
+
   # Nested categories:
   nb new -t architecture/decisions "use postgres"
   nb new -t issues/bugs "login failed"
   nb new -t todos/sprint "planning tasks"
-  
+
   # From stdin (auto-detected):
   echo "Quick thought" | nb new
   cat ideas.txt | nb new "imported ideas"
-  
+
   # Explicit stdin control:
   echo "content" | nb new --stdin "title"
   nb new --stdin "manual" < file.txt`,
@@ -61,8 +61,8 @@ Examples:
 			}
 			defer svc.Close()
 
-			// Get workspace context
-			ctx, err := svc.GetWorkspaceContext()
+			// Get workspace context, potentially overridden by the -W flag
+			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}

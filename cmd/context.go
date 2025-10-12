@@ -19,7 +19,7 @@ func NewContextCmd() *cobra.Command {
 		Use:   "context",
 		Short: "Show current workspace context",
 		Long: `Display information about the current workspace context.
-	
+
 This is useful for integration with other tools like Neovim.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Initialize config and service
@@ -30,7 +30,7 @@ This is useful for integration with other tools like Neovim.`,
 			}
 			defer svc.Close()
 
-			ctx, err := svc.GetWorkspaceContext()
+			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
 			if err != nil {
 				return err
 			}
@@ -48,10 +48,10 @@ This is useful for integration with other tools like Neovim.`,
 			if contextJSON {
 				// JSON output
 				output := map[string]any{
-					"workspace": ctx.Workspace.Name,
-					"type":      ctx.Workspace.Type,
-					"branch":    ctx.Branch,
-					"paths":     ctx.Paths,
+					"current_workspace":          ctx.CurrentWorkspace,
+					"notebook_context_workspace": ctx.NotebookContextWorkspace,
+					"branch":                     ctx.Branch,
+					"paths":                      ctx.Paths,
 				}
 
 				encoder := json.NewEncoder(cmd.OutOrStdout())
@@ -60,11 +60,21 @@ This is useful for integration with other tools like Neovim.`,
 			}
 
 			// Human-readable output
-			fmt.Printf("Workspace: %s\n", ctx.Workspace.Name)
-			fmt.Printf("Type: %s\n", ctx.Workspace.Type)
+			fmt.Printf("Current Location:\n")
+			fmt.Printf("  Name: %s\n", ctx.CurrentWorkspace.Name)
+			fmt.Printf("  Path: %s\n", ctx.CurrentWorkspace.Path)
+			fmt.Printf("  Kind: %s\n", ctx.CurrentWorkspace.Kind)
 			if ctx.Branch != "" {
-				fmt.Printf("Branch: %s\n", ctx.Branch)
+				fmt.Printf("  Branch: %s\n", ctx.Branch)
 			}
+
+			fmt.Printf("\nNotebook Scope:\n")
+			fmt.Printf("  Name: %s\n", ctx.NotebookContextWorkspace.Name)
+			fmt.Printf("  Identifier: %s\n", ctx.NotebookContextWorkspace.Identifier())
+			fmt.Printf("  Path: %s\n", ctx.NotebookContextWorkspace.Path)
+			fmt.Printf("  Kind: %s\n", ctx.NotebookContextWorkspace.Kind)
+
+
 			fmt.Println("\nPaths:")
 			for key, path := range ctx.Paths {
 				fmt.Printf("  %s: %s\n", key, path)

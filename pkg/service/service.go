@@ -8,16 +8,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattsolo1/grove-core/git"
+	coreworkspace "github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/search"
 	"github.com/mattsolo1/grove-notebook/pkg/workspace"
 )
 
+// getDefaultNotebookDir returns the default notebook directory path
+// This now delegates to workspace.GetDefaultNotebookDir() which reads from grove.yml
+func getDefaultNotebookDir() string {
+	return workspace.GetDefaultNotebookDir()
+}
+
 // Service is the core note service
 type Service struct {
-	Registry *workspace.Registry
-	Index    *search.Index
-	Config   *Config
+	workspaceProvider *coreworkspace.Provider
+	Index             *search.Index
+	Config            *Config
 }
 
 // Config holds service configuration
@@ -29,21 +37,16 @@ type Config struct {
 }
 
 // New creates a new note service
-func New(config *Config) (*Service, error) {
-	registry, err := workspace.NewRegistry(config.DataDir)
-	if err != nil {
-		return nil, fmt.Errorf("create registry: %w", err)
-	}
-
+func New(config *Config, provider *coreworkspace.Provider) (*Service, error) {
 	index, err := search.NewIndex(filepath.Join(config.DataDir, "index.db"))
 	if err != nil {
 		return nil, fmt.Errorf("create index: %w", err)
 	}
 
 	return &Service{
-		Registry: registry,
-		Index:    index,
-		Config:   config,
+		workspaceProvider: provider,
+		Index:             index,
+		Config:            config,
 	}, nil
 }
 
@@ -56,45 +59,42 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 		opt(opts)
 	}
 
-	// If the global option is used, override the context with the global workspace
+	var currentContext *WorkspaceContext
+	var err error
+
 	if opts.useGlobal {
-		globalWs, err := s.Registry.Global()
-		if err != nil {
-			return nil, fmt.Errorf("get global workspace: %w", err)
-		}
-		// Create a new context for the global workspace
-		ctx = &WorkspaceContext{
-			Workspace: globalWs,
-			Branch:    "", // Global workspace has no branch
-			Paths:     make(map[string]string),
-		}
+		// Create a specific context for the global workspace
+		currentContext, err = s.GetWorkspaceContext("global")
+	} else {
+		currentContext = ctx
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get workspace context for create: %w", err)
 	}
 
 	// Ensure directory exists
-	if err := ctx.Workspace.EnsureDirectories(string(noteType), ctx.Branch); err != nil {
+	noteDir := getNotePathForContext(currentContext, string(noteType))
+	if err := os.MkdirAll(noteDir, 0755); err != nil {
 		return nil, fmt.Errorf("ensure directories: %w", err)
 	}
 
 	// Generate filename
 	var filename string
 	if noteType == models.NoteTypeQuick {
-		// For quick notes, use just the time + quick
 		filename = time.Now().Format("150405") + "-quick.md"
 	} else if noteType == models.NoteTypeDaily {
-		// For daily notes, use the date as filename
 		filename = time.Now().Format("20060102") + "-daily.md"
-		// If no title provided, use the date as title
 		if title == "" {
 			title = "Daily Note: " + time.Now().Format("2006-01-02")
 		}
 	} else {
 		filename = GenerateFilename(title)
 	}
-	notePath := filepath.Join(ctx.Workspace.GetNotePath(string(noteType), ctx.Branch), filename)
+	notePath := filepath.Join(noteDir, filename)
 
 	// Create note content
 	template := s.Config.Templates[string(noteType)]
-	content := CreateNoteContent(noteType, title, ctx.Workspace.Name, ctx.Branch, template)
+	content := CreateNoteContent(noteType, title, currentContext.NotebookContextWorkspace.Name, currentContext.Branch, template)
 
 	// Write file
 	if err := os.WriteFile(notePath, []byte(content), 0644); err != nil {
@@ -108,13 +108,12 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 	}
 
 	// Set metadata
-	note.Workspace = ctx.Workspace.Name
-	note.Branch = ctx.Branch
+	note.Workspace = currentContext.NotebookContextWorkspace.Name
+	note.Branch = currentContext.Branch
 	note.Type = noteType
 
 	// Index the note
 	if err := s.Index.IndexNote(note); err != nil {
-		// Don't fail if indexing fails
 		fmt.Fprintf(os.Stderr, "Warning: failed to index note: %v\n", err)
 	}
 
@@ -137,16 +136,15 @@ func (s *Service) SearchNotes(ctx *WorkspaceContext, query string, options ...Se
 		opt(opts)
 	}
 
-	// Use the provided context's workspace unless searching all workspaces
-	var ws *workspace.Workspace
+	var searchWorkspaceName string
 	if !opts.allWorkspaces {
-		ws = ctx.Workspace
+		searchWorkspaceName = ctx.NotebookContextWorkspace.Name
 	}
 
 	results, err := s.Index.Search(query, &search.Options{
-		Workspace: ws,
-		Type:      string(opts.noteType),
-		Limit:     opts.limit,
+		WorkspaceName: searchWorkspaceName,
+		Type:          string(opts.noteType),
+		Limit:         opts.limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("search index: %w", err)
@@ -157,7 +155,7 @@ func (s *Service) SearchNotes(ctx *WorkspaceContext, query string, options ...Se
 
 // ListNotes lists notes in the current workspace
 func (s *Service) ListNotes(ctx *WorkspaceContext, noteType models.NoteType) ([]*models.Note, error) {
-	notePath := ctx.Workspace.GetNotePath(string(noteType), ctx.Branch)
+	notePath := getNotePathForContext(ctx, string(noteType))
 
 	var notes []*models.Note
 	err := filepath.Walk(notePath, func(path string, info os.FileInfo, err error) error {
@@ -168,7 +166,7 @@ func (s *Service) ListNotes(ctx *WorkspaceContext, noteType models.NoteType) ([]
 		if !info.IsDir() && strings.HasSuffix(path, ".md") {
 			note, err := ParseNote(path)
 			if err == nil {
-				note.Workspace = ctx.Workspace.Name
+				note.Workspace = ctx.NotebookContextWorkspace.Name
 				note.Branch = ctx.Branch
 				note.Type = noteType
 				notes = append(notes, note)
@@ -182,13 +180,11 @@ func (s *Service) ListNotes(ctx *WorkspaceContext, noteType models.NoteType) ([]
 
 // ListAllNotes lists all notes in the specified workspace context (all directories)
 func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
-	// Get the root path for this workspace/branch
 	var rootPath string
-
-	if ctx.Workspace.Type == workspace.TypeGlobal {
-		rootPath = filepath.Join(ctx.Workspace.NotebookDir, "global")
+	if ctx.NotebookContextWorkspace.Name == "global" {
+		rootPath = filepath.Join(getDefaultNotebookDir(), "global")
 	} else {
-		rootPath = filepath.Join(ctx.Workspace.NotebookDir, "repos", ctx.Workspace.Name, ctx.Branch)
+		rootPath = filepath.Join(getDefaultNotebookDir(), "repos", ctx.NotebookContextWorkspace.Identifier(), ctx.Branch)
 	}
 
 	var notes []*models.Note
@@ -196,139 +192,183 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
 		if err != nil {
 			return nil // Skip errors
 		}
-
-		// Skip archive directory
 		if strings.Contains(path, "/archive/") {
 			return nil
 		}
-
 		if !info.IsDir() && strings.HasSuffix(path, ".md") {
 			note, err := ParseNote(path)
 			if err == nil {
-				note.Workspace = ctx.Workspace.Name
+				note.Workspace = ctx.NotebookContextWorkspace.Name
 				note.Branch = ctx.Branch
 
-				// Extract note type from path
 				relPath, _ := filepath.Rel(rootPath, path)
 				parts := strings.Split(filepath.ToSlash(relPath), "/")
 				if len(parts) > 1 {
-					// Everything except the filename is the type
 					note.Type = models.NoteType(strings.Join(parts[:len(parts)-1], "/"))
 				} else if len(parts) == 1 {
-					// If file is at root, infer type from parent directory
-					note.Type = models.NoteTypeQuick // Default
+					note.Type = models.NoteTypeQuick
 				}
-
 				notes = append(notes, note)
 			}
 		}
 		return nil
 	})
-
 	return notes, err
 }
 
 // ListAllGlobalNotes lists all notes in the global workspace (all directories)
 func (s *Service) ListAllGlobalNotes() ([]*models.Note, error) {
-	ws, err := s.Registry.Global()
+	ctx, err := s.GetWorkspaceContext("global")
 	if err != nil {
-		return nil, fmt.Errorf("get global workspace: %w", err)
+		return nil, fmt.Errorf("get global workspace context: %w", err)
 	}
-
-	ctx := &WorkspaceContext{
-		Workspace: ws,
-		Branch:    "",
-		Paths:     make(map[string]string),
-	}
-
 	return s.ListAllNotes(ctx)
 }
 
 // ListGlobalNotes lists notes in the global workspace
 func (s *Service) ListGlobalNotes(noteType models.NoteType) ([]*models.Note, error) {
-	ws, err := s.Registry.Global()
+	ctx, err := s.GetWorkspaceContext("global")
 	if err != nil {
-		return nil, fmt.Errorf("get global workspace: %w", err)
+		return nil, fmt.Errorf("get global workspace context: %w", err)
 	}
-
-	ctx := &WorkspaceContext{
-		Workspace: ws,
-		Branch:    "",
-		Paths:     make(map[string]string),
-	}
-
 	return s.ListNotes(ctx, noteType)
 }
 
 // ArchiveNotes moves notes to the archive
 func (s *Service) ArchiveNotes(ctx *WorkspaceContext, paths []string) error {
-	archivePath := ctx.Workspace.GetNotePath("archive", ctx.Branch)
+	archivePath := getNotePathForContext(ctx, "archive")
 	if err := os.MkdirAll(archivePath, 0755); err != nil {
 		return fmt.Errorf("create archive directory: %w", err)
 	}
 
 	for _, path := range paths {
-		// Get relative path within note directory
 		_, _, noteType := GetNoteMetadata(path)
 		if noteType == "" {
 			continue
 		}
 
-		// Create subdirectory in archive if needed
 		archiveSubdir := filepath.Join(archivePath, noteType)
 		if err := os.MkdirAll(archiveSubdir, 0755); err != nil {
 			return fmt.Errorf("create archive subdirectory: %w", err)
 		}
 
-		// Move file
 		dest := filepath.Join(archiveSubdir, filepath.Base(path))
 		if err := os.Rename(path, dest); err != nil {
 			return fmt.Errorf("move %s to archive: %w", path, err)
 		}
 
-		// Update index
 		if note, err := ParseNote(dest); err == nil {
 			note.IsArchived = true
-			note.Workspace = ctx.Workspace.Name
+			note.Workspace = ctx.NotebookContextWorkspace.Name
 			note.Branch = ctx.Branch
 			if err := s.Index.IndexNote(note); err != nil {
-				// Don't fail the operation, just log the error
 				fmt.Fprintf(os.Stderr, "Warning: failed to index archived note: %v\n", err)
 			}
 		}
 	}
-
 	return nil
 }
 
-// GetWorkspaceContext returns current workspace context
-func (s *Service) GetWorkspaceContext() (*WorkspaceContext, error) {
-	ws, err := s.Registry.DetectCurrent()
+// GetWorkspaceContext returns current workspace context.
+// If startPath is provided, it's used as the basis for context detection.
+// If startPath is "global", it forces the global context.
+func (s *Service) GetWorkspaceContext(startPath string) (*WorkspaceContext, error) {
+	notebookDir := getDefaultNotebookDir()
+
+	if startPath == "global" {
+		globalNode := &coreworkspace.WorkspaceNode{Name: "global", Path: notebookDir}
+		return &WorkspaceContext{
+			CurrentWorkspace:         globalNode,
+			NotebookContextWorkspace: globalNode,
+			Branch:                   "",
+			Paths:                    buildPathsMap(globalNode, ""),
+		}, nil
+	}
+
+	var CWD string
+	var err error
+	if startPath == "" {
+		CWD, err = os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		CWD = startPath
+	}
+
+	currentWorkspace := s.workspaceProvider.FindByPath(CWD)
+	if currentWorkspace == nil {
+		// Fallback to global context if not in a known workspace
+		return s.GetWorkspaceContext("global")
+	}
+
+	notebookContextWorkspace, err := s.findNotebookContextNode(currentWorkspace)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not determine notebook context for '%s': %w", currentWorkspace.Name, err)
 	}
 
 	branch := ""
-	if ws.Type == workspace.TypeGitRepo {
-		branch = getCurrentGitBranch(ws.Path)
+	if git.IsGitRepo(currentWorkspace.Path) {
+		_, branch, _ = git.GetRepoInfo(currentWorkspace.Path)
 	}
 
 	return &WorkspaceContext{
-		Workspace: ws,
-		Branch:    branch,
-		Paths: map[string]string{
-			"current":      ws.GetNotePath("current", branch),
-			"llm":          ws.GetNotePath("llm", branch),
-			"learn":        ws.GetNotePath("learn", branch),
-			"daily":        ws.GetNotePath("daily", branch),
-			"issues":       ws.GetNotePath("issues", branch),
-			"architecture": ws.GetNotePath("architecture", branch),
-			"todos":        ws.GetNotePath("todos", branch),
-			"quick":        ws.GetNotePath("quick", branch),
-			"archive":      ws.GetNotePath("archive", branch),
-			"prompts":      ws.GetNotePath("prompts", branch),
-		},
+		CurrentWorkspace:         currentWorkspace,
+		NotebookContextWorkspace: notebookContextWorkspace,
+		Branch:                   branch,
+		Paths:                    buildPathsMap(notebookContextWorkspace, branch),
 	}, nil
+}
+
+// findNotebookContextNode determines the logical owner of the notebook directory.
+func (s *Service) findNotebookContextNode(currentNode *coreworkspace.WorkspaceNode) (*coreworkspace.WorkspaceNode, error) {
+	// If it's a worktree of any kind, its notebook context is its parent project.
+	if currentNode.IsWorktree() && currentNode.ParentProjectPath != "" {
+		parent := s.workspaceProvider.FindByPath(currentNode.ParentProjectPath)
+		if parent == nil {
+			return nil, fmt.Errorf("parent project not found at path: %s", currentNode.ParentProjectPath)
+		}
+		return parent, nil
+	}
+
+	// For sub-projects inside an ecosystem worktree, the context is the ecosystem worktree itself.
+	if (currentNode.Kind == coreworkspace.KindEcosystemWorktreeSubProject || currentNode.Kind == coreworkspace.KindEcosystemWorktreeSubProjectWorktree) && currentNode.ParentEcosystemPath != "" {
+		parent := s.workspaceProvider.FindByPath(currentNode.ParentEcosystemPath)
+		if parent == nil {
+			return nil, fmt.Errorf("parent ecosystem not found at path: %s", currentNode.ParentEcosystemPath)
+		}
+		// We need to ensure this parent is an ecosystem worktree
+		if parent.Kind == coreworkspace.KindEcosystemWorktree {
+			return parent, nil
+		}
+	}
+
+	// In all other cases (root projects, standalone projects, sub-projects in root eco), the node is its own context.
+	return currentNode, nil
+}
+
+// buildPathsMap creates the map of note type paths for a given context.
+func buildPathsMap(notebookContext *coreworkspace.WorkspaceNode, branch string) map[string]string {
+	paths := make(map[string]string)
+	types := []string{"current", "llm", "learn", "daily", "issues", "architecture", "todos", "quick", "archive", "prompts"}
+	for _, t := range types {
+		paths[t] = getNotePath(notebookContext, branch, t)
+	}
+	return paths
+}
+
+// getNotePath is a helper to construct the path for a given context.
+func getNotePath(notebookContext *coreworkspace.WorkspaceNode, branch, noteType string) string {
+	notebookDir := getDefaultNotebookDir()
+	if notebookContext.Name == "global" {
+		return filepath.Join(notebookDir, "global", noteType)
+	}
+	return filepath.Join(notebookDir, "repos", notebookContext.Identifier(), branch, noteType)
+}
+
+// getNotePathForContext is a convenience wrapper.
+func getNotePathForContext(ctx *WorkspaceContext, noteType string) string {
+	return getNotePath(ctx.NotebookContextWorkspace, ctx.Branch, noteType)
 }
 
 // openInEditor opens a file in the configured editor
@@ -362,7 +402,7 @@ func (s *Service) UpdateNoteContent(path string, content string) error {
 		return fmt.Errorf("parse note: %w", err)
 	}
 
-	// Extract workspace and branch from path
+	// Extract metadata from path
 	ws, branch, noteType := GetNoteMetadata(path)
 	note.Workspace = ws
 	note.Branch = branch
@@ -379,39 +419,24 @@ func (s *Service) UpdateNoteContent(path string, content string) error {
 
 // BuildNotePath constructs a path for a note in the specified workspace/branch/type
 func (s *Service) BuildNotePath(workspaceName, branch, noteType, filename string) (string, error) {
-	var ws *workspace.Workspace
-
+	var targetNode *coreworkspace.WorkspaceNode
 	if workspaceName == "global" || workspaceName == "" {
-		// Use global workspace
-		globalWs, err := s.Registry.Global()
-		if err != nil {
-			return "", fmt.Errorf("get global workspace: %w", err)
-		}
-		ws = globalWs
+		targetNode = &coreworkspace.WorkspaceNode{Name: "global"}
 	} else {
-		// Find workspace by name
-		workspaces, err := s.Registry.List()
-		if err != nil {
-			return "", fmt.Errorf("list workspaces: %w", err)
-		}
-
-		for _, w := range workspaces {
-			if w.Name == workspaceName {
-				ws = w
+		// Find workspace node by name from the provider
+		for _, node := range s.workspaceProvider.All() {
+			if node.Name == workspaceName && !node.IsWorktree() { // Find the root project
+				targetNode = node
 				break
 			}
 		}
-
-		if ws == nil {
-			return "", fmt.Errorf("workspace not found: %s", workspaceName)
-		}
 	}
 
-	// Get the base path for the note type
-	notePath := ws.GetNotePath(noteType, branch)
+	if targetNode == nil {
+		return "", fmt.Errorf("workspace not found: %s", workspaceName)
+	}
 
-	// Combine with filename
-	return filepath.Join(notePath, filename), nil
+	return filepath.Join(getNotePath(targetNode, branch, noteType), filename), nil
 }
 
 // IndexFile indexes a single file
@@ -432,17 +457,20 @@ func (s *Service) IndexFile(path string) error {
 
 // Close closes the service
 func (s *Service) Close() error {
-	if err := s.Index.Close(); err != nil {
-		return err
+	if s.Index != nil {
+		if err := s.Index.Close(); err != nil {
+			return err
+		}
 	}
-	return s.Registry.Close()
+	return nil
 }
 
 // WorkspaceContext holds current workspace information
 type WorkspaceContext struct {
-	Workspace *workspace.Workspace
-	Branch    string
-	Paths     map[string]string
+	CurrentWorkspace         *coreworkspace.WorkspaceNode
+	NotebookContextWorkspace *coreworkspace.WorkspaceNode
+	Branch                   string
+	Paths                    map[string]string
 }
 
 // Options for various operations
@@ -466,19 +494,12 @@ func InGlobalWorkspace() CreateOption {
 }
 
 type searchOptions struct {
-	workspace     *workspace.Workspace
 	allWorkspaces bool
 	noteType      models.NoteType
 	limit         int
 }
 
 type SearchOption func(*searchOptions)
-
-func InWorkspace(w *workspace.Workspace) SearchOption {
-	return func(o *searchOptions) {
-		o.workspace = w
-	}
-}
 
 func AllWorkspaces() SearchOption {
 	return func(o *searchOptions) {
@@ -510,48 +531,38 @@ func getCurrentGitBranch(repoPath string) string {
 }
 
 // ListAllNotesInWorkspace lists all notes in a given workspace, across all branches.
-func (s *Service) ListAllNotesInWorkspace(ws *workspace.Workspace) ([]*models.Note, error) {
-	if ws.Type != workspace.TypeGitRepo {
-		// This functionality is most relevant for git repos.
-		// For other types, it might behave like ListAllNotes.
-		// For now, let's focus on the git repo case.
-		return nil, fmt.Errorf("listing notes across all branches is only supported for git-repo workspaces")
+func (s *Service) ListAllNotesInWorkspace(ws *coreworkspace.WorkspaceNode) ([]*models.Note, error) {
+	if ws.Kind != coreworkspace.KindStandaloneProject && ws.Kind != coreworkspace.KindEcosystemRoot && ws.Kind != coreworkspace.KindEcosystemSubProject {
+		return nil, fmt.Errorf("listing notes across all branches is only supported for root projects, not worktrees")
 	}
 
-	// The root for a repository's notes is at .../repos/<workspace-name>/
-	repoNotesRoot := filepath.Join(ws.NotebookDir, "repos", ws.Name)
+	repoNotesRoot := filepath.Join(getDefaultNotebookDir(), "repos", ws.Identifier())
 
 	var notes []*models.Note
 	err := filepath.Walk(repoNotesRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors to continue walking
 		}
-
-		// Skip archive directories within any branch
 		if strings.Contains(path, "/archive/") {
 			return filepath.SkipDir
 		}
-
 		if !info.IsDir() && strings.HasSuffix(path, ".md") {
 			note, err := ParseNote(path)
 			if err == nil {
-				// ParseNote already extracts workspace, branch, and type from the path
 				notes = append(notes, note)
 			}
 		}
 		return nil
 	})
-
 	return notes, err
 }
 
 // GetBranches returns all branches for a git workspace
-func (s *Service) GetBranches(ws *workspace.Workspace) ([]string, error) {
-	if ws.Type != workspace.TypeGitRepo {
+func (s *Service) GetBranches(ws *coreworkspace.WorkspaceNode) ([]string, error) {
+	if !git.IsGitRepo(ws.Path) {
 		return []string{}, nil
 	}
 
-	// Get local branches
 	cmd := exec.Command("git", "branch", "--format=%(refname:short)")
 	cmd.Dir = ws.Path
 	output, err := cmd.Output()
@@ -559,8 +570,7 @@ func (s *Service) GetBranches(ws *workspace.Workspace) ([]string, error) {
 		return nil, fmt.Errorf("list branches: %w", err)
 	}
 
-	// Parse branches from output
-	branches := []string{}
+	var branches []string
 	for _, line := range strings.Split(string(output), "\n") {
 		branch := strings.TrimSpace(line)
 		if branch != "" {
@@ -568,7 +578,6 @@ func (s *Service) GetBranches(ws *workspace.Workspace) ([]string, error) {
 		}
 	}
 
-	// If no branches found, return main as default
 	if len(branches) == 0 {
 		branches = []string{"main"}
 	}

@@ -5,12 +5,13 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
-	"github.com/mattsolo1/grove-notebook/pkg/workspace"
 )
 
 var (
@@ -40,7 +41,8 @@ func InitConfig() {
 	viper.SetDefault("default_type", "current")
 
 	if err := viper.ReadInConfig(); err == nil {
-		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
+		// Do not print this in normal operation, it's noisy.
+		// fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
 	}
 }
 
@@ -54,37 +56,20 @@ func InitService() (*service.Service, error) {
 		Templates:   viper.GetStringMapString("templates"),
 	}
 
-	svc, err := service.New(config)
+	// Discover all workspaces once and create a provider.
+	logger := logrus.New()
+	logger.SetOutput(os.Stderr)
+	logger.SetLevel(logrus.WarnLevel) // Keep it quiet unless there are issues.
+	discoveryService := workspace.NewDiscoveryService(logger)
+	result, err := discoveryService.DiscoverAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+	provider := workspace.NewProvider(result)
+
+	svc, err := service.New(config, provider)
 	if err != nil {
 		return nil, err
-	}
-
-	// If workspace override is specified, change to that workspace
-	if WorkspaceOverride != "" {
-		workspaces, err := svc.Registry.List()
-		if err != nil {
-			svc.Close()
-			return nil, fmt.Errorf("list workspaces: %w", err)
-		}
-
-		var targetWorkspace *workspace.Workspace
-		for _, ws := range workspaces {
-			if ws.Name == WorkspaceOverride {
-				targetWorkspace = ws
-				break
-			}
-		}
-
-		if targetWorkspace == nil {
-			svc.Close()
-			return nil, fmt.Errorf("workspace not found: %s", WorkspaceOverride)
-		}
-
-		// Change to the workspace directory
-		if err := os.Chdir(targetWorkspace.Path); err != nil {
-			svc.Close()
-			return nil, fmt.Errorf("change to workspace directory: %w", err)
-		}
 	}
 
 	return svc, nil
@@ -92,5 +77,5 @@ func InitService() (*service.Service, error) {
 
 func AddGlobalFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/nb/config.yaml)")
-	cmd.PersistentFlags().StringVarP(&WorkspaceOverride, "workspace", "W", "", "Override current workspace context")
+	cmd.PersistentFlags().StringVarP(&WorkspaceOverride, "workspace", "W", "", "Override current workspace context by path")
 }

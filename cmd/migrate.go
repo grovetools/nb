@@ -95,11 +95,11 @@ Examples:
 			case migrateWorkspace != "":
 				scope.Workspace = migrateWorkspace
 			default:
-				context, err := svc.GetWorkspaceContext()
+				context, err := svc.GetWorkspaceContext("")
 				if err != nil {
 					return fmt.Errorf("get context: %w", err)
 				}
-				scope.Context = context.Workspace.Name
+				scope.Context = context.NotebookContextWorkspace.Name
 			}
 
 			options := migration.MigrationOptions{

@@ -22,10 +22,10 @@ func NewSearchCmd() *cobra.Command {
 		Use:   "search <query>",
 		Short: "Search notes",
 		Long: `Search for notes matching the query.
-	
+
 Examples:
   nb search "authentication"     # Search in current workspace
-  nb search "todo" --all         # Search all workspaces  
+  nb search "todo" --all         # Search all workspaces
   nb search "api" -t llm         # Search only LLM notes`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -38,7 +38,7 @@ Examples:
 			defer svc.Close()
 
 			// Get workspace context
-			ctx, err := svc.GetWorkspaceContext()
+			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}

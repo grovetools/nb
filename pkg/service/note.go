@@ -41,7 +41,7 @@ func sanitizeFilename(s string) string {
 	s = strings.ReplaceAll(s, " ", "-")
 
 	// Remove invalid characters
-	invalidChars := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
+	invalidChars := []string{"/", "\\", ":", "*", "?", `"`, "<", ">", "|"}
 	for _, char := range invalidChars {
 		s = strings.ReplaceAll(s, char, "")
 	}
@@ -228,7 +228,7 @@ func generateDailyContent(title, workspace, branch string, pathTags []string, no
 	body := fmt.Sprintf(`# Daily Note: %s
 
 ## Tasks
-- [ ] 
+- [ ]
 
 ## Notes
 
@@ -405,36 +405,39 @@ func CreateNoteContent(noteType models.NoteType, title, workspace, branch string
 }
 
 // GetNoteMetadata extracts metadata from note path
-func GetNoteMetadata(path string) (workspace, branch, noteType string) {
+func GetNoteMetadata(path string) (workspaceIdentifier, branch, noteType string) {
 	parts := strings.Split(filepath.ToSlash(path), "/")
 
 	for i, part := range parts {
 		if part == "nb" && i+1 < len(parts) {
-			if parts[i+1] == globalWorkspace && i+2 < len(parts) {
-				// For global notes, everything after "global/" until the filename is the note type
-				typeStartIdx := i + 2
-				// Find where the filename starts (contains .md)
-				for j := len(parts) - 1; j >= typeStartIdx; j-- {
-					if strings.HasSuffix(parts[j], ".md") {
-						// Join all parts between global and the filename
-						noteType = strings.Join(parts[typeStartIdx:j], "/")
-						return "global", "", noteType
+			if parts[i+1] == globalWorkspace {
+				// Path: .../nb/global/TYPE/.../file.md
+				if i+2 < len(parts) {
+					// Find where the filename starts (contains .md)
+					for j := len(parts) - 1; j >= i+2; j-- {
+						if strings.HasSuffix(parts[j], ".md") {
+							noteType = strings.Join(parts[i+2:j], "/")
+							return "global", "", noteType
+						}
 					}
 				}
+				return "global", "", "" // Note directly in global
 			}
-			if parts[i+1] == "repos" && i+4 < len(parts) {
-				workspace = parts[i+2]
+			if parts[i+1] == "repos" && i+3 < len(parts) {
+				// Path: .../nb/repos/IDENTIFIER/BRANCH/TYPE/.../file.md
+				workspaceIdentifier = parts[i+2]
 				branch = parts[i+3]
-				// Everything after the branch until the filename is the note type
-				typeStartIdx := i + 4
-				// Find where the filename starts (contains .md)
-				for j := len(parts) - 1; j >= typeStartIdx; j-- {
-					if strings.HasSuffix(parts[j], ".md") {
-						// Join all parts between branch and the filename
-						noteType = strings.Join(parts[typeStartIdx:j], "/")
-						return workspace, branch, noteType
+
+				if i+4 < len(parts) {
+					// Find where the filename starts
+					for j := len(parts) - 1; j >= i+4; j-- {
+						if strings.HasSuffix(parts[j], ".md") {
+							noteType = strings.Join(parts[i+4:j], "/")
+							return workspaceIdentifier, branch, noteType
+						}
 					}
 				}
+				return workspaceIdentifier, branch, "" // Note directly in branch dir
 			}
 		}
 	}
