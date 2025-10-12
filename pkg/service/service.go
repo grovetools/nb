@@ -94,7 +94,7 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 
 	// Create note content
 	template := s.Config.Templates[string(noteType)]
-	content := CreateNoteContent(noteType, title, currentContext.NotebookContextWorkspace.Name, currentContext.Branch, template)
+	content := CreateNoteContent(noteType, title, currentContext.NotebookContextWorkspace.Name, currentContext.Branch, currentContext.CurrentWorkspace.Name, template)
 
 	// Write file
 	if err := os.WriteFile(notePath, []byte(content), 0644); err != nil {
@@ -296,8 +296,8 @@ func (s *Service) GetWorkspaceContext(startPath string) (*WorkspaceContext, erro
 		CWD = startPath
 	}
 
-	currentWorkspace := s.workspaceProvider.FindByPath(CWD)
-	if currentWorkspace == nil {
+	currentWorkspace, err := coreworkspace.GetProjectByPath(CWD)
+	if err != nil {
 		// Fallback to global context if not in a known workspace
 		return s.GetWorkspaceContext("global")
 	}
@@ -322,28 +322,25 @@ func (s *Service) GetWorkspaceContext(startPath string) (*WorkspaceContext, erro
 
 // findNotebookContextNode determines the logical owner of the notebook directory.
 func (s *Service) findNotebookContextNode(currentNode *coreworkspace.WorkspaceNode) (*coreworkspace.WorkspaceNode, error) {
-	// If it's a worktree of any kind, its notebook context is its parent project.
+	// If the current node has a RootEcosystemPath, the notebook context is that root ecosystem
+	if currentNode.RootEcosystemPath != "" {
+		rootNode, err := coreworkspace.GetProjectByPath(currentNode.RootEcosystemPath)
+		if err != nil {
+			return nil, fmt.Errorf("root ecosystem not found at path: %s: %w", currentNode.RootEcosystemPath, err)
+		}
+		return rootNode, nil
+	}
+
+	// If it's a standalone worktree (not part of an ecosystem), its notebook context is its parent project
 	if currentNode.IsWorktree() && currentNode.ParentProjectPath != "" {
-		parent := s.workspaceProvider.FindByPath(currentNode.ParentProjectPath)
-		if parent == nil {
-			return nil, fmt.Errorf("parent project not found at path: %s", currentNode.ParentProjectPath)
+		parent, err := coreworkspace.GetProjectByPath(currentNode.ParentProjectPath)
+		if err != nil {
+			return nil, fmt.Errorf("parent project not found at path: %s: %w", currentNode.ParentProjectPath, err)
 		}
 		return parent, nil
 	}
 
-	// For sub-projects inside an ecosystem worktree, the context is the ecosystem worktree itself.
-	if (currentNode.Kind == coreworkspace.KindEcosystemWorktreeSubProject || currentNode.Kind == coreworkspace.KindEcosystemWorktreeSubProjectWorktree) && currentNode.ParentEcosystemPath != "" {
-		parent := s.workspaceProvider.FindByPath(currentNode.ParentEcosystemPath)
-		if parent == nil {
-			return nil, fmt.Errorf("parent ecosystem not found at path: %s", currentNode.ParentEcosystemPath)
-		}
-		// We need to ensure this parent is an ecosystem worktree
-		if parent.Kind == coreworkspace.KindEcosystemWorktree {
-			return parent, nil
-		}
-	}
-
-	// In all other cases (root projects, standalone projects, sub-projects in root eco), the node is its own context.
+	// Otherwise (standalone project or ecosystem root), the project is its own notebook context
 	return currentNode, nil
 }
 

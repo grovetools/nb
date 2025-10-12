@@ -150,7 +150,7 @@ func containsTodos(content string) bool {
 }
 
 // NoteContentGenerator defines the function signature for note content generators
-type NoteContentGenerator func(title, workspace, branch string, pathTags []string, now time.Time, timestampStr string) string
+type NoteContentGenerator func(title, workspace, branch string, tags []string, now time.Time, timestampStr string) string
 
 // noteContentGenerators maps note types to their content generator functions
 var noteContentGenerators = map[models.NoteType]NoteContentGenerator{
@@ -163,13 +163,13 @@ var noteContentGenerators = map[models.NoteType]NoteContentGenerator{
 }
 
 // generateQuickContent creates content for quick notes
-func generateQuickContent(title, workspace, branch string, pathTags []string, now time.Time, timestampStr string) string {
+func generateQuickContent(title, workspace, branch string, tags []string, now time.Time, timestampStr string) string {
 	// For quick notes, use the title directly as ID (which already contains the timestamp + quick)
 	fm := &frontmatter.Frontmatter{
 		ID:       title,
 		Title:    title,
 		Aliases:  []string{},
-		Tags:     pathTags,
+		Tags:     tags,
 		Created:  timestampStr,
 		Modified: timestampStr,
 	}
@@ -187,13 +187,13 @@ func generateQuickContent(title, workspace, branch string, pathTags []string, no
 }
 
 // generateLLMContent creates content for LLM chat notes
-func generateLLMContent(title, workspace, branch string, pathTags []string, now time.Time, timestampStr string) string {
+func generateLLMContent(title, workspace, branch string, tags []string, now time.Time, timestampStr string) string {
 	id := fmt.Sprintf("%s-chat%d", now.Format("20060102-150405"), now.Unix()%1000)
 	fm := &frontmatter.Frontmatter{
 		ID:         id,
 		Title:      title,
 		Aliases:    []string{},
-		Tags:       pathTags,
+		Tags:       tags,
 		Repository: workspace,
 		Branch:     branch,
 		Created:    timestampStr,
@@ -206,13 +206,13 @@ func generateLLMContent(title, workspace, branch string, pathTags []string, now 
 }
 
 // generateDailyContent creates content for daily notes
-func generateDailyContent(title, workspace, branch string, pathTags []string, now time.Time, timestampStr string) string {
+func generateDailyContent(title, workspace, branch string, tags []string, now time.Time, timestampStr string) string {
 	id := GenerateNoteID(fmt.Sprintf("daily-%s", now.Format("2006-01-02")))
 	fm := &frontmatter.Frontmatter{
 		ID:       id,
 		Title:    title,
 		Aliases:  []string{},
-		Tags:     pathTags,
+		Tags:     tags,
 		Created:  timestampStr,
 		Modified: timestampStr,
 	}
@@ -239,13 +239,13 @@ func generateDailyContent(title, workspace, branch string, pathTags []string, no
 }
 
 // generateLearnContent creates content for learning notes
-func generateLearnContent(title, workspace, branch string, pathTags []string, now time.Time, timestampStr string) string {
+func generateLearnContent(title, workspace, branch string, tags []string, now time.Time, timestampStr string) string {
 	id := GenerateNoteID(title)
 	fm := &frontmatter.Frontmatter{
 		ID:       id,
 		Title:    title,
 		Aliases:  []string{},
-		Tags:     pathTags,
+		Tags:     tags,
 		Created:  timestampStr,
 		Modified: timestampStr,
 	}
@@ -273,7 +273,7 @@ func generateLearnContent(title, workspace, branch string, pathTags []string, no
 }
 
 // generateBlogContent creates content for blog posts
-func generateBlogContent(title, workspace, branch string, pathTags []string, now time.Time, timestampStr string) string {
+func generateBlogContent(title, workspace, branch string, tags []string, now time.Time, timestampStr string) string {
 	id := GenerateNoteID(title)
 	// Match the schema for blog posts
 	fm := &frontmatter.Frontmatter{
@@ -282,7 +282,7 @@ func generateBlogContent(title, workspace, branch string, pathTags []string, now
 		Description: "", // User will fill this in
 		PublishDate: frontmatter.FormatTimestamp(now),
 		UpdatedDate: frontmatter.FormatTimestamp(now),
-		Tags:        pathTags,
+		Tags:        tags,
 		Draft:       true, // Posts are drafts by default
 		Featured:    false,
 		Aliases:     []string{},
@@ -308,13 +308,13 @@ Start writing your amazing blog post here.
 }
 
 // generatePromptsContent creates content for reusable LLM prompts
-func generatePromptsContent(title, workspace, branch string, pathTags []string, now time.Time, timestampStr string) string {
+func generatePromptsContent(title, workspace, branch string, tags []string, now time.Time, timestampStr string) string {
 	id := GenerateNoteID(title)
 	fm := &frontmatter.Frontmatter{
 		ID:       id,
 		Title:    title,
 		Aliases:  []string{},
-		Tags:     pathTags,
+		Tags:     tags,
 		Created:  timestampStr,
 		Modified: timestampStr,
 	}
@@ -347,13 +347,13 @@ func generatePromptsContent(title, workspace, branch string, pathTags []string, 
 }
 
 // generateDefaultContent creates content for all other note types
-func generateDefaultContent(title, workspace, branch string, pathTags []string, now time.Time, timestampStr string) string {
+func generateDefaultContent(title, workspace, branch string, tags []string, now time.Time, timestampStr string) string {
 	id := GenerateNoteID(title)
 	fm := &frontmatter.Frontmatter{
 		ID:       id,
 		Title:    title,
 		Aliases:  []string{},
-		Tags:     pathTags,
+		Tags:     tags,
 		Created:  timestampStr,
 		Modified: timestampStr,
 	}
@@ -371,9 +371,13 @@ func generateDefaultContent(title, workspace, branch string, pathTags []string, 
 }
 
 // CreateNoteContent generates initial note content based on type and template
-func CreateNoteContent(noteType models.NoteType, title, workspace, branch string, template string) string {
+func CreateNoteContent(noteType models.NoteType, title, workspace, branch, currentWorkspaceName string, template string) string {
 	// Extract path components for tags
 	pathTags := frontmatter.ExtractPathTags(string(noteType))
+
+	// Merge path tags with current workspace name
+	allTags := frontmatter.MergeTags(pathTags, []string{currentWorkspaceName})
+
 	if template != "" {
 		// Simple template variable replacement
 		replacements := map[string]string{
@@ -397,11 +401,11 @@ func CreateNoteContent(noteType models.NoteType, title, workspace, branch string
 
 	// Look up the generator function
 	if generator, ok := noteContentGenerators[noteType]; ok {
-		return generator(title, workspace, branch, pathTags, now, timestampStr)
+		return generator(title, workspace, branch, allTags, now, timestampStr)
 	}
 
 	// Fallback to default generator if the type is not in the map
-	return generateDefaultContent(title, workspace, branch, pathTags, now, timestampStr)
+	return generateDefaultContent(title, workspace, branch, allTags, now, timestampStr)
 }
 
 // GetNoteMetadata extracts metadata from note path

@@ -49,8 +49,8 @@ Examples:
 
 			// Handle --all-branches flag
 			if listAllBranches {
-				if !ctx.CurrentWorkspace.IsWorktree() && ctx.CurrentWorkspace.Kind != "StandaloneProject" { // Simplified check
-					return fmt.Errorf("--all-branches can only be used within a git repository workspace")
+				if ctx.NotebookContextWorkspace.IsWorktree() {
+					return fmt.Errorf("--all-branches can only be used from a main project directory, not a worktree")
 				}
 
 				repoNotes, err := svc.ListAllNotesInWorkspace(ctx.NotebookContextWorkspace)
