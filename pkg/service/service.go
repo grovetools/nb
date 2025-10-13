@@ -184,7 +184,8 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
 	if ctx.NotebookContextWorkspace.Name == "global" {
 		rootPath = filepath.Join(getDefaultNotebookDir(), "global")
 	} else {
-		rootPath = filepath.Join(getDefaultNotebookDir(), "repos", ctx.NotebookContextWorkspace.Identifier(), ctx.Branch)
+		// Always use "main" for notebook paths, and use the project name directly
+		rootPath = filepath.Join(getDefaultNotebookDir(), "repos", ctx.NotebookContextWorkspace.Name, "main")
 	}
 
 	var notes []*models.Note
@@ -321,35 +322,73 @@ func (s *Service) GetWorkspaceContext(startPath string) (*WorkspaceContext, erro
 }
 
 // findNotebookContextNode determines the logical owner of the notebook directory.
+// The notebook context is always the repository (project) that manages the git history.
+// For ecosystem worktree subprojects, this means finding the corresponding subproject in the main ecosystem.
 func (s *Service) findNotebookContextNode(currentNode *coreworkspace.WorkspaceNode) (*coreworkspace.WorkspaceNode, error) {
-	// If the current node has a RootEcosystemPath, the notebook context is that root ecosystem
-	if currentNode.RootEcosystemPath != "" {
-		rootNode, err := coreworkspace.GetProjectByPath(currentNode.RootEcosystemPath)
+	switch currentNode.Kind {
+	case coreworkspace.KindEcosystemWorktreeSubProjectWorktree:
+		// For a subproject within an ecosystem worktree (e.g., grove-notebook inside general-refactoring),
+		// we want to use the corresponding subproject in the main ecosystem (e.g., grove-notebook in grove-ecosystem)
+		// Find the main ecosystem root
+		if currentNode.RootEcosystemPath == "" {
+			return nil, fmt.Errorf("ecosystem worktree subproject has no root ecosystem path")
+		}
+		rootEco, err := coreworkspace.GetProjectByPath(currentNode.RootEcosystemPath)
 		if err != nil {
 			return nil, fmt.Errorf("root ecosystem not found at path: %s: %w", currentNode.RootEcosystemPath, err)
 		}
-		return rootNode, nil
-	}
 
-	// If it's a standalone worktree (not part of an ecosystem), its notebook context is its parent project
-	if currentNode.IsWorktree() && currentNode.ParentProjectPath != "" {
-		parent, err := coreworkspace.GetProjectByPath(currentNode.ParentProjectPath)
-		if err != nil {
-			return nil, fmt.Errorf("parent project not found at path: %s: %w", currentNode.ParentProjectPath, err)
+		// Find the corresponding subproject in the main ecosystem
+		for _, node := range s.workspaceProvider.All() {
+			if node.Kind == coreworkspace.KindEcosystemSubProject &&
+			   node.Name == currentNode.Name &&
+			   strings.EqualFold(node.ParentEcosystemPath, rootEco.Path) {
+				return node, nil
+			}
 		}
-		return parent, nil
-	}
 
-	// Otherwise (standalone project or ecosystem root), the project is its own notebook context
-	return currentNode, nil
+		// If not found, fall back to the root ecosystem
+		return rootEco, nil
+
+	case coreworkspace.KindStandaloneProjectWorktree, coreworkspace.KindEcosystemSubProjectWorktree:
+		// For standalone worktrees, find the parent project
+		if currentNode.ParentProjectPath != "" {
+			parent, err := coreworkspace.GetProjectByPath(currentNode.ParentProjectPath)
+			if err != nil {
+				return nil, fmt.Errorf("parent project not found at path: %s: %w", currentNode.ParentProjectPath, err)
+			}
+			return parent, nil
+		}
+		return currentNode, nil
+
+	case coreworkspace.KindEcosystemWorktree:
+		// For ecosystem worktrees, use the root ecosystem
+		if currentNode.RootEcosystemPath != "" {
+			rootNode, err := coreworkspace.GetProjectByPath(currentNode.RootEcosystemPath)
+			if err != nil {
+				return nil, fmt.Errorf("root ecosystem not found at path: %s: %w", currentNode.RootEcosystemPath, err)
+			}
+			return rootNode, nil
+		}
+		return currentNode, nil
+
+	default:
+		// For all other cases (standalone projects, ecosystem roots, ecosystem subprojects),
+		// the project is its own notebook context
+		return currentNode, nil
+	}
 }
 
 // buildPathsMap creates the map of note type paths for a given context.
+// Note: We always use "main" as the branch for notebook paths for consistency,
+// regardless of the current branch or worktree the user is in.
 func buildPathsMap(notebookContext *coreworkspace.WorkspaceNode, branch string) map[string]string {
 	paths := make(map[string]string)
 	types := []string{"current", "llm", "learn", "daily", "issues", "architecture", "todos", "quick", "archive", "prompts"}
+	// Always use "main" for notebook paths
+	notebookBranch := "main"
 	for _, t := range types {
-		paths[t] = getNotePath(notebookContext, branch, t)
+		paths[t] = getNotePath(notebookContext, notebookBranch, t)
 	}
 	return paths
 }
@@ -360,12 +399,14 @@ func getNotePath(notebookContext *coreworkspace.WorkspaceNode, branch, noteType 
 	if notebookContext.Name == "global" {
 		return filepath.Join(notebookDir, "global", noteType)
 	}
-	return filepath.Join(notebookDir, "repos", notebookContext.Identifier(), branch, noteType)
+	// Use the project name directly, not the full identifier with ecosystem prefix
+	return filepath.Join(notebookDir, "repos", notebookContext.Name, branch, noteType)
 }
 
 // getNotePathForContext is a convenience wrapper.
+// Always uses "main" for notebook paths.
 func getNotePathForContext(ctx *WorkspaceContext, noteType string) string {
-	return getNotePath(ctx.NotebookContextWorkspace, ctx.Branch, noteType)
+	return getNotePath(ctx.NotebookContextWorkspace, "main", noteType)
 }
 
 // openInEditor opens a file in the configured editor
@@ -415,6 +456,7 @@ func (s *Service) UpdateNoteContent(path string, content string) error {
 }
 
 // BuildNotePath constructs a path for a note in the specified workspace/branch/type
+// Note: branch parameter is accepted for API compatibility but always uses "main"
 func (s *Service) BuildNotePath(workspaceName, branch, noteType, filename string) (string, error) {
 	var targetNode *coreworkspace.WorkspaceNode
 	if workspaceName == "global" || workspaceName == "" {
@@ -433,7 +475,8 @@ func (s *Service) BuildNotePath(workspaceName, branch, noteType, filename string
 		return "", fmt.Errorf("workspace not found: %s", workspaceName)
 	}
 
-	return filepath.Join(getNotePath(targetNode, branch, noteType), filename), nil
+	// Always use "main" for notebook paths
+	return filepath.Join(getNotePath(targetNode, "main", noteType), filename), nil
 }
 
 // IndexFile indexes a single file
@@ -533,7 +576,8 @@ func (s *Service) ListAllNotesInWorkspace(ws *coreworkspace.WorkspaceNode) ([]*m
 		return nil, fmt.Errorf("listing notes across all branches is only supported for root projects, not worktrees")
 	}
 
-	repoNotesRoot := filepath.Join(getDefaultNotebookDir(), "repos", ws.Identifier())
+	// Use the project name directly, not the full identifier
+	repoNotesRoot := filepath.Join(getDefaultNotebookDir(), "repos", ws.Name)
 
 	var notes []*models.Note
 	err := filepath.Walk(repoNotesRoot, func(path string, info os.FileInfo, err error) error {
