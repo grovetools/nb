@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	coreconfig "github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
 	coreworkspace "github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
@@ -15,15 +16,10 @@ import (
 	"github.com/mattsolo1/grove-notebook/pkg/workspace"
 )
 
-// getDefaultNotebookDir returns the default notebook directory path
-// This now delegates to workspace.GetDefaultNotebookDir() which reads from grove.yml
-func getDefaultNotebookDir() string {
-	return workspace.GetDefaultNotebookDir()
-}
-
 // Service is the core note service
 type Service struct {
 	workspaceProvider *coreworkspace.Provider
+	notebookLocator   *coreworkspace.NotebookLocator
 	Index             *search.Index
 	Config            *Config
 }
@@ -43,8 +39,24 @@ func New(config *Config, provider *coreworkspace.Provider) (*Service, error) {
 		return nil, fmt.Errorf("create index: %w", err)
 	}
 
+	// Load core config and initialize NotebookLocator
+	coreCfg, err := coreconfig.LoadDefault()
+	if err != nil {
+		// Proceed with empty config if none exists (Local Mode)
+		coreCfg = &coreconfig.Config{}
+	}
+
+	// Check for deprecated nb.notebook_dir configuration
+	var nbConfig workspace.NbConfig
+	if err := coreCfg.UnmarshalExtension("nb", &nbConfig); err == nil && nbConfig.NotebookDir != "" {
+		fmt.Fprintln(os.Stderr, "⚠️  Warning: The 'nb.notebook_dir' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
+	}
+
+	notebookLocator := coreworkspace.NewNotebookLocator(coreCfg)
+
 	return &Service{
 		workspaceProvider: provider,
+		notebookLocator:   notebookLocator,
 		Index:             index,
 		Config:            config,
 	}, nil
@@ -73,7 +85,10 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 	}
 
 	// Ensure directory exists
-	noteDir := getNotePathForContext(currentContext, string(noteType))
+	noteDir, err := s.getNotePathForContext(currentContext, string(noteType))
+	if err != nil {
+		return nil, fmt.Errorf("get note path: %w", err)
+	}
 	if err := os.MkdirAll(noteDir, 0755); err != nil {
 		return nil, fmt.Errorf("ensure directories: %w", err)
 	}
@@ -155,10 +170,13 @@ func (s *Service) SearchNotes(ctx *WorkspaceContext, query string, options ...Se
 
 // ListNotes lists notes in the current workspace
 func (s *Service) ListNotes(ctx *WorkspaceContext, noteType models.NoteType) ([]*models.Note, error) {
-	notePath := getNotePathForContext(ctx, string(noteType))
+	notePath, err := s.getNotePathForContext(ctx, string(noteType))
+	if err != nil {
+		return nil, fmt.Errorf("get note path: %w", err)
+	}
 
 	var notes []*models.Note
-	err := filepath.Walk(notePath, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(notePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
 		}
@@ -180,16 +198,17 @@ func (s *Service) ListNotes(ctx *WorkspaceContext, noteType models.NoteType) ([]
 
 // ListAllNotes lists all notes in the specified workspace context (all directories)
 func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
-	var rootPath string
-	if ctx.NotebookContextWorkspace.Name == "global" {
-		rootPath = filepath.Join(getDefaultNotebookDir(), "global")
-	} else {
-		// Always use "main" for notebook paths, and use the project name directly
-		rootPath = filepath.Join(getDefaultNotebookDir(), "repos", ctx.NotebookContextWorkspace.Name, "main")
+	// Get the root path by getting any note type directory and going up one level
+	// This works because all note types share the same parent directory
+	samplePath, err := s.notebookLocator.GetNotesDir(ctx.NotebookContextWorkspace, "current")
+	if err != nil {
+		return nil, fmt.Errorf("get notes root: %w", err)
 	}
+	// Go up one level to get the parent directory that contains all note types
+	rootPath := filepath.Dir(samplePath)
 
 	var notes []*models.Note
-	err := filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
 		}
@@ -237,7 +256,10 @@ func (s *Service) ListGlobalNotes(noteType models.NoteType) ([]*models.Note, err
 
 // ArchiveNotes moves notes to the archive
 func (s *Service) ArchiveNotes(ctx *WorkspaceContext, paths []string) error {
-	archivePath := getNotePathForContext(ctx, "archive")
+	archivePath, err := s.getNotePathForContext(ctx, "archive")
+	if err != nil {
+		return fmt.Errorf("get archive path: %w", err)
+	}
 	if err := os.MkdirAll(archivePath, 0755); err != nil {
 		return fmt.Errorf("create archive directory: %w", err)
 	}
@@ -274,15 +296,18 @@ func (s *Service) ArchiveNotes(ctx *WorkspaceContext, paths []string) error {
 // If startPath is provided, it's used as the basis for context detection.
 // If startPath is "global", it forces the global context.
 func (s *Service) GetWorkspaceContext(startPath string) (*WorkspaceContext, error) {
-	notebookDir := getDefaultNotebookDir()
-
 	if startPath == "global" {
-		globalNode := &coreworkspace.WorkspaceNode{Name: "global", Path: notebookDir}
+		// For global context, use a minimal WorkspaceNode with just the name
+		globalNode := &coreworkspace.WorkspaceNode{Name: "global", Path: ""}
+		paths, err := s.buildPathsMap(globalNode)
+		if err != nil {
+			return nil, fmt.Errorf("build paths map for global: %w", err)
+		}
 		return &WorkspaceContext{
 			CurrentWorkspace:         globalNode,
 			NotebookContextWorkspace: globalNode,
 			Branch:                   "",
-			Paths:                    buildPathsMap(globalNode, ""),
+			Paths:                    paths,
 		}, nil
 	}
 
@@ -313,11 +338,16 @@ func (s *Service) GetWorkspaceContext(startPath string) (*WorkspaceContext, erro
 		_, branch, _ = git.GetRepoInfo(currentWorkspace.Path)
 	}
 
+	paths, err := s.buildPathsMap(notebookContextWorkspace)
+	if err != nil {
+		return nil, fmt.Errorf("build paths map: %w", err)
+	}
+
 	return &WorkspaceContext{
 		CurrentWorkspace:         currentWorkspace,
 		NotebookContextWorkspace: notebookContextWorkspace,
 		Branch:                   branch,
-		Paths:                    buildPathsMap(notebookContextWorkspace, branch),
+		Paths:                    paths,
 	}, nil
 }
 
@@ -379,34 +409,26 @@ func (s *Service) findNotebookContextNode(currentNode *coreworkspace.WorkspaceNo
 	}
 }
 
-// buildPathsMap creates the map of note type paths for a given context.
+// buildPathsMap creates the map of note type paths for a given context using the NotebookLocator.
 // Note: We always use "main" as the branch for notebook paths for consistency,
 // regardless of the current branch or worktree the user is in.
-func buildPathsMap(notebookContext *coreworkspace.WorkspaceNode, branch string) map[string]string {
+func (s *Service) buildPathsMap(notebookContext *coreworkspace.WorkspaceNode) (map[string]string, error) {
 	paths := make(map[string]string)
 	types := []string{"current", "llm", "learn", "daily", "issues", "architecture", "todos", "quick", "archive", "prompts"}
-	// Always use "main" for notebook paths
-	notebookBranch := "main"
+
 	for _, t := range types {
-		paths[t] = getNotePath(notebookContext, notebookBranch, t)
+		path, err := s.notebookLocator.GetNotesDir(notebookContext, t)
+		if err != nil {
+			return nil, fmt.Errorf("get notes dir for type %s: %w", t, err)
+		}
+		paths[t] = path
 	}
-	return paths
+	return paths, nil
 }
 
-// getNotePath is a helper to construct the path for a given context.
-func getNotePath(notebookContext *coreworkspace.WorkspaceNode, branch, noteType string) string {
-	notebookDir := getDefaultNotebookDir()
-	if notebookContext.Name == "global" {
-		return filepath.Join(notebookDir, "global", noteType)
-	}
-	// Use the project name directly, not the full identifier with ecosystem prefix
-	return filepath.Join(notebookDir, "repos", notebookContext.Name, branch, noteType)
-}
-
-// getNotePathForContext is a convenience wrapper.
-// Always uses "main" for notebook paths.
-func getNotePathForContext(ctx *WorkspaceContext, noteType string) string {
-	return getNotePath(ctx.NotebookContextWorkspace, "main", noteType)
+// getNotePathForContext is a convenience wrapper that uses the NotebookLocator.
+func (s *Service) getNotePathForContext(ctx *WorkspaceContext, noteType string) (string, error) {
+	return s.notebookLocator.GetNotesDir(ctx.NotebookContextWorkspace, noteType)
 }
 
 // openInEditor opens a file in the configured editor
@@ -475,8 +497,13 @@ func (s *Service) BuildNotePath(workspaceName, branch, noteType, filename string
 		return "", fmt.Errorf("workspace not found: %s", workspaceName)
 	}
 
-	// Always use "main" for notebook paths
-	return filepath.Join(getNotePath(targetNode, "main", noteType), filename), nil
+	// Get the note directory using NotebookLocator
+	noteDir, err := s.notebookLocator.GetNotesDir(targetNode, noteType)
+	if err != nil {
+		return "", fmt.Errorf("get notes dir: %w", err)
+	}
+
+	return filepath.Join(noteDir, filename), nil
 }
 
 // IndexFile indexes a single file
@@ -576,11 +603,17 @@ func (s *Service) ListAllNotesInWorkspace(ws *coreworkspace.WorkspaceNode) ([]*m
 		return nil, fmt.Errorf("listing notes across all branches is only supported for root projects, not worktrees")
 	}
 
-	// Use the project name directly, not the full identifier
-	repoNotesRoot := filepath.Join(getDefaultNotebookDir(), "repos", ws.Name)
+	// Get the root path by getting any note type directory and going up two levels
+	// This works because the structure is: .../repos/{workspace}/main/{noteType}
+	samplePath, err := s.notebookLocator.GetNotesDir(ws, "current")
+	if err != nil {
+		return nil, fmt.Errorf("get notes root: %w", err)
+	}
+	// Go up two levels to get to the workspace directory (repos/{workspace})
+	repoNotesRoot := filepath.Dir(filepath.Dir(samplePath))
 
 	var notes []*models.Note
-	err := filepath.Walk(repoNotesRoot, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(repoNotesRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors to continue walking
 		}
