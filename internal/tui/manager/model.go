@@ -94,9 +94,9 @@ var (
 		Foreground(theme.DefaultColors.LightText).
 		Background(theme.DefaultColors.SelectedBackground)
 
-	selectedStyle = lipgloss.NewStyle().
-		Foreground(theme.DefaultColors.LightText).
-		Background(theme.DefaultColors.SelectedBackground)
+	selectedStyle = theme.DefaultTheme.SelectedRow.
+		Copy().
+		Foreground(theme.DefaultColors.LightText)
 
 	dimStyle = lipgloss.NewStyle().
 		Foreground(theme.DefaultColors.MutedText)
@@ -198,10 +198,8 @@ func New(notes []*models.Note, svc *service.Service, ctx *service.WorkspaceConte
 		BorderForeground(theme.DefaultColors.Border).
 		BorderBottom(true).
 		Bold(false)
-	s.Selected = s.Selected.
-		Foreground(theme.DefaultColors.LightText).
-		Background(theme.DefaultColors.SelectedBackground).
-		Bold(false)
+	// Remove background highlighting - use same style as unselected rows
+	s.Selected = s.Cell.Copy()
 	t.SetStyles(s)
 
 	// Initialize text input for filtering
@@ -647,8 +645,8 @@ func (m Model) View() string {
 		}
 	}
 
-	// Table
-	s.WriteString(m.table.View() + "\n")
+	// Table with arrow indicator
+	s.WriteString(m.renderTableWithArrow() + "\n")
 
 	// Status line
 	status := fmt.Sprintf("%d notes, %d selected", len(m.notes), len(m.selected))
@@ -658,6 +656,41 @@ func (m Model) View() string {
 	s.WriteString(helpStyle.Render("Press ? for help"))
 
 	return s.String()
+}
+
+// renderTableWithArrow renders the table with an arrow indicator on the left side
+func (m Model) renderTableWithArrow() string {
+	tableStr := m.table.View()
+	lines := strings.Split(tableStr, "\n")
+
+	// Calculate which line the selected row is on
+	// Bubbles table structure:
+	// Line 0: top border
+	// Line 1: header row
+	// Line 2: separator line after header
+	// Line 3+: data rows (with potential separators between them)
+	// If there are row separators, each row takes 2 lines (row + separator)
+	selectedLineIndex := 3 + (m.table.Cursor() * 2)
+
+	// Add the indicator to each line
+	result := ""
+	arrow := theme.DefaultTheme.Highlight.Render("▶")
+	for i, line := range lines {
+		// Add the indicator on the left for the selected row
+		if i == selectedLineIndex {
+			result += arrow + " " + line
+		} else {
+			result += "  " + line
+		}
+		result += "\n"
+	}
+
+	// Remove the trailing newline to match original behavior
+	if len(result) > 0 && result[len(result)-1] == '\n' {
+		result = result[:len(result)-1]
+	}
+
+	return result
 }
 
 // openInEditor opens a note in the configured editor
