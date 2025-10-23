@@ -27,8 +27,7 @@ type managerKeyMap struct {
 }
 
 func (k managerKeyMap) ShortHelp() []key.Binding {
-	// Return empty to show no help in footer - all help goes in popup
-	return []key.Binding{}
+	return []key.Binding{k.Quit}
 }
 
 func (k managerKeyMap) FullHelp() [][]key.Binding {
@@ -653,7 +652,7 @@ func (m Model) View() string {
 	s.WriteString(dimStyle.Render(status) + "\n\n")
 
 	// Help
-	s.WriteString(helpStyle.Render("Press ? for help"))
+	s.WriteString(m.help.View())
 
 	return s.String()
 }
