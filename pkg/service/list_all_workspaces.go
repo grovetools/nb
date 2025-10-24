@@ -3,44 +3,41 @@ package service
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/mattsolo1/grove-notebook/pkg/models"
-	"github.com/mattsolo1/grove-notebook/pkg/workspace"
 )
 
 // ListNotesFromAllWorkspaces returns notes from all registered workspaces
 func (s *Service) ListNotesFromAllWorkspaces() ([]*models.Note, error) {
 	allNotes := []*models.Note{}
+	allWorkspaces := s.workspaceProvider.All()
 
-	notebookDir := workspace.GetDefaultNotebookDir()
+	// Use a map to avoid processing the same notebook context twice (for worktrees)
+	seenContexts := make(map[string]bool)
 
-	// Scan global notes
-	globalPath := filepath.Join(notebookDir, "global")
-	if err := s.scanDirectoryForNotes(globalPath, &allNotes); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not scan global notes: %v\n", err)
-	}
-
-	// Scan repo notes
-	reposPath := filepath.Join(notebookDir, "repos")
-	if err := s.scanDirectoryForNotes(reposPath, &allNotes); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not scan repo notes: %v\n", err)
-	}
-
-	return allNotes, nil
-}
-
-func (s *Service) scanDirectoryForNotes(rootPath string, notes *[]*models.Note) error {
-	return filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+	for _, ws := range allWorkspaces {
+		contextNode, err := s.findNotebookContextNode(ws)
 		if err != nil {
-			return nil // Skip errors
+			continue // skip if we can't find context
 		}
-		if !info.IsDir() && filepath.Ext(path) == ".md" {
-			note, parseErr := ParseNote(path)
-			if parseErr == nil {
-				*notes = append(*notes, note)
-			}
+		if seenContexts[contextNode.Path] {
+			continue
 		}
-		return nil
-	})
+		seenContexts[contextNode.Path] = true
+
+		// create a dummy context for ListAllNotes
+		wsCtx := &WorkspaceContext{
+			CurrentWorkspace:         ws,
+			NotebookContextWorkspace: contextNode,
+		}
+
+		notes, err := s.ListAllNotes(wsCtx)
+		if err != nil {
+			// don't fail, just log and continue
+			fmt.Fprintf(os.Stderr, "Warning: could not list notes for workspace %s: %v\n", ws.Name, err)
+			continue
+		}
+		allNotes = append(allNotes, notes...)
+	}
+	return allNotes, nil
 }

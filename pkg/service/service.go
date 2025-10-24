@@ -13,7 +13,6 @@ import (
 	coreworkspace "github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/search"
-	"github.com/mattsolo1/grove-notebook/pkg/workspace"
 )
 
 // Service is the core note service
@@ -44,12 +43,6 @@ func New(config *Config, provider *coreworkspace.Provider) (*Service, error) {
 	if err != nil {
 		// Proceed with empty config if none exists (Local Mode)
 		coreCfg = &coreconfig.Config{}
-	}
-
-	// Check for deprecated nb.notebook_dir configuration
-	var nbConfig workspace.NbConfig
-	if err := coreCfg.UnmarshalExtension("nb", &nbConfig); err == nil && nbConfig.NotebookDir != "" {
-		fmt.Fprintln(os.Stderr, "⚠️  Warning: The 'nb.notebook_dir' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
 	}
 
 	notebookLocator := coreworkspace.NewNotebookLocator(coreCfg)
