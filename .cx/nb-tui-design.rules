@@ -8,16 +8,11 @@ main.go
 Makefile
 go.mod
 grove.yml
-!go.sum
 
 # Exclude test files
-!tests/**
-!test/**
 !**/*_test.go
 
-# Exclude docs
-!docs
-
+# Other tuis for inspiration
 @a:grove-ecosystem/**/*.go @find: "tui"
 @a:grove-ecosystem:grove-context/cmd/view
 

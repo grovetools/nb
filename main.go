@@ -26,7 +26,8 @@ func main() {
 	rootCmd.AddCommand(cmd.NewMoveCmd())
 	rootCmd.AddCommand(cmd.NewObsidianCmd())
 	rootCmd.AddCommand(cmd.NewVersionCmd())
-	
+	rootCmd.AddCommand(cmd.NewTuiCmd())
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
