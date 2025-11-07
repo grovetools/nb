@@ -1,7 +1,9 @@
 package browser
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -12,11 +14,29 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
+	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
+	case editFileAndQuitMsg:
+		// Write file path to temp file for Neovim to read
+		// Use session ID from environment if available, otherwise fall back to PID
+		sessionID := os.Getenv("GROVE_NVIM_SESSION_ID")
+		if sessionID == "" {
+			sessionID = fmt.Sprintf("%d", os.Getpid())
+		}
+		tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("grove-nb-edit-%s", sessionID))
+		err := os.WriteFile(tempFile, []byte(msg.filePath+"\n"), 0644)
+		if err != nil {
+			m.statusMessage = fmt.Sprintf("Error writing temp file: %v", err)
+		} else {
+			m.statusMessage = fmt.Sprintf("Wrote to %s", tempFile)
+		}
+		// Don't quit - stay open
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetSize(msg.Width, msg.Height)
@@ -35,9 +55,60 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyFilterAndSort()
 		return m, nil
 
+	case notesArchivedMsg:
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Error archiving notes: %v", msg.err)
+			return m, nil
+		}
+
+		// Create a lookup map of archived paths
+		archivedMap := make(map[string]bool)
+		for _, path := range msg.archivedPaths {
+			archivedMap[path] = true
+		}
+
+		// Filter out archived notes from allNotes
+		newAllNotes := make([]*models.Note, 0)
+		for _, note := range m.allNotes {
+			if !archivedMap[note.Path] {
+				newAllNotes = append(newAllNotes, note)
+			}
+		}
+		m.allNotes = newAllNotes
+
+		// Clear selections
+		m.selected = make(map[string]struct{})
+		m.selectedGroups = make(map[string]struct{})
+
+		// Rebuild the display
+		m.buildDisplayTree()
+		m.applyFilterAndSort()
+
+		if msg.archivedPlans > 0 {
+			m.statusMessage = fmt.Sprintf("Archived %d note(s) and %d plan(s)", len(msg.archivedPaths), msg.archivedPlans)
+		} else {
+			m.statusMessage = fmt.Sprintf("Archived %d note(s)", len(msg.archivedPaths))
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.help.ShowAll {
 			m.help.Toggle()
+			return m, nil
+		}
+
+		// Handle archive confirmation mode
+		if m.confirmingArchive {
+			switch msg.String() {
+			case "y", "Y":
+				m.confirmingArchive = false
+				m.statusMessage = ""
+				return m, m.archiveSelectedNotesCmd()
+			case "n", "N", "esc":
+				m.confirmingArchive = false
+				m.statusMessage = ""
+				return m, nil
+			}
 			return m, nil
 		}
 
@@ -202,13 +273,79 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		case key.Matches(msg, m.keys.Sort):
 			if m.viewMode == tableView {
-				m.sortColumn = (m.sortColumn + 1) % 4
+				m.sortColumn = (m.sortColumn + 1) % 5
 				m.applyFilterAndSort()
 			}
 		case key.Matches(msg, m.keys.ToggleArchives):
 			if m.viewMode == treeView {
 				m.showArchives = !m.showArchives
 				m.buildDisplayTree()
+			}
+		case key.Matches(msg, m.keys.ToggleSelect):
+			// Toggle selection for the current note or plan group
+			if m.viewMode == treeView {
+				if m.cursor < len(m.displayNodes) {
+					node := m.displayNodes[m.cursor]
+					if node.isNote {
+						if _, ok := m.selected[node.note.Path]; ok {
+							delete(m.selected, node.note.Path)
+						} else {
+							m.selected[node.note.Path] = struct{}{}
+						}
+					} else if node.isPlan() {
+						// Allow selection of plan groups
+						groupKey := m.getGroupKey(node)
+						if _, ok := m.selectedGroups[groupKey]; ok {
+							delete(m.selectedGroups, groupKey)
+						} else {
+							m.selectedGroups[groupKey] = struct{}{}
+						}
+					}
+				}
+			} else { // Table view
+				if m.table.Cursor() < len(m.filteredNotes) {
+					note := m.filteredNotes[m.table.Cursor()]
+					if _, ok := m.selected[note.Path]; ok {
+						delete(m.selected, note.Path)
+					} else {
+						m.selected[note.Path] = struct{}{}
+					}
+					m.buildTableRows()
+				}
+			}
+		case key.Matches(msg, m.keys.SelectAll):
+			// Select all visible notes
+			if m.viewMode == treeView {
+				for _, node := range m.displayNodes {
+					if node.isNote {
+						m.selected[node.note.Path] = struct{}{}
+					}
+				}
+			} else { // Table view
+				for _, note := range m.filteredNotes {
+					m.selected[note.Path] = struct{}{}
+				}
+				m.buildTableRows()
+			}
+		case key.Matches(msg, m.keys.SelectNone):
+			// Clear all selections
+			m.selected = make(map[string]struct{})
+			m.selectedGroups = make(map[string]struct{})
+			if m.viewMode == tableView {
+				m.buildTableRows()
+			}
+		case key.Matches(msg, m.keys.Archive):
+			// Archive selected notes and/or plan groups
+			totalSelected := len(m.selected) + len(m.selectedGroups)
+			if totalSelected > 0 {
+				m.confirmingArchive = true
+				if len(m.selected) > 0 && len(m.selectedGroups) > 0 {
+					m.statusMessage = fmt.Sprintf("Archive %d notes and %d plans? (y/N)", len(m.selected), len(m.selectedGroups))
+				} else if len(m.selectedGroups) > 0 {
+					m.statusMessage = fmt.Sprintf("Archive %d plans? (y/N)", len(m.selectedGroups))
+				} else {
+					m.statusMessage = fmt.Sprintf("Archive %d notes? (y/N)", len(m.selected))
+				}
 			}
 		case key.Matches(msg, m.keys.Confirm):
 			if m.ecosystemPickerMode {
@@ -357,6 +494,11 @@ func (m *Model) buildDisplayTree() {
 					// This is an archive group - associate it with its parent
 					parent := strings.TrimSuffix(name, "/.archive")
 					archiveGroups[parent] = append(archiveGroups[parent], name)
+				} else if strings.Contains(name, "/.archive/") {
+					// This is an archived plan or similar - skip if archives are hidden
+					if m.showArchives {
+						regularGroups = append(regularGroups, name)
+					}
 				} else {
 					regularGroups = append(regularGroups, name)
 				}
@@ -383,10 +525,11 @@ func (m *Model) buildDisplayTree() {
 
 				// Add group node
 				groupNode := &displayNode{
-					isGroup:   true,
-					groupName: groupName,
-					prefix:    groupPrefix.String(),
-					depth:     ws.Depth + 1,
+					isGroup:       true,
+					groupName:     groupName,
+					workspaceName: ws.Name,
+					prefix:        groupPrefix.String(),
+					depth:         ws.Depth + 1,
 				}
 				nodes = append(nodes, groupNode)
 
@@ -431,10 +574,11 @@ func (m *Model) buildDisplayTree() {
 						archivePrefix.WriteString("└─ ")
 
 						archiveNode := &displayNode{
-							isGroup:   true,
-							groupName: ".archive",
-							prefix:    archivePrefix.String(),
-							depth:     ws.Depth + 2,
+							isGroup:       true,
+							groupName:     ".archive",
+							workspaceName: ws.Name,
+							prefix:        archivePrefix.String(),
+							depth:         ws.Depth + 2,
 						}
 						nodes = append(nodes, archiveNode)
 
@@ -490,9 +634,10 @@ func (m *Model) getViewportHeight() int {
 	// - Header: 1 line
 	// - Blank line after header: 1 line
 	// - Blank line before footer: 1 line
+	// - Status bar: 1 line
 	// - Footer (help): 1 line
 	// - Scroll indicator (when shown): 2 lines (blank + indicator)
-	const fixedLines = 7
+	const fixedLines = 8
 	availableHeight := m.height - fixedLines
 	if availableHeight < 1 {
 		return 1
@@ -548,13 +693,15 @@ func (m *Model) applyFilterAndSort() {
 		a, b := m.filteredNotes[i], m.filteredNotes[j]
 		var less bool
 		switch m.sortColumn {
-		case 0: // Workspace
+		case 0: // Selection indicator (no sorting)
+			return false
+		case 1: // Workspace
 			less = strings.ToLower(a.Workspace) < strings.ToLower(b.Workspace)
-		case 1: // Type
+		case 2: // Type
 			less = strings.ToLower(string(a.Type)) < strings.ToLower(string(b.Type))
-		case 2: // Title
+		case 3: // Title
 			less = strings.ToLower(a.Title) < strings.ToLower(b.Title)
-		default: // Modified (case 3)
+		default: // Modified (case 4)
 			less = a.ModifiedAt.Before(b.ModifiedAt)
 		}
 		if m.sortAsc {
@@ -570,7 +717,12 @@ func (m *Model) applyFilterAndSort() {
 func (m *Model) buildTableRows() {
 	rows := make([]table.Row, len(m.filteredNotes))
 	for i, note := range m.filteredNotes {
+		selIndicator := " "
+		if _, ok := m.selected[note.Path]; ok {
+			selIndicator = "✓"
+		}
 		rows[i] = table.Row{
+			selIndicator,
 			note.Workspace,
 			string(note.Type),
 			note.Title,
@@ -638,4 +790,157 @@ func (m *Model) closeAllFolds() {
 func (m *Model) openAllFolds() {
 	m.collapsedNodes = make(map[string]bool)
 	m.buildDisplayTree()
+}
+
+// getGroupKey returns a unique key for a group node (workspace:groupName)
+func (m *Model) getGroupKey(node *displayNode) string {
+	return node.workspaceName + ":" + node.groupName
+}
+
+// archivePlanDirectory moves a plan directory to the .archive subdirectory
+// and returns the paths of all notes that were in the plan directory
+func (m *Model) archivePlanDirectory(ctx *service.WorkspaceContext, planGroup string) ([]string, error) {
+	// planGroup is like "plans/my-plan"
+	// We need to move it to "plans/.archive/my-plan"
+
+	// Get the plans base directory
+	plansBaseDir, err := m.service.GetNotebookLocator().GetPlansDir(ctx.NotebookContextWorkspace)
+	if err != nil {
+		return nil, fmt.Errorf("get plans directory: %w", err)
+	}
+
+	// Extract plan name from group (remove "plans/" prefix)
+	planName := strings.TrimPrefix(planGroup, "plans/")
+
+	// Source path: plans/<planName>
+	sourcePath := filepath.Join(plansBaseDir, planName)
+
+	// Collect paths of notes in this plan directory
+	var notePaths []string
+	for _, note := range m.allNotes {
+		if strings.HasPrefix(note.Path, sourcePath+string(filepath.Separator)) {
+			notePaths = append(notePaths, note.Path)
+		}
+	}
+
+	// Create archive directory if it doesn't exist
+	archiveDir := filepath.Join(plansBaseDir, ".archive")
+	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+		return nil, fmt.Errorf("create archive directory: %w", err)
+	}
+
+	// Destination path: plans/.archive/<planName>
+	destPath := filepath.Join(archiveDir, planName)
+
+	// Check if destination already exists, if so append timestamp
+	if _, err := os.Stat(destPath); err == nil {
+		// Destination exists, create unique name with timestamp
+		timestamp := time.Now().Format("20060102150405")
+		destPath = filepath.Join(archiveDir, fmt.Sprintf("%s-%s", planName, timestamp))
+	}
+
+	// Move the plan directory
+	if err := os.Rename(sourcePath, destPath); err != nil {
+		return nil, fmt.Errorf("move plan directory: %w", err)
+	}
+
+	return notePaths, nil
+}
+
+// archiveSelectedNotesCmd creates a command to archive the selected notes and plan groups
+func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Group notes by workspace
+		notesByWorkspace := make(map[string][]*models.Note)
+		for _, note := range m.allNotes {
+			if _, ok := m.selected[note.Path]; ok {
+				notesByWorkspace[note.Workspace] = append(notesByWorkspace[note.Workspace], note)
+			}
+		}
+
+		var archivedPaths []string
+		var archivedPlans int
+		var archiveErr error
+
+		// Archive notes workspace by workspace
+		for workspaceName, notes := range notesByWorkspace {
+			// Get workspace context
+			wsCtx, err := m.service.GetWorkspaceContext(workspaceName)
+			if err != nil {
+				archiveErr = fmt.Errorf("failed to get workspace context for %s: %w", workspaceName, err)
+				break
+			}
+
+			// Extract paths from notes
+			paths := make([]string, len(notes))
+			for i, note := range notes {
+				paths[i] = note.Path
+			}
+
+			// Archive the notes
+			if err := m.service.ArchiveNotes(wsCtx, paths); err != nil {
+				archiveErr = fmt.Errorf("failed to archive notes in workspace %s: %w", workspaceName, err)
+				break
+			}
+
+			archivedPaths = append(archivedPaths, paths...)
+		}
+
+		// Archive selected plan groups
+		if archiveErr == nil && len(m.selectedGroups) > 0 {
+			// Group plans by workspace
+			plansByWorkspace := make(map[string][]string)
+			for groupKey := range m.selectedGroups {
+				parts := strings.SplitN(groupKey, ":", 2)
+				if len(parts) == 2 {
+					workspaceName := parts[0]
+					groupName := parts[1]
+					plansByWorkspace[workspaceName] = append(plansByWorkspace[workspaceName], groupName)
+				}
+			}
+
+			// Archive plans workspace by workspace
+			for workspaceName, planNames := range plansByWorkspace {
+				// Find the workspace node by name
+				var wsNode *workspace.WorkspaceNode
+				for _, node := range m.service.GetWorkspaceProvider().All() {
+					if node.Name == workspaceName {
+						wsNode = node
+						break
+					}
+				}
+				if wsNode == nil {
+					archiveErr = fmt.Errorf("workspace not found: %s", workspaceName)
+					break
+				}
+
+				wsCtx, err := m.service.GetWorkspaceContext(wsNode.Path)
+				if err != nil {
+					archiveErr = fmt.Errorf("failed to get workspace context for %s: %w", workspaceName, err)
+					break
+				}
+
+				for _, planName := range planNames {
+					// Archive the plan directory and collect archived note paths
+					planNotePaths, err := m.archivePlanDirectory(wsCtx, planName)
+					if err != nil {
+						archiveErr = fmt.Errorf("failed to archive plan %s in workspace %s: %w", planName, workspaceName, err)
+						break
+					}
+					archivedPaths = append(archivedPaths, planNotePaths...)
+					archivedPlans++
+				}
+
+				if archiveErr != nil {
+					break
+				}
+			}
+		}
+
+		return notesArchivedMsg{
+			archivedPaths: archivedPaths,
+			archivedPlans: archivedPlans,
+			err:           archiveErr,
+		}
+	}
 }

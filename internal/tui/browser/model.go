@@ -3,6 +3,7 @@ package browser
 import (
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -26,9 +27,10 @@ type displayNode struct {
 	isGroup     bool
 	isNote      bool
 
-	workspace *workspace.WorkspaceNode
-	groupName string
-	note      *models.Note
+	workspace     *workspace.WorkspaceNode
+	groupName     string
+	workspaceName string // For groups, tracks which workspace they belong to
+	note          *models.Note
 
 	// Pre-calculated for rendering
 	prefix  string
@@ -49,6 +51,19 @@ func (n *displayNode) nodeID() string {
 // isFoldable returns true if this node can be collapsed/expanded
 func (n *displayNode) isFoldable() bool {
 	return n.isWorkspace || n.isGroup
+}
+
+// groupKey returns a unique key for this group (for selection tracking)
+func (n *displayNode) groupKey() string {
+	if n.isGroup {
+		return n.workspaceName + ":" + n.groupName
+	}
+	return ""
+}
+
+// isPlan returns true if this group represents a plan directory
+func (n *displayNode) isPlan() bool {
+	return n.isGroup && strings.HasPrefix(n.groupName, "plans/")
 }
 
 // Model is the main model for the notebook browser TUI
@@ -77,6 +92,20 @@ type Model struct {
 	// Focus mode state
 	ecosystemPickerMode bool
 	focusedWorkspace    *workspace.WorkspaceNode
+
+	// Selection and archiving state
+	selected          map[string]struct{} // Tracks selected note paths
+	selectedGroups    map[string]struct{} // Tracks selected groups (workspace:groupName)
+	statusMessage     string
+	confirmingArchive bool
+
+	// File to edit when running in Neovim plugin mode
+	fileToEdit string
+}
+
+// FileToEdit returns the file path that should be edited (for Neovim integration)
+func (m Model) FileToEdit() string {
+	return m.fileToEdit
 }
 
 // New creates a new TUI model.
@@ -88,6 +117,7 @@ func New(svc *service.Service) Model {
 
 	// Define table columns
 	columns := []table.Column{
+		{Title: " ", Width: 3}, // Selection indicator
 		{Title: "WORKSPACE", Width: 20},
 		{Title: "TYPE", Width: 15},
 		{Title: "TITLE", Width: 40},
@@ -111,10 +141,12 @@ func New(svc *service.Service) Model {
 		viewMode:       treeView, // Default to tree view
 		table:          tbl,
 		filterInput:    ti,
-		sortColumn:     3,    // Default sort by modified date
-		sortAsc:        false, // Descending
+		sortColumn:     4,                           // Default sort by modified date (adjusted for new column)
+		sortAsc:        false,                       // Descending
 		jumpMap:        make(map[rune]int),
 		collapsedNodes: make(map[string]bool),
+		selected:       make(map[string]struct{}),  // Initialize selection map
+		selectedGroups: make(map[string]struct{}),  // Initialize group selection map
 	}
 }
 
@@ -131,6 +163,13 @@ type editorFinishedMsg struct{ err error }
 
 // editFileAndQuitMsg signals to quit and let neovim plugin handle opening
 type editFileAndQuitMsg struct{ filePath string }
+
+// notesArchivedMsg is sent when notes and/or plans have been archived
+type notesArchivedMsg struct {
+	archivedPaths []string
+	archivedPlans int
+	err           error
+}
 
 // openInEditor opens a note in the configured editor
 func (m Model) openInEditor(path string) tea.Cmd {
