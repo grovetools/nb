@@ -19,6 +19,7 @@ type KeyMap struct {
 	GoToTop         key.Binding
 	GoToBottom      key.Binding
 	FoldPrefix      key.Binding // z key for fold commands
+	ToggleArchives  key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -74,5 +75,9 @@ var keys = KeyMap{
 	FoldPrefix: key.NewBinding(
 		key.WithKeys("z"),
 		key.WithHelp("z", "fold commands (za/zo/zc/zM/zR)"),
+	),
+	ToggleArchives: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "toggle archives"),
 	),
 }

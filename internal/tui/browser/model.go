@@ -72,6 +72,7 @@ type Model struct {
 	jumpMap        map[rune]int
 	lastKey        string // For detecting 'gg' and 'z' sequences
 	collapsedNodes map[string]bool // Tracks collapsed workspaces and groups
+	showArchives   bool            // Whether to show .archive directories
 
 	// Focus mode state
 	ecosystemPickerMode bool

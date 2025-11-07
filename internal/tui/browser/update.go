@@ -205,6 +205,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sortColumn = (m.sortColumn + 1) % 4
 				m.applyFilterAndSort()
 			}
+		case key.Matches(msg, m.keys.ToggleArchives):
+			if m.viewMode == treeView {
+				m.showArchives = !m.showArchives
+				m.buildDisplayTree()
+			}
 		case key.Matches(msg, m.keys.Confirm):
 			if m.ecosystemPickerMode {
 				if m.viewMode == treeView && m.cursor < len(m.displayNodes) {
@@ -336,15 +341,23 @@ func (m *Model) buildDisplayTree() {
 		}
 
 		if noteGroups, ok := notesByWorkspace[ws.Name]; ok {
-			// Sort group names (note types) for consistent order
-			var groupNames []string
-			for name := range noteGroups {
-				groupNames = append(groupNames, name)
-			}
-			sort.Strings(groupNames)
+			// Separate archive groups from regular groups
+			var regularGroups []string
+			archiveGroups := make(map[string][]string) // parent -> archive path
 
-			for i, groupName := range groupNames {
-				isLastGroup := i == len(groupNames)-1
+			for name := range noteGroups {
+				if strings.HasSuffix(name, "/.archive") {
+					// This is an archive group - associate it with its parent
+					parent := strings.TrimSuffix(name, "/.archive")
+					archiveGroups[parent] = append(archiveGroups[parent], name)
+				} else {
+					regularGroups = append(regularGroups, name)
+				}
+			}
+			sort.Strings(regularGroups)
+
+			for i, groupName := range regularGroups {
+				isLastGroup := i == len(regularGroups)-1
 				notesInGroup := noteGroups[groupName]
 
 				// Calculate group prefix
@@ -377,8 +390,10 @@ func (m *Model) buildDisplayTree() {
 				}
 
 				// Add note nodes
+				hasArchive := len(archiveGroups[groupName]) > 0 && m.showArchives
+
 				for j, note := range notesInGroup {
-					isLastNote := j == len(notesInGroup)-1
+					isLastNote := j == len(notesInGroup)-1 && !hasArchive
 					var notePrefix strings.Builder
 					noteIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
 					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
@@ -394,6 +409,54 @@ func (m *Model) buildDisplayTree() {
 						prefix: notePrefix.String(),
 						depth:  ws.Depth + 2,
 					})
+				}
+
+				// Add archive subgroup if it exists and archives are visible
+				if hasArchive {
+					for _, archiveName := range archiveGroups[groupName] {
+						archiveNotes := noteGroups[archiveName]
+
+						// Calculate archive prefix
+						var archivePrefix strings.Builder
+						archiveIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
+						archiveIndent = strings.ReplaceAll(archiveIndent, "└─", "  ")
+						archivePrefix.WriteString(archiveIndent)
+						archivePrefix.WriteString("└─ ")
+
+						archiveNode := &displayNode{
+							isGroup:   true,
+							groupName: ".archive",
+							prefix:    archivePrefix.String(),
+							depth:     ws.Depth + 2,
+						}
+						nodes = append(nodes, archiveNode)
+
+						// Skip archive notes if collapsed
+						archiveNodeID := archiveNode.nodeID()
+						if m.collapsedNodes[archiveNodeID] {
+							continue
+						}
+
+						// Add archive note nodes
+						for k, note := range archiveNotes {
+							isLastArchiveNote := k == len(archiveNotes)-1
+							var archiveNotePrefix strings.Builder
+							archiveNoteIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
+							archiveNoteIndent = strings.ReplaceAll(archiveNoteIndent, "└─", "  ")
+							archiveNotePrefix.WriteString(archiveNoteIndent)
+							if isLastArchiveNote {
+								archiveNotePrefix.WriteString("└─ ")
+							} else {
+								archiveNotePrefix.WriteString("├─ ")
+							}
+							nodes = append(nodes, &displayNode{
+								isNote: true,
+								note:   note,
+								prefix: archiveNotePrefix.String(),
+								depth:  ws.Depth + 3,
+							})
+						}
+					}
 				}
 			}
 		}
