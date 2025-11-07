@@ -70,7 +70,7 @@ func TestParseNoteWithoutFrontmatter(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a nested structure for global workspace
-	noteDir := filepath.Join(tempDir, "nb", "global", "quick")
+	noteDir := filepath.Join(tempDir, "nb", "global", "notes", "quick")
 	err := os.MkdirAll(noteDir, 0755)
 	require.NoError(t, err)
 

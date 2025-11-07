@@ -201,25 +201,25 @@ func printNotesTable(notes []*models.Note) {
 
 func getNoteTypeIcon(noteType models.NoteType) string {
 	switch noteType {
-	case models.NoteTypeCurrent:
+	case "current":
 		return "📝"
-	case models.NoteTypeLLM:
+	case "llm":
 		return "🤖"
-	case models.NoteTypeLearn:
+	case "learn":
 		return "📚"
-	case models.NoteTypeDaily:
+	case "daily":
 		return "📅"
-	case models.NoteTypeIssues:
+	case "issues":
 		return "🐛"
-	case models.NoteTypeArchitecture:
+	case "architecture":
 		return "🏗️"
-	case models.NoteTypeTodos:
+	case "todos":
 		return "✅"
-	case models.NoteTypeQuick:
+	case "quick":
 		return "⚡"
-	case models.NoteTypeBlog:
+	case "blog":
 		return "✍️"
-	case models.NoteTypePrompts:
+	case "prompts":
 		return "💡"
 	default:
 		return "📄"
@@ -228,25 +228,25 @@ func getNoteTypeIcon(noteType models.NoteType) string {
 
 func getTypeAbbreviation(noteType models.NoteType) string {
 	switch noteType {
-	case models.NoteTypeCurrent:
+	case "current":
 		return "cur"
-	case models.NoteTypeLLM:
+	case "llm":
 		return "llm"
-	case models.NoteTypeLearn:
+	case "learn":
 		return "lrn"
-	case models.NoteTypeDaily:
+	case "daily":
 		return "dly"
-	case models.NoteTypeIssues:
+	case "issues":
 		return "iss"
-	case models.NoteTypeArchitecture:
+	case "architecture":
 		return "arc"
-	case models.NoteTypeTodos:
+	case "todos":
 		return "tdo"
-	case models.NoteTypeQuick:
+	case "quick":
 		return "qui"
-	case models.NoteTypeBlog:
+	case "blog":
 		return "blg"
-	case models.NoteTypePrompts:
+	case "prompts":
 		return "pmt"
 	default:
 		// For unknown types, take first 3 chars

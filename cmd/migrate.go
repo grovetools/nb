@@ -10,6 +10,7 @@ import (
 
 	"github.com/mattsolo1/grove-notebook/cmd/config"
 	"github.com/mattsolo1/grove-notebook/pkg/migration"
+	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
 const (
@@ -38,6 +39,7 @@ func NewMigrateCmd() *cobra.Command {
 		migrateVerbose     bool
 		migrateShowReport  bool
 		migrateNoBackup    bool
+		migrateStructure   bool
 	)
 
 	cmd := &cobra.Command{
@@ -60,6 +62,11 @@ Examples:
 				return err
 			}
 			defer svc.Close()
+
+			// Handle structural migration separately
+			if migrateStructure {
+				return runStructuralMigration(svc, migrateDryRun, migrateVerbose, migrateShowReport)
+			}
 
 			if migrateAll {
 				fixTitles = true
@@ -123,6 +130,7 @@ Examples:
 		},
 	}
 
+	cmd.Flags().BoolVar(&migrateStructure, "structure", false, "Migrate from old repos/{workspace}/{branch} structure to new notebooks structure")
 	cmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Show what would be changed without modifying")
 	cmd.Flags().BoolVar(&migrateForce, "force", false, "Overwrite existing frontmatter")
 	cmd.Flags().BoolVar(&migrateRecursive, "recursive", true, "Process directories recursively")
@@ -178,4 +186,44 @@ func printMigrationReport(report *migration.MigrationReport, dryRun bool) {
 	if dryRun {
 		fmt.Println("\nDry run complete. No files were modified.")
 	}
+}
+
+func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bool) error {
+	basePath := filepath.Join(os.Getenv("HOME"), "Documents", "nb")
+
+	options := migration.MigrationOptions{
+		DryRun:     dryRun,
+		Verbose:    verbose,
+		ShowReport: showReport,
+	}
+
+	// Get workspace provider and locator from service
+	provider := svc.GetWorkspaceProvider()
+	locator := svc.GetNotebookLocator()
+	index := svc.Index
+
+	sm := migration.NewStructuralMigration(basePath, locator, index, provider, options, os.Stdout)
+
+	if !dryRun {
+		fmt.Println("⚠️  WARNING: This will migrate notes from the old repos/ structure to the new notebooks/ structure.")
+		fmt.Println("   Files will be moved and the old structure will be removed.")
+		fmt.Print("\nContinue? [y/N] ")
+		var response string
+		_, _ = fmt.Scanln(&response)
+		if strings.ToLower(response) != "y" {
+			fmt.Println("Cancelled")
+			return nil
+		}
+	}
+
+	if err := sm.MigrateStructure(); err != nil {
+		return fmt.Errorf("structural migration failed: %w", err)
+	}
+
+	report := sm.GetReport()
+	if showReport {
+		printMigrationReport(report, dryRun)
+	}
+
+	return nil
 }

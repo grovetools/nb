@@ -21,6 +21,7 @@ type Service struct {
 	notebookLocator   *coreworkspace.NotebookLocator
 	Index             *search.Index
 	Config            *Config
+	CoreConfig        *coreconfig.Config
 }
 
 // Config holds service configuration
@@ -52,7 +53,18 @@ func New(config *Config, provider *coreworkspace.Provider) (*Service, error) {
 		notebookLocator:   notebookLocator,
 		Index:             index,
 		Config:            config,
+		CoreConfig:        coreCfg,
 	}, nil
+}
+
+// GetWorkspaceProvider returns the workspace provider
+func (s *Service) GetWorkspaceProvider() *coreworkspace.Provider {
+	return s.workspaceProvider
+}
+
+// GetNotebookLocator returns the notebook locator
+func (s *Service) GetNotebookLocator() *coreworkspace.NotebookLocator {
+	return s.notebookLocator
 }
 
 // CreateNote creates a new note in the specified workspace context
@@ -88,9 +100,9 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 
 	// Generate filename
 	var filename string
-	if noteType == models.NoteTypeQuick {
+	if noteType == "quick" {
 		filename = time.Now().Format("150405") + "-quick.md"
-	} else if noteType == models.NoteTypeDaily {
+	} else if noteType == "daily" {
 		filename = time.Now().Format("20060102") + "-daily.md"
 		if title == "" {
 			title = "Daily Note: " + time.Now().Format("2006-01-02")
@@ -102,7 +114,22 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 
 	// Create note content
 	template := s.Config.Templates[string(noteType)]
-	content := CreateNoteContent(noteType, title, currentContext.NotebookContextWorkspace.Name, currentContext.Branch, currentContext.CurrentWorkspace.Name, template)
+
+	// Look up user-defined note type configuration from core config
+	var noteTypeConfig *coreconfig.NoteTypeConfig
+	if s.CoreConfig != nil && s.CoreConfig.Notebooks != nil {
+		if notebook, ok := s.CoreConfig.Notebooks["default"]; ok && notebook.Types != nil {
+			noteTypeConfig = notebook.Types[string(noteType)]
+		}
+	}
+
+	// Get worktree name using the proper workspace model method
+	worktreeName := ""
+	if currentContext.CurrentWorkspace != nil {
+		worktreeName = currentContext.CurrentWorkspace.GetWorktreeName()
+	}
+
+	content := CreateNoteContent(noteType, title, currentContext.NotebookContextWorkspace.Name, currentContext.Branch, worktreeName, currentContext.CurrentWorkspace.Name, template, noteTypeConfig)
 
 	// Write file
 	if err := os.WriteFile(notePath, []byte(content), 0644); err != nil {
@@ -219,7 +246,7 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
 				if len(parts) > 1 {
 					note.Type = models.NoteType(strings.Join(parts[:len(parts)-1], "/"))
 				} else if len(parts) == 1 {
-					note.Type = models.NoteTypeQuick
+					note.Type = "quick"
 				}
 				notes = append(notes, note)
 			}

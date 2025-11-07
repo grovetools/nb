@@ -51,7 +51,7 @@ func TestSimpleListNotes(t *testing.T) {
 			note := &models.Note{
 				Path:  path,
 				Title: strings.TrimSuffix(info.Name(), ".md"),
-				Type:  models.NoteTypeCurrent,
+				Type:  "current",
 			}
 			notes = append(notes, note)
 		}

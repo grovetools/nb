@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mattsolo1/grove-notebook/cmd/config"
-	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
@@ -43,7 +42,7 @@ Examples:
 			title := time.Now().Format("2006-01-02-150405") + "-quick"
 
 			// Create the note without opening editor in the quick directory
-			note, err := svc.CreateNote(ctx, models.NoteTypeQuick, title, service.WithoutEditor())
+			note, err := svc.CreateNote(ctx, "quick", title, service.WithoutEditor())
 			if err != nil {
 				return err
 			}

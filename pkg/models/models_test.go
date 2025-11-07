@@ -10,16 +10,16 @@ func TestNoteTypeValidation(t *testing.T) {
 		noteType NoteType
 		isValid  bool
 	}{
-		{NoteTypeCurrent, true},
-		{NoteTypeQuick, true},
-		{NoteTypeLLM, true},
-		{NoteTypeLearn, true},
-		{NoteTypeDaily, true},
-		{NoteTypeIssues, true},
-		{NoteTypeArchitecture, true},
-		{NoteTypeTodos, true},
-		{NoteTypeBlog, true},
-		{NoteTypePrompts, true},
+		{"current", true},
+		{"quick", true},
+		{"llm", true},
+		{"learn", true},
+		{"daily", true},
+		{"issues", true},
+		{"architecture", true},
+		{"todos", true},
+		{"blog", true},
+		{"prompts", true},
 		{NoteType("invalid"), false},
 		{NoteType(""), false},
 	}
@@ -38,7 +38,7 @@ func TestNoteFields(t *testing.T) {
 	note := &Note{
 		Path:       "/path/to/note.md",
 		Title:      "Test Note",
-		Type:       NoteTypeCurrent,
+		Type:       "current",
 		Content:    "This is test content",
 		CreatedAt:  time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC),
 		ModifiedAt: time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC),
@@ -54,7 +54,7 @@ func TestNoteFields(t *testing.T) {
 		t.Errorf("Expected title 'Test Note', got %s", note.Title)
 	}
 
-	if note.Type != NoteTypeCurrent {
+	if note.Type != "current" {
 		t.Errorf("Expected type 'current', got %s", note.Type)
 	}
 
@@ -68,7 +68,7 @@ func TestNoteWithMetadata(t *testing.T) {
 	note := &Note{
 		Path:       "/test/note.md",
 		Title:      "Metadata Test",
-		Type:       NoteTypeTodos,
+		Type:       "todos",
 		CreatedAt:  now,
 		ModifiedAt: now.Add(24 * time.Hour),
 		WordCount:  100,
@@ -124,16 +124,16 @@ func TestEmptyNote(t *testing.T) {
 // Helper functions for testing
 func isValidNoteType(nt NoteType) bool {
 	validTypes := []NoteType{
-		NoteTypeCurrent,
-		NoteTypeQuick,
-		NoteTypeLLM,
-		NoteTypeLearn,
-		NoteTypeDaily,
-		NoteTypeIssues,
-		NoteTypeArchitecture,
-		NoteTypeTodos,
-		NoteTypeBlog,
-		NoteTypePrompts,
+		"current",
+		"quick",
+		"llm",
+		"learn",
+		"daily",
+		"issues",
+		"architecture",
+		"todos",
+		"blog",
+		"prompts",
 	}
 
 	for _, valid := range validTypes {

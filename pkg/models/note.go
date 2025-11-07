@@ -5,19 +5,6 @@ import "time"
 // NoteType represents the type of note
 type NoteType string
 
-const (
-	NoteTypeCurrent      NoteType = "current"
-	NoteTypeLLM          NoteType = "llm"
-	NoteTypeLearn        NoteType = "learn"
-	NoteTypeDaily        NoteType = "daily"
-	NoteTypeIssues       NoteType = "issues"
-	NoteTypeArchitecture NoteType = "architecture"
-	NoteTypeTodos        NoteType = "todos"
-	NoteTypeQuick        NoteType = "quick"
-	NoteTypeBlog         NoteType = "blog"
-	NoteTypePrompts      NoteType = "prompts"
-)
-
 // Note represents a note file
 type Note struct {
 	Path       string    `json:"path"`

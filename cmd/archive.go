@@ -82,15 +82,15 @@ Examples:
 			} else if olderThan > 0 {
 				// Find old notes to archive across all note types
 				noteTypes := []models.NoteType{
-					models.NoteTypeCurrent,
-					models.NoteTypeLLM,
-					models.NoteTypeLearn,
-					models.NoteTypeDaily,
-					models.NoteTypeIssues,
-					models.NoteTypeArchitecture,
-					models.NoteTypeTodos,
-					models.NoteTypeBlog,
-					models.NoteTypePrompts,
+					"current",
+					"llm",
+					"learn",
+					"daily",
+					"issues",
+					"architecture",
+					"todos",
+					"blog",
+					"prompts",
 				}
 
 				cutoff := time.Now().AddDate(0, 0, -olderThan)

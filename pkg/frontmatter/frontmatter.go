@@ -19,6 +19,7 @@ type Frontmatter struct {
 	Tags       []string `yaml:"tags,flow"`
 	Repository string   `yaml:"repository,omitempty"`
 	Branch     string   `yaml:"branch,omitempty"`
+	Worktree   string   `yaml:"worktree,omitempty"`
 	Created    string   `yaml:"created"`
 	Modified   string   `yaml:"modified"`
 	Started    string   `yaml:"started,omitempty"` // For LLM notes
@@ -76,6 +77,9 @@ func Build(fm *Frontmatter) string {
 	}
 	if fm.Branch != "" {
 		sb.WriteString(fmt.Sprintf("branch: %s\n", fm.Branch))
+	}
+	if fm.Worktree != "" {
+		sb.WriteString(fmt.Sprintf("worktree: %s\n", fm.Worktree))
 	}
 
 	// Timestamps

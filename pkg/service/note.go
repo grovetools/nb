@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	coreconfig "github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 )
@@ -151,16 +152,6 @@ func containsTodos(content string) bool {
 
 // NoteContentGenerator defines the function signature for note content generators
 type NoteContentGenerator func(title, workspace, branch string, tags []string, now time.Time, timestampStr string) string
-
-// noteContentGenerators maps note types to their content generator functions
-var noteContentGenerators = map[models.NoteType]NoteContentGenerator{
-	models.NoteTypeQuick:   generateQuickContent,
-	models.NoteTypeLLM:     generateLLMContent,
-	models.NoteTypeDaily:   generateDailyContent,
-	models.NoteTypeLearn:   generateLearnContent,
-	models.NoteTypeBlog:    generateBlogContent,
-	models.NoteTypePrompts: generatePromptsContent,
-}
 
 // generateQuickContent creates content for quick notes
 func generateQuickContent(title, workspace, branch string, tags []string, now time.Time, timestampStr string) string {
@@ -347,7 +338,7 @@ func generatePromptsContent(title, workspace, branch string, tags []string, now 
 }
 
 // generateDefaultContent creates content for all other note types
-func generateDefaultContent(title, workspace, branch string, tags []string, now time.Time, timestampStr string) string {
+func generateDefaultContent(title, workspace, branch, worktree string, tags []string, now time.Time, timestampStr string) string {
 	id := GenerateNoteID(title)
 	fm := &frontmatter.Frontmatter{
 		ID:       id,
@@ -364,6 +355,9 @@ func generateDefaultContent(title, workspace, branch string, tags []string, now 
 		if branch != "" {
 			fm.Branch = branch
 		}
+		if worktree != "" {
+			fm.Worktree = worktree
+		}
 	}
 
 	body := fmt.Sprintf("# %s\n\n", title)
@@ -371,12 +365,35 @@ func generateDefaultContent(title, workspace, branch string, tags []string, now 
 }
 
 // CreateNoteContent generates initial note content based on type and template
-func CreateNoteContent(noteType models.NoteType, title, workspace, branch, currentWorkspaceName string, template string) string {
+// If noteTypeConfig is provided with a TemplatePath, it reads from that file.
+// Otherwise, it falls back to generating default content.
+func CreateNoteContent(noteType models.NoteType, title, workspace, branch, worktree, currentWorkspaceName string, template string, noteTypeConfig *coreconfig.NoteTypeConfig) string {
 	// Extract path components for tags
 	pathTags := frontmatter.ExtractPathTags(string(noteType))
 
 	// Merge path tags with current workspace name
 	allTags := frontmatter.MergeTags(pathTags, []string{currentWorkspaceName})
+
+	// Check if user provided a custom template path via configuration
+	if noteTypeConfig != nil && noteTypeConfig.TemplatePath != "" {
+		if content, err := os.ReadFile(noteTypeConfig.TemplatePath); err == nil {
+			// Simple template variable replacement
+			replacements := map[string]string{
+				"{{.Title}}":     title,
+				"{{.Timestamp}}": time.Now().Format("2006-01-02 15:04:05"),
+				"{{.Date}}":      time.Now().Format("2006-01-02"),
+				"{{.Workspace}}": workspace,
+				"{{.Branch}}":    branch,
+			}
+
+			result := string(content)
+			for key, value := range replacements {
+				result = strings.ReplaceAll(result, key, value)
+			}
+			return result
+		}
+		// If template file read fails, fall through to default generation
+	}
 
 	if template != "" {
 		// Simple template variable replacement
@@ -399,13 +416,8 @@ func CreateNoteContent(noteType models.NoteType, title, workspace, branch, curre
 	now := time.Now()
 	timestampStr := frontmatter.FormatTimestamp(now)
 
-	// Look up the generator function
-	if generator, ok := noteContentGenerators[noteType]; ok {
-		return generator(title, workspace, branch, allTags, now, timestampStr)
-	}
-
-	// Fallback to default generator if the type is not in the map
-	return generateDefaultContent(title, workspace, branch, allTags, now, timestampStr)
+	// Fallback to default generator
+	return generateDefaultContent(title, workspace, branch, worktree, allTags, now, timestampStr)
 }
 
 // GetNoteMetadata extracts metadata from note path
@@ -415,18 +427,35 @@ func GetNoteMetadata(path string) (workspaceIdentifier, branch, noteType string)
 	for i, part := range parts {
 		if part == "nb" && i+1 < len(parts) {
 			if parts[i+1] == globalWorkspace {
-				// Path: .../nb/global/TYPE/.../file.md
-				if i+2 < len(parts) {
+				// Path: .../nb/global/notes/TYPE/.../file.md
+				if i+2 < len(parts) && parts[i+2] == "notes" && i+3 < len(parts) {
 					// Find where the filename starts (contains .md)
-					for j := len(parts) - 1; j >= i+2; j-- {
+					for j := len(parts) - 1; j >= i+3; j-- {
 						if strings.HasSuffix(parts[j], ".md") {
-							noteType = strings.Join(parts[i+2:j], "/")
+							noteType = strings.Join(parts[i+3:j], "/")
 							return "global", "", noteType
 						}
 					}
 				}
 				return "global", "", "" // Note directly in global
 			}
+			if parts[i+1] == "notebooks" && i+2 < len(parts) {
+				// Path: .../nb/notebooks/IDENTIFIER/notes/TYPE/.../file.md
+				workspaceIdentifier = parts[i+2]
+
+				// Check if this is a notes path
+				if i+3 < len(parts) && parts[i+3] == "notes" && i+4 < len(parts) {
+					// Find where the filename starts
+					for j := len(parts) - 1; j >= i+4; j-- {
+						if strings.HasSuffix(parts[j], ".md") {
+							noteType = strings.Join(parts[i+4:j], "/")
+							return workspaceIdentifier, "", noteType
+						}
+					}
+				}
+				return workspaceIdentifier, "", "" // Note directly in workspace dir
+			}
+			// Legacy support for old path structure
 			if parts[i+1] == "repos" && i+3 < len(parts) {
 				// Path: .../nb/repos/IDENTIFIER/BRANCH/TYPE/.../file.md
 				workspaceIdentifier = parts[i+2]
