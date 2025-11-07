@@ -26,24 +26,30 @@ func (m Model) View() string {
 	}
 
 	// Header
-	var header strings.Builder
+	var header string
 	if m.ecosystemPickerMode {
-		header.WriteString(theme.DefaultTheme.Info.Render("[Select Ecosystem to Focus]"))
+		header = theme.DefaultTheme.Info.Render("[Select Ecosystem to Focus]")
 	} else if m.focusedWorkspace != nil {
 		focusIndicator := theme.DefaultTheme.Info.Render(
 			fmt.Sprintf("[Focus: %s]", m.focusedWorkspace.Name))
-		header.WriteString(focusIndicator)
+		header = focusIndicator
 	} else {
-		header.WriteString(theme.DefaultTheme.Header.Render("Notebook Browser"))
+		header = theme.DefaultTheme.Header.Render("Notebook Browser")
 	}
 
-	var output strings.Builder
-	output.WriteString(header.String())
-	output.WriteString("\n\n")
-	output.WriteString(viewContent)
-	output.WriteString("\n")
-	output.WriteString(m.help.View())
-	return output.String()
+	footer := m.help.View()
+
+	// Combine components vertically
+	fullView := lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		"", // This adds a blank line for spacing
+		viewContent,
+		"", // Another blank line for spacing
+		footer,
+	)
+
+	// Add top margin to prevent border cutoff
+	return "\n" + fullView
 }
 
 func (m Model) renderTreeView() string {

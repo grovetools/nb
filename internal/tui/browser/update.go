@@ -307,9 +307,16 @@ func (m *Model) buildDisplayTree() {
 	m.jumpMap = make(map[rune]int)
 	jumpCounter := '1'
 	for _, ws := range workspacesToShow {
+		// Skip worktrees - they never have their own notes
+		if ws.IsWorktree() {
+			continue
+		}
+
 		hasNotes := len(notesByWorkspace[ws.Name]) > 0
-		if !hasNotes && m.focusedWorkspace == nil {
-			// In global view, only show workspaces that have notes
+		// Always show ecosystem nodes at depth 0, even if they have no direct notes
+		// (their children may have notes)
+		if !hasNotes && m.focusedWorkspace == nil && ws.Depth > 0 {
+			// In global view, only skip non-ecosystem workspaces that have no notes
 			continue
 		}
 
@@ -478,9 +485,15 @@ func (m *Model) clampCursor() {
 
 // getViewportHeight calculates how many lines are available for the list.
 func (m *Model) getViewportHeight() int {
-	const headerLines = 2 // Header line + blank line
-	const footerLines = 2 // Blank line + help line
-	availableHeight := m.height - headerLines - footerLines
+	// Account for:
+	// - Top margin: 1 line
+	// - Header: 1 line
+	// - Blank line after header: 1 line
+	// - Blank line before footer: 1 line
+	// - Footer (help): 1 line
+	// - Scroll indicator (when shown): 2 lines (blank + indicator)
+	const fixedLines = 7
+	availableHeight := m.height - fixedLines
 	if availableHeight < 1 {
 		return 1
 	}
