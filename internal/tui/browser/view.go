@@ -71,10 +71,25 @@ func (m Model) View() string {
 		status = fmt.Sprintf("%d notes shown%s", noteCount, selectionInfo)
 	}
 
+	// Search bar (if active)
+	var searchBar string
+	if m.filterInput.Focused() || m.filterInput.Value() != "" {
+		searchBar = "Search: " + m.filterInput.View()
+	}
+
 	// Combine components vertically
-	fullView := lipgloss.JoinVertical(lipgloss.Left,
+	mainContent := lipgloss.JoinVertical(lipgloss.Left,
 		header,
-		"", // This adds a blank line for spacing
+		searchBar,
+	)
+
+	// Ensure there is spacing between header/search and content
+	if mainContent != "" {
+		mainContent = lipgloss.JoinVertical(lipgloss.Left, mainContent, "")
+	}
+
+	fullView := lipgloss.JoinVertical(lipgloss.Left,
+		mainContent,
 		viewContent,
 		"", // Another blank line for spacing
 		theme.DefaultTheme.Muted.Render(status),
@@ -165,6 +180,20 @@ func (m Model) renderTreeView() string {
 				displayName = strings.TrimPrefix(displayName, "plans/")
 			}
 
+			// Handle search highlighting for group/plan names
+			filterValue := m.filterInput.Value()
+			if filterValue != "" {
+				lowerName := strings.ToLower(displayName)
+				lowerFilter := strings.ToLower(filterValue)
+				if idx := strings.Index(lowerName, lowerFilter); idx != -1 {
+					pre := displayName[:idx]
+					match := displayName[idx : idx+len(filterValue)]
+					post := displayName[idx+len(filterValue):]
+					highlightStyle := theme.DefaultTheme.Highlight.Copy().Reverse(true)
+					displayName = fmt.Sprintf("%s%s%s", pre, highlightStyle.Render(match), post)
+				}
+			}
+
 			line = fmt.Sprintf("%s%s%s%s%s", cursor, node.prefix, foldIndicator, selIndicator, displayName)
 			if i == m.cursor {
 				line = theme.DefaultTheme.Highlight.Render(line)
@@ -187,7 +216,23 @@ func (m Model) renderTreeView() string {
 			// Check if this note is in an archived directory
 			isArchived := strings.Contains(node.note.Path, "/.archive/")
 
-			line = fmt.Sprintf("%s%s%s %s", cursor, node.prefix, selIndicator, node.note.Title)
+			// Handle search highlighting
+			title := node.note.Title
+			filterValue := m.filterInput.Value()
+			if filterValue != "" {
+				lowerTitle := strings.ToLower(title)
+				lowerFilter := strings.ToLower(filterValue)
+				if idx := strings.Index(lowerTitle, lowerFilter); idx != -1 {
+					pre := title[:idx]
+					match := title[idx : idx+len(filterValue)]
+					post := title[idx+len(filterValue):]
+					highlightStyle := theme.DefaultTheme.Highlight.Copy().Reverse(true)
+					title = fmt.Sprintf("%s%s%s", pre, highlightStyle.Render(match), post)
+				}
+			}
+
+			line = fmt.Sprintf("%s%s%s %s", cursor, node.prefix, selIndicator, title)
+
 			if i == m.cursor {
 				line = theme.DefaultTheme.Highlight.Render(line)
 			} else if isArchived {

@@ -144,7 +144,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.filterInput.Focused() {
 			switch {
 			case key.Matches(msg, m.keys.Back): // Esc
+				m.filterInput.SetValue("")
 				m.filterInput.Blur()
+				m.applyFilterAndSort()
 				return m, nil
 			case key.Matches(msg, m.keys.Confirm): // Enter
 				m.filterInput.Blur()
@@ -1206,8 +1208,24 @@ func (m *Model) adjustScroll() {
 	}
 }
 
-// applyFilterAndSort filters and sorts notes for the table view.
+// applyFilterAndSort filters and sorts notes for both table and tree views.
 func (m *Model) applyFilterAndSort() {
+	// For Tree View: rebuild the tree and then filter it if necessary
+	if m.viewMode == treeView {
+		if m.filterInput.Value() != "" {
+			// When filtering, temporarily expand all nodes so we can search everything
+			savedCollapsed := m.collapsedNodes
+			m.collapsedNodes = make(map[string]bool)
+			m.buildDisplayTree() // Rebuild the full tree with everything expanded
+			m.filterDisplayTree()
+			m.collapsedNodes = savedCollapsed // Restore collapsed state for when filter is cleared
+		} else {
+			// No filter - use normal collapsed state
+			m.buildDisplayTree()
+		}
+	}
+
+	// For Table View:
 	var notesToConsider []*models.Note
 	if m.focusedWorkspace != nil {
 		for _, note := range m.allNotes {
@@ -1278,6 +1296,71 @@ func (m *Model) buildTableRows() {
 		}
 	}
 	m.table.SetRows(rows)
+}
+
+// filterDisplayTree filters the tree view, preserving parent nodes of matches.
+func (m *Model) filterDisplayTree() {
+	filter := strings.ToLower(m.filterInput.Value())
+	if filter == "" {
+		return // No filter to apply
+	}
+
+	fullTree := m.displayNodes
+	nodesToKeep := make(map[int]bool)
+	parentMap := make(map[int]int)
+	lastNodeAtDepth := make(map[int]int)
+
+	// First pass: build parent map
+	for i, node := range fullTree {
+		if node.depth > 0 {
+			if parentIndex, ok := lastNodeAtDepth[node.depth-1]; ok {
+				parentMap[i] = parentIndex
+			}
+		}
+		lastNodeAtDepth[node.depth] = i
+	}
+
+	// Second pass: mark nodes to keep
+	for i, node := range fullTree {
+		match := false
+
+		if node.isNote {
+			// Search only in note title and type
+			match = strings.Contains(strings.ToLower(node.note.Title), filter) ||
+				strings.Contains(strings.ToLower(string(node.note.Type)), filter)
+		} else if node.isGroup {
+			// Search in group/plan names (strip "plans/" prefix for matching)
+			displayName := node.groupName
+			if node.isPlan() {
+				displayName = strings.TrimPrefix(displayName, "plans/")
+			}
+			match = strings.Contains(strings.ToLower(displayName), filter)
+		}
+
+		if match {
+			// Mark this node and all its parents to be kept
+			curr := i
+			for {
+				nodesToKeep[curr] = true
+				parentIndex, ok := parentMap[curr]
+				if !ok {
+					break // No more parents
+				}
+				curr = parentIndex
+			}
+		}
+	}
+
+	// Third pass: build the filtered tree
+	var filteredTree []*displayNode
+	for i, node := range fullTree {
+		if nodesToKeep[i] {
+			filteredTree = append(filteredTree, node)
+		}
+	}
+
+	m.displayNodes = filteredTree
+	m.clampCursor()
 }
 
 // toggleFold toggles the fold state of the node under the cursor
