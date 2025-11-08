@@ -121,6 +121,9 @@ func (m Model) renderTreeView() string {
 			line = fmt.Sprintf("%s%s%s%s", cursor, node.prefix, foldIndicator, wsName)
 			if i == m.cursor {
 				line = theme.DefaultTheme.Highlight.Render(line)
+			} else if node.workspace.Name == "global" {
+				// Global notes workspace: green + bold
+				line = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Green).Render(line)
 			} else if node.workspace.IsEcosystem() {
 				// Ecosystems: cyan + bold
 				line = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Cyan).Render(line)

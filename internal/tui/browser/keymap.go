@@ -21,12 +21,13 @@ type KeyMap struct {
 	GoToTop         key.Binding
 	GoToBottom      key.Binding
 	FoldPrefix      key.Binding // z key for fold commands
-	ToggleArchives  key.Binding
-	ToggleSelect    key.Binding
-	SelectAll       key.Binding
-	SelectNone      key.Binding
-	Archive         key.Binding
-	Preview         key.Binding
+	ToggleArchives key.Binding
+	ToggleGlobal   key.Binding
+	ToggleSelect   key.Binding
+	SelectAll      key.Binding
+	SelectNone     key.Binding
+	Archive        key.Binding
+	Preview        key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -51,6 +52,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.GoToBottom,
 		k.FoldPrefix,
 		k.ToggleArchives,
+		k.ToggleGlobal,
 	}, []key.Binding{
 		k.ToggleSelect,
 		k.SelectAll,
@@ -117,6 +119,10 @@ var keys = KeyMap{
 	ToggleArchives: key.NewBinding(
 		key.WithKeys("A"),
 		key.WithHelp("A", "toggle archives"),
+	),
+	ToggleGlobal: key.NewBinding(
+		key.WithKeys("~"),
+		key.WithHelp("~", "toggle global"),
 	),
 	ToggleSelect: key.NewBinding(
 		key.WithKeys(" "),

@@ -89,6 +89,7 @@ type Model struct {
 	lastKey        string // For detecting 'gg' and 'z' sequences
 	collapsedNodes map[string]bool // Tracks collapsed workspaces and groups
 	showArchives   bool            // Whether to show .archive directories
+	hideGlobal     bool            // Whether to hide the global workspace node
 
 	// Focus mode state
 	ecosystemPickerMode bool
@@ -144,10 +145,12 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		filterInput:      ti,
 		sortColumn:       4,                           // Default sort by modified date (adjusted for new column)
 		sortAsc:          false,                       // Descending
-		jumpMap:          make(map[rune]int),
-		collapsedNodes:   make(map[string]bool),
-		selected:         make(map[string]struct{}),  // Initialize selection map
-		selectedGroups:   make(map[string]struct{}),  // Initialize group selection map
+		jumpMap:        make(map[rune]int),
+		collapsedNodes: map[string]bool{
+			"ws:::global": true, // Start with global workspace collapsed
+		},
+		selected:         make(map[string]struct{}), // Initialize selection map
+		selectedGroups:   make(map[string]struct{}), // Initialize group selection map
 		focusedWorkspace: initialFocus,
 	}
 }

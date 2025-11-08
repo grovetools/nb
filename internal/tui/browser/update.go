@@ -355,6 +355,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showArchives = !m.showArchives
 				m.buildDisplayTree()
 			}
+		case key.Matches(msg, m.keys.ToggleGlobal):
+			if m.viewMode == treeView {
+				m.hideGlobal = !m.hideGlobal
+				m.buildDisplayTree()
+			}
 		case key.Matches(msg, m.keys.ToggleSelect):
 			// Toggle selection for the current note or plan group
 			if m.viewMode == treeView {
@@ -520,7 +525,13 @@ func (m *Model) buildDisplayTree() {
 			}
 		}
 	} else if m.focusedWorkspace != nil {
+		var globalNode *workspace.WorkspaceNode
 		for _, ws := range m.workspaces {
+			// Save global separately
+			if ws.Name == "global" {
+				globalNode = ws
+				continue
+			}
 			// Use case-insensitive path comparison
 			isSame, _ := pathutil.ComparePaths(ws.Path, m.focusedWorkspace.Path)
 			if isSame {
@@ -534,14 +545,31 @@ func (m *Model) buildDisplayTree() {
 				workspacesToShow = append(workspacesToShow, ws)
 			}
 		}
+
+		// Clear tree prefix on focused workspace (first item) to make it a sibling of global
+		if len(workspacesToShow) > 0 {
+			focusedCopy := *workspacesToShow[0]
+			focusedCopy.TreePrefix = ""
+			workspacesToShow[0] = &focusedCopy
+		}
+
+		// Prepend global at the front (unless hidden)
+		if globalNode != nil && !m.hideGlobal {
+			workspacesToShow = append([]*workspace.WorkspaceNode{globalNode}, workspacesToShow...)
+		}
 	} else {
 		// Global view: partition into ecosystem workspaces and standalone workspaces
 		for _, ws := range m.workspaces {
+			// Skip global if hidden
+			if ws.Name == "global" && m.hideGlobal {
+				continue
+			}
 			// Check if this is a standalone (non-ecosystem) top-level workspace
-			if ws.Depth == 0 && !ws.IsEcosystem() {
+			// Ungrouped workspaces are top-level, not ecosystems, and not our special "global" node.
+			if ws.Depth == 0 && !ws.IsEcosystem() && ws.Name != "global" {
 				ungroupedWorkspaces = append(ungroupedWorkspaces, ws)
 			} else if ws.Depth == 0 || ws.IsEcosystem() {
-				// Top-level ecosystems and their children
+				// Top-level ecosystems and their children, and the global node
 				workspacesToShow = append(workspacesToShow, ws)
 			} else {
 				// Check if this workspace belongs to a standalone project
@@ -597,7 +625,8 @@ func (m *Model) buildDisplayTree() {
 		hasNotes := len(notesByWorkspace[ws.Name]) > 0
 		// Always show ecosystem nodes at depth 0, even if they have no direct notes
 		// (their children may have notes)
-		if !hasNotes && m.focusedWorkspace == nil && ws.Depth > 0 {
+		// Also always show the global workspace
+		if !hasNotes && m.focusedWorkspace == nil && ws.Depth > 0 && ws.Name != "global" {
 			// In global view, only skip non-ecosystem workspaces that have no notes
 			continue
 		}

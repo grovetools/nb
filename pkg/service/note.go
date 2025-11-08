@@ -430,12 +430,22 @@ func GetNoteMetadata(path string) (workspaceIdentifier, branch, noteType string)
 	for i, part := range parts {
 		if part == "nb" && i+1 < len(parts) {
 			if parts[i+1] == globalWorkspace {
-				// Path: .../nb/global/notes/TYPE/.../file.md
+				// Path: .../nb/global/notes/TYPE/.../file.md (with "notes" subdirectory)
 				if i+2 < len(parts) && parts[i+2] == "notes" && i+3 < len(parts) {
 					// Find where the filename starts (contains .md)
 					for j := len(parts) - 1; j >= i+3; j-- {
 						if strings.HasSuffix(parts[j], ".md") {
 							noteType = strings.Join(parts[i+3:j], "/")
+							return "global", "", noteType
+						}
+					}
+				}
+				// Path: .../nb/global/TYPE/.../file.md (direct TYPE, no "notes" subdirectory)
+				if i+2 < len(parts) {
+					// Find where the filename starts (contains .md)
+					for j := len(parts) - 1; j >= i+2; j-- {
+						if strings.HasSuffix(parts[j], ".md") {
+							noteType = strings.Join(parts[i+2:j], "/")
 							return "global", "", noteType
 						}
 					}
