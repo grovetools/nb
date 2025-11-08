@@ -11,6 +11,7 @@ import (
 	coreconfig "github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
 	coreworkspace "github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/search"
 )
@@ -228,13 +229,33 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
 	rootPath := filepath.Dir(samplePath)
 
 	var notes []*models.Note
+	processedPaths := make(map[string]struct{})
+
 	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
 		}
-		if strings.Contains(path, "/archive/") {
+
+		// De-duplication: check if we've already processed this canonical path
+		canonicalPath, err := pathutil.NormalizeForLookup(path)
+		if err != nil {
+			return nil // Skip if we cannot normalize the path
+		}
+		if _, seen := processedPaths[canonicalPath]; seen {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
+		processedPaths[canonicalPath] = struct{}{}
+
+		if strings.Contains(path, "/archive/") {
+			if info.IsDir() {
+				return filepath.SkipDir // Correctly skip entire archive directories
+			}
+			return nil // Skip archived files
+		}
+
 		if !info.IsDir() && strings.HasSuffix(path, ".md") {
 			note, err := ParseNote(path)
 			if err == nil {

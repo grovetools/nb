@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 )
 
@@ -14,6 +15,9 @@ func (s *Service) ListNotesFromAllWorkspaces() ([]*models.Note, error) {
 
 	// Use a map to avoid processing the same notebook context twice (for worktrees)
 	seenContexts := make(map[string]bool)
+
+	// Use a map to deduplicate notes by canonical path across all workspaces
+	seenNotePaths := make(map[string]bool)
 
 	for _, ws := range allWorkspaces {
 		contextNode, err := s.findNotebookContextNode(ws)
@@ -37,7 +41,21 @@ func (s *Service) ListNotesFromAllWorkspaces() ([]*models.Note, error) {
 			fmt.Fprintf(os.Stderr, "Warning: could not list notes for workspace %s: %v\n", ws.Name, err)
 			continue
 		}
-		allNotes = append(allNotes, notes...)
+
+		// Deduplicate notes across workspaces by canonical path
+		for _, note := range notes {
+			canonicalPath, err := pathutil.NormalizeForLookup(note.Path)
+			if err != nil {
+				// Skip notes we can't normalize
+				continue
+			}
+			if seenNotePaths[canonicalPath] {
+				// Skip duplicate note
+				continue
+			}
+			seenNotePaths[canonicalPath] = true
+			allNotes = append(allNotes, note)
+		}
 	}
 	return allNotes, nil
 }
