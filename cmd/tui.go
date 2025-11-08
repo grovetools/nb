@@ -40,8 +40,8 @@ This view provides a workspace-centric way to explore your entire notebook.`,
 			}
 
 			var initialFocus *workspace.WorkspaceNode
-			if ctx.CurrentWorkspace.Name != "global" {
-				initialFocus = ctx.CurrentWorkspace
+			if ctx.NotebookContextWorkspace.Name != "global" {
+				initialFocus = ctx.NotebookContextWorkspace
 			}
 
 			// Create and run TUI with initial focus
