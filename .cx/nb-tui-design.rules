@@ -8,13 +8,19 @@ main.go
 Makefile
 go.mod
 grove.yml
+!go.sum
 
 # Exclude test files
+!tests/**
+!test/**
 !**/*_test.go
 
-# Other tuis for inspiration
+# Exclude docs
+!docs
+
 @a:grove-ecosystem/**/*.go @find: "tui"
 @a:grove-ecosystem:grove-context/cmd/view
 
 # don't let the old tui bias design of new one
 !@a:grove-ecosystem:grove-notebook/internal/tui/manager/model.go
+@a:grove-ecosystem:grove-core::workspace-only

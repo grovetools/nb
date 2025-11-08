@@ -9,7 +9,8 @@ type NoteType string
 type Note struct {
 	Path       string    `json:"path"`
 	Title      string    `json:"title"`
-	Type       NoteType  `json:"type"`
+	Type       NoteType  `json:"type"`          // Note type from frontmatter (chat, interactive_agent, etc.)
+	Group      string    `json:"group"`         // Directory grouping (current, plans/name, etc.)
 	Content    string    `json:"content,omitempty"`
 	Workspace  string    `json:"workspace"`
 	Branch     string    `json:"branch,omitempty"`

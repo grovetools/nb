@@ -111,6 +111,9 @@ func ParseNote(path string) (*models.Note, error) {
 		if fm.Branch != "" {
 			note.Branch = fm.Branch
 		}
+		if fm.Type != "" {
+			note.Type = models.NoteType(fm.Type)
+		}
 
 		// Parse timestamps from frontmatter if available
 		if fm.Created != "" {

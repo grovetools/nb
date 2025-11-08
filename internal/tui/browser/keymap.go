@@ -20,6 +20,11 @@ type KeyMap struct {
 	GoToBottom      key.Binding
 	FoldPrefix      key.Binding // z key for fold commands
 	ToggleArchives  key.Binding
+	ToggleSelect    key.Binding
+	SelectAll       key.Binding
+	SelectNone      key.Binding
+	Archive         key.Binding
+	Preview         key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -27,7 +32,28 @@ func (k KeyMap) ShortHelp() []key.Binding {
 }
 
 func (k KeyMap) FullHelp() [][]key.Binding {
-	return k.Base.FullHelp()
+	baseHelp := k.Base.FullHelp()
+	return append(baseHelp, []key.Binding{
+		k.FocusEcosystem,
+		k.ClearFocus,
+		k.ToggleView,
+		k.Search,
+		k.Sort,
+		k.JumpToWorkspace,
+	}, []key.Binding{
+		k.PageUp,
+		k.PageDown,
+		k.GoToTop,
+		k.GoToBottom,
+		k.FoldPrefix,
+		k.ToggleArchives,
+	}, []key.Binding{
+		k.ToggleSelect,
+		k.SelectAll,
+		k.SelectNone,
+		k.Archive,
+		k.Preview,
+	})
 }
 
 var keys = KeyMap{
@@ -77,7 +103,27 @@ var keys = KeyMap{
 		key.WithHelp("z", "fold commands (za/zo/zc/zM/zR)"),
 	),
 	ToggleArchives: key.NewBinding(
+		key.WithKeys("A"),
+		key.WithHelp("A", "toggle archives"),
+	),
+	ToggleSelect: key.NewBinding(
+		key.WithKeys(" "),
+		key.WithHelp("space", "toggle select"),
+	),
+	SelectAll: key.NewBinding(
 		key.WithKeys("a"),
-		key.WithHelp("a", "toggle archives"),
+		key.WithHelp("a", "select all (visible)"),
+	),
+	SelectNone: key.NewBinding(
+		key.WithKeys("n"),
+		key.WithHelp("n", "deselect all"),
+	),
+	Archive: key.NewBinding(
+		key.WithKeys("x"),
+		key.WithHelp("x", "archive selected"),
+	),
+	Preview: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "preview note"),
 	),
 }

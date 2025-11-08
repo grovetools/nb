@@ -28,13 +28,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			sessionID = fmt.Sprintf("%d", os.Getpid())
 		}
 		tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("grove-nb-edit-%s", sessionID))
-		err := os.WriteFile(tempFile, []byte(msg.filePath+"\n"), 0644)
+		err := os.WriteFile(tempFile, []byte("OPEN:"+msg.filePath+"\n"), 0644)
 		if err != nil {
 			m.statusMessage = fmt.Sprintf("Error writing temp file: %v", err)
 		} else {
-			m.statusMessage = fmt.Sprintf("Wrote to %s", tempFile)
+			m.statusMessage = ""
 		}
 		// Don't quit - stay open
+		return m, nil
+
+	case previewFileMsg:
+		// Write file path to temp file for Neovim to preview
+		sessionID := os.Getenv("GROVE_NVIM_SESSION_ID")
+		if sessionID == "" {
+			sessionID = fmt.Sprintf("%d", os.Getpid())
+		}
+		tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("grove-nb-edit-%s", sessionID))
+		err := os.WriteFile(tempFile, []byte("PREVIEW:"+msg.filePath+"\n"), 0644)
+		if err != nil {
+			m.statusMessage = fmt.Sprintf("Error writing temp file: %v", err)
+		} else {
+			m.statusMessage = ""
+		}
 		return m, nil
 
 	case tea.WindowSizeMsg:
@@ -386,6 +401,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.openInEditor(noteToOpen.Path)
 				}
 			}
+		case key.Matches(msg, m.keys.Preview):
+			if !m.ecosystemPickerMode {
+				var noteToPreview *models.Note
+				if m.viewMode == treeView {
+					if m.cursor < len(m.displayNodes) {
+						node := m.displayNodes[m.cursor]
+						if node.isNote {
+							noteToPreview = node.note
+						}
+					}
+				} else { // Table view
+					if m.table.Cursor() < len(m.filteredNotes) {
+						noteToPreview = m.filteredNotes[m.table.Cursor()]
+					}
+				}
+				if noteToPreview != nil && os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
+					return m, func() tea.Msg {
+						return previewFileMsg{filePath: noteToPreview.Path}
+					}
+				}
+			}
 		case key.Matches(msg, m.keys.Back):
 			if m.ecosystemPickerMode {
 				m.ecosystemPickerMode = false
@@ -431,13 +467,13 @@ func (m *Model) buildDisplayTree() {
 		workspacesToShow = m.workspaces
 	}
 
-	// 2. Group notes by workspace path, then by note type
+	// 2. Group notes by workspace path, then by group (directory)
 	notesByWorkspace := make(map[string]map[string][]*models.Note)
 	for _, note := range m.allNotes {
 		if _, ok := notesByWorkspace[note.Workspace]; !ok {
 			notesByWorkspace[note.Workspace] = make(map[string][]*models.Note)
 		}
-		notesByWorkspace[note.Workspace][string(note.Type)] = append(notesByWorkspace[note.Workspace][string(note.Type)], note)
+		notesByWorkspace[note.Workspace][note.Group] = append(notesByWorkspace[note.Workspace][note.Group], note)
 	}
 
 	// 3. Build the display node list and jump map
@@ -485,11 +521,12 @@ func (m *Model) buildDisplayTree() {
 		}
 
 		if noteGroups, ok := notesByWorkspace[ws.Name]; ok {
-			// Separate archive groups from regular groups
+			// Separate regular groups, plan groups, and archive groups
 			var regularGroups []string
-			archiveGroups := make(map[string][]string) // parent -> archive path
+			planGroups := make(map[string][]*models.Note) // plan name -> notes
+			archiveGroups := make(map[string][]string)    // parent -> archive path
 
-			for name := range noteGroups {
+			for name, notes := range noteGroups {
 				if strings.HasSuffix(name, "/.archive") {
 					// This is an archive group - associate it with its parent
 					parent := strings.TrimSuffix(name, "/.archive")
@@ -499,14 +536,25 @@ func (m *Model) buildDisplayTree() {
 					if m.showArchives {
 						regularGroups = append(regularGroups, name)
 					}
+				} else if strings.HasPrefix(name, "plans/") {
+					// Extract plan name (e.g., "plans/nb-tui" -> "nb-tui")
+					planName := strings.TrimPrefix(name, "plans/")
+					planGroups[planName] = notes
 				} else {
 					regularGroups = append(regularGroups, name)
 				}
 			}
 			sort.Strings(regularGroups)
 
+			// Check if we have plans to add a "plans" parent group
+			hasPlans := len(planGroups) > 0
+			totalGroups := len(regularGroups)
+			if hasPlans {
+				totalGroups++
+			}
+
 			for i, groupName := range regularGroups {
-				isLastGroup := i == len(regularGroups)-1
+				isLastGroup := i == len(regularGroups)-1 && !hasPlans
 				notesInGroup := noteGroups[groupName]
 
 				// Calculate group prefix
@@ -610,6 +658,91 @@ func (m *Model) buildDisplayTree() {
 					}
 				}
 			}
+
+			// Add "plans" parent group if there are any plans
+			if hasPlans {
+				// Calculate plans parent prefix
+				var plansPrefix strings.Builder
+				indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
+				indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+				plansPrefix.WriteString(indentPrefix)
+				if ws.Depth > 0 || ws.TreePrefix != "" {
+					plansPrefix.WriteString("  ")
+				}
+				plansPrefix.WriteString("└─ ") // Plans is always last
+
+				// Add "plans" parent node
+				plansParentNode := &displayNode{
+					isGroup:       true,
+					groupName:     "plans",
+					workspaceName: ws.Name,
+					prefix:        plansPrefix.String(),
+					depth:         ws.Depth + 1,
+				}
+				nodes = append(nodes, plansParentNode)
+
+				// Check if plans parent is collapsed
+				plansParentNodeID := plansParentNode.nodeID()
+				if !m.collapsedNodes[plansParentNodeID] {
+					// Sort plan names
+					var planNames []string
+					for planName := range planGroups {
+						planNames = append(planNames, planName)
+					}
+					sort.Strings(planNames)
+
+					// Add individual plan nodes
+					for pi, planName := range planNames {
+						isLastPlan := pi == len(planNames)-1
+						planNotes := planGroups[planName]
+
+						// Calculate plan prefix
+						var planPrefix strings.Builder
+						planIndent := strings.ReplaceAll(plansPrefix.String(), "├─", "│ ")
+						planIndent = strings.ReplaceAll(planIndent, "└─", "  ")
+						planPrefix.WriteString(planIndent)
+						if isLastPlan {
+							planPrefix.WriteString("└─ ")
+						} else {
+							planPrefix.WriteString("├─ ")
+						}
+
+						// Add plan node with status icon
+						planNode := &displayNode{
+							isGroup:       true,
+							groupName:     "plans/" + planName, // Keep full path for isPlan() check
+							workspaceName: ws.Name,
+							prefix:        planPrefix.String(),
+							depth:         ws.Depth + 2,
+						}
+						nodes = append(nodes, planNode)
+
+						// Check if this plan is collapsed
+						planNodeID := planNode.nodeID()
+						if !m.collapsedNodes[planNodeID] {
+							// Add notes in this plan
+							for ni, note := range planNotes {
+								isLastNote := ni == len(planNotes)-1
+								var notePrefix strings.Builder
+								noteIndent := strings.ReplaceAll(planPrefix.String(), "├─", "│ ")
+								noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+								notePrefix.WriteString(noteIndent)
+								if isLastNote {
+									notePrefix.WriteString("└─ ")
+								} else {
+									notePrefix.WriteString("├─ ")
+								}
+								nodes = append(nodes, &displayNode{
+									isNote: true,
+									note:   note,
+									prefix: notePrefix.String(),
+									depth:  ws.Depth + 3,
+								})
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 	m.displayNodes = nodes
@@ -681,7 +814,8 @@ func (m *Model) applyFilterAndSort() {
 		for _, note := range notesToConsider {
 			if strings.Contains(strings.ToLower(note.Title), filter) ||
 				strings.Contains(strings.ToLower(note.Workspace), filter) ||
-				strings.Contains(strings.ToLower(string(note.Type)), filter) {
+				strings.Contains(strings.ToLower(string(note.Type)), filter) ||
+				strings.Contains(strings.ToLower(note.Group), filter) {
 				filtered = append(filtered, note)
 			}
 		}

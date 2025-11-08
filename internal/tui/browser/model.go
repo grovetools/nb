@@ -164,6 +164,9 @@ type editorFinishedMsg struct{ err error }
 // editFileAndQuitMsg signals to quit and let neovim plugin handle opening
 type editFileAndQuitMsg struct{ filePath string }
 
+// previewFileMsg signals to preview a file in neovim (without focusing)
+type previewFileMsg struct{ filePath string }
+
 // notesArchivedMsg is sent when notes and/or plans have been archived
 type notesArchivedMsg struct {
 	archivedPaths []string

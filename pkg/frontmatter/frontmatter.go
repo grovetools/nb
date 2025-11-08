@@ -15,6 +15,7 @@ var frontmatterPattern = regexp.MustCompile(`(?s)^---\n(.*?)\n---\n(.*)`)
 type Frontmatter struct {
 	ID         string   `yaml:"id"`
 	Title      string   `yaml:"title"`
+	Type       string   `yaml:"type,omitempty"` // Note type (chat, interactive_agent, etc.)
 	Aliases    []string `yaml:"aliases,flow"`
 	Tags       []string `yaml:"tags,flow"`
 	Repository string   `yaml:"repository,omitempty"`
@@ -26,7 +27,7 @@ type Frontmatter struct {
 
 	// Blog-specific fields
 	Description string `yaml:"description,omitempty"`
-	PublishDate string `yaml:"publishDate,omitempty"`
+	PublishDate string   `yaml:"publishDate,omitempty"`
 	UpdatedDate string `yaml:"updatedDate,omitempty"`
 	Draft       bool   `yaml:"draft,omitempty"`
 	Featured    bool   `yaml:"featured,omitempty"`

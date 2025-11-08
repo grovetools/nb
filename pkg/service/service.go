@@ -241,13 +241,20 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
 				note.Workspace = ctx.NotebookContextWorkspace.Name
 				note.Branch = ctx.Branch
 
+				// Set Group from directory path for grouping in UI
 				relPath, _ := filepath.Rel(rootPath, path)
 				parts := strings.Split(filepath.ToSlash(relPath), "/")
 				if len(parts) > 1 {
-					note.Type = models.NoteType(strings.Join(parts[:len(parts)-1], "/"))
+					note.Group = strings.Join(parts[:len(parts)-1], "/")
 				} else if len(parts) == 1 {
-					note.Type = "quick"
+					note.Group = "quick"
 				}
+
+				// Set Type from directory if not already set from frontmatter (for backwards compatibility)
+				if note.Type == "" {
+					note.Type = models.NoteType(note.Group)
+				}
+
 				notes = append(notes, note)
 			}
 		}

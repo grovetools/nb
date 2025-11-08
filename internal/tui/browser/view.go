@@ -2,6 +2,8 @@ package browser
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,12 +41,43 @@ func (m Model) View() string {
 
 	footer := m.help.View()
 
+	// Build status bar
+	var status string
+	if m.statusMessage != "" {
+		status = m.statusMessage
+	} else {
+		var noteCount int
+		if m.viewMode == treeView {
+			// Count notes in display nodes
+			for _, node := range m.displayNodes {
+				if node.isNote {
+					noteCount++
+				}
+			}
+		} else {
+			noteCount = len(m.filteredNotes)
+		}
+
+		selectionInfo := ""
+		if len(m.selected) > 0 && len(m.selectedGroups) > 0 {
+			selectionInfo = fmt.Sprintf(" | %d notes + %d plans selected", len(m.selected), len(m.selectedGroups))
+		} else if len(m.selected) > 0 {
+			selectionInfo = fmt.Sprintf(" | %d notes selected", len(m.selected))
+		} else if len(m.selectedGroups) > 0 {
+			selectionInfo = fmt.Sprintf(" | %d plans selected", len(m.selectedGroups))
+		} else {
+			selectionInfo = " | 0 selected"
+		}
+		status = fmt.Sprintf("%d notes shown%s", noteCount, selectionInfo)
+	}
+
 	// Combine components vertically
 	fullView := lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		"", // This adds a blank line for spacing
 		viewContent,
 		"", // Another blank line for spacing
+		theme.DefaultTheme.Muted.Render(status),
 		footer,
 	)
 
@@ -87,7 +120,13 @@ func (m Model) renderTreeView() string {
 			wsName := node.workspace.Name
 			line = fmt.Sprintf("%s%s%s%s", cursor, node.prefix, foldIndicator, wsName)
 			if i == m.cursor {
-				line = lipgloss.NewStyle().Bold(true).Render(line)
+				line = theme.DefaultTheme.Highlight.Render(line)
+			} else if node.workspace.IsEcosystem() {
+				// Ecosystems: cyan + bold
+				line = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Cyan).Render(line)
+			} else {
+				// Regular workspaces: violet + bold
+				line = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Violet).Render(line)
 			}
 		} else if node.isGroup {
 			// Add fold indicator
@@ -100,14 +139,56 @@ func (m Model) renderTreeView() string {
 					foldIndicator = "▼ "
 				}
 			}
-			line = fmt.Sprintf("%s%s%s%s", cursor, node.prefix, foldIndicator, node.groupName)
+
+			// Add selection and plan icon for plan groups
+			selIndicator := ""
+			if node.isPlan() {
+				groupKey := m.getGroupKey(node)
+				if _, ok := m.selectedGroups[groupKey]; ok {
+					selIndicator = "■ " // Selected indicator
+				} else {
+					// Get plan status icon
+					planStatus := m.getPlanStatus(node.workspaceName, node.groupName)
+					selIndicator = getPlanStatusIcon(planStatus) + " "
+				}
+			}
+
+			// Check if this is an archived item
+			isArchived := strings.Contains(node.groupName, "/.archive/") || node.groupName == ".archive"
+
+			// Display name - strip "plans/" prefix for plan nodes
+			displayName := node.groupName
+			if node.isPlan() {
+				displayName = strings.TrimPrefix(displayName, "plans/")
+			}
+
+			line = fmt.Sprintf("%s%s%s%s%s", cursor, node.prefix, foldIndicator, selIndicator, displayName)
 			if i == m.cursor {
-				line = lipgloss.NewStyle().Bold(true).Render(line)
+				line = theme.DefaultTheme.Highlight.Render(line)
+			} else if isArchived {
+				line = lipgloss.NewStyle().Faint(true).Render(line)
+			} else if node.isPlan() {
+				// Individual plan nodes: yellow (not bold)
+				line = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Yellow).Render(line)
 			}
 		} else if node.isNote {
-			line = fmt.Sprintf("%s%s▢ %s", cursor, node.prefix, node.note.Title)
+			// Get type-specific icon
+			noteType := string(node.note.Type)
+			noteIcon := getNoteIcon(noteType)
+
+			selIndicator := noteIcon
+			if _, ok := m.selected[node.note.Path]; ok {
+				selIndicator = "■" // Selected indicator
+			}
+
+			// Check if this note is in an archived directory
+			isArchived := strings.Contains(node.note.Path, "/.archive/")
+
+			line = fmt.Sprintf("%s%s%s %s", cursor, node.prefix, selIndicator, node.note.Title)
 			if i == m.cursor {
-				line = theme.DefaultTheme.Selected.Render(line)
+				line = theme.DefaultTheme.Highlight.Render(line)
+			} else if isArchived {
+				line = lipgloss.NewStyle().Faint(true).Render(line)
 			}
 		}
 		b.WriteString(line)
@@ -153,4 +234,80 @@ func formatRelativeTime(t time.Time) string {
 		return fmt.Sprintf("%dd ago", int(diff.Hours()/24))
 	}
 	return t.Format("2006-01-02")
+}
+
+// getNoteIcon returns the appropriate icon for a note type
+func getNoteIcon(noteType string) string {
+	switch noteType {
+	case "chat":
+		return theme.IconChat // ★
+	case "interactive_agent":
+		return theme.IconInteractiveAgent // ⚙
+	case "oneshot":
+		return theme.IconOneshot // ●
+	case "headless_agent":
+		return theme.IconHeadlessAgent // ◆
+	case "shell":
+		return theme.IconShell // ▶
+	default:
+		return "▢" // Default fallback
+	}
+}
+
+// getPlanStatus reads the plan status from the .grove-plan yaml file
+func (m *Model) getPlanStatus(workspaceName, planGroup string) string {
+	// Find workspace to get path
+	var wsPath string
+	for _, ws := range m.workspaces {
+		if ws.Name == workspaceName {
+			wsPath = ws.Path
+			break
+		}
+	}
+	if wsPath == "" {
+		return "unknown"
+	}
+
+	// Extract plan name (e.g., "plans/my-plan" -> "my-plan")
+	planName := strings.TrimPrefix(planGroup, "plans/")
+
+	// Construct path to .grove-plan file
+	planFile := filepath.Join(wsPath, "plans", planName, ".grove-plan")
+
+	// Read and parse the file
+	data, err := os.ReadFile(planFile)
+	if err != nil {
+		return "unknown"
+	}
+
+	// Simple parsing - look for "status:" line
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "status:") {
+			status := strings.TrimSpace(strings.TrimPrefix(line, "status:"))
+			status = strings.Trim(status, `"'`)
+			return status
+		}
+	}
+
+	return "unknown"
+}
+
+// getPlanStatusIcon returns the appropriate icon for a plan status
+func getPlanStatusIcon(status string) string {
+	switch status {
+	case "completed", "finished", "done":
+		return theme.IconStatusCompleted // ●
+	case "running", "active", "in_progress":
+		return theme.IconStatusRunning // ◐
+	case "failed", "error":
+		return theme.IconStatusFailed // ✗
+	case "abandoned", "cancelled":
+		return theme.IconStatusAbandoned // ⊗
+	case "pending", "todo", "unknown":
+		fallthrough
+	default:
+		return theme.IconStatusTodo // ○
+	}
 }
