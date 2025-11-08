@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
@@ -60,12 +61,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case workspacesLoadedMsg:
 		m.workspaces = msg.workspaces
+		// Ensure focused workspace is expanded when initially loaded
+		if m.focusedWorkspace != nil {
+			wsNodeID := "ws:" + m.focusedWorkspace.Path
+			delete(m.collapsedNodes, wsNodeID)
+			// Collapse all groups within the focused workspace for a cleaner initial view
+			// Users can expand individual groups as needed
+			m.collapseFocusedWorkspaceGroups()
+		}
 		m.buildDisplayTree()
 		m.applyFilterAndSort()
 		return m, nil
 
 	case notesLoadedMsg:
 		m.allNotes = msg.notes
+		// Collapse groups if we have a focused workspace
+		if m.focusedWorkspace != nil {
+			m.collapseFocusedWorkspaceGroups()
+		}
 		m.buildDisplayTree()
 		m.applyFilterAndSort()
 		return m, nil
@@ -268,12 +281,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = 0
 			}
 		case key.Matches(msg, m.keys.ClearFocus):
-			if m.focusedWorkspace != nil {
+			if m.focusedWorkspace != nil || m.ecosystemPickerMode {
 				m.focusedWorkspace = nil
 				m.ecosystemPickerMode = false
 				m.buildDisplayTree()
 				m.applyFilterAndSort()
 				m.cursor = 0
+			}
+		case key.Matches(msg, m.keys.FocusParent):
+			if m.focusedWorkspace != nil {
+				var parent *workspace.WorkspaceNode
+				var parentPath string
+
+				if m.focusedWorkspace.ParentEcosystemPath != "" {
+					parentPath = m.focusedWorkspace.ParentEcosystemPath
+				} else if m.focusedWorkspace.ParentProjectPath != "" {
+					parentPath = m.focusedWorkspace.ParentProjectPath
+				} else if m.focusedWorkspace.RootEcosystemPath != "" && m.focusedWorkspace.RootEcosystemPath != m.focusedWorkspace.Path {
+					parentPath = m.focusedWorkspace.RootEcosystemPath
+				}
+
+				if parentPath != "" {
+					for _, ws := range m.workspaces {
+						if ws.Path == parentPath {
+							parent = ws
+							break
+						}
+					}
+				}
+
+				m.focusedWorkspace = parent // This can be nil if no parent is found, effectively clearing focus
+				// Ensure new focused workspace is expanded
+				if m.focusedWorkspace != nil {
+					wsNodeID := "ws:" + m.focusedWorkspace.Path
+					delete(m.collapsedNodes, wsNodeID)
+				}
+				m.buildDisplayTree()
+				m.applyFilterAndSort()
+				m.cursor = 0
+			}
+		case key.Matches(msg, m.keys.FocusSelected):
+			if m.viewMode == treeView && m.cursor < len(m.displayNodes) {
+				node := m.displayNodes[m.cursor]
+				if node.isWorkspace {
+					m.focusedWorkspace = node.workspace
+					m.ecosystemPickerMode = false // Focusing on a workspace exits picker mode
+					// Ensure focused workspace is expanded
+					wsNodeID := "ws:" + m.focusedWorkspace.Path
+					delete(m.collapsedNodes, wsNodeID)
+					m.buildDisplayTree()
+					m.applyFilterAndSort()
+					m.cursor = 0
+				}
 			}
 		case key.Matches(msg, m.keys.ToggleView):
 			if m.viewMode == treeView {
@@ -444,6 +503,9 @@ func (m *Model) buildDisplayTree() {
 	var workspacesToShow []*workspace.WorkspaceNode
 
 	// 1. Filter workspaces based on focus mode
+	var showUngroupedSection bool
+	var ungroupedWorkspaces []*workspace.WorkspaceNode
+
 	if m.ecosystemPickerMode {
 		// In picker mode, show only top-level ecosystems and their eco-worktrees
 		for _, ws := range m.workspaces {
@@ -459,12 +521,44 @@ func (m *Model) buildDisplayTree() {
 		}
 	} else if m.focusedWorkspace != nil {
 		for _, ws := range m.workspaces {
-			if ws.Path == m.focusedWorkspace.Path || strings.HasPrefix(ws.Path, m.focusedWorkspace.Path+"/") {
+			// Use case-insensitive path comparison
+			isSame, _ := pathutil.ComparePaths(ws.Path, m.focusedWorkspace.Path)
+			if isSame {
+				workspacesToShow = append(workspacesToShow, ws)
+				continue
+			}
+			// Check if it's a child workspace
+			normFocused, _ := pathutil.NormalizeForLookup(m.focusedWorkspace.Path)
+			normWs, _ := pathutil.NormalizeForLookup(ws.Path)
+			if strings.HasPrefix(normWs, normFocused+string(filepath.Separator)) {
 				workspacesToShow = append(workspacesToShow, ws)
 			}
 		}
 	} else {
-		workspacesToShow = m.workspaces
+		// Global view: partition into ecosystem workspaces and standalone workspaces
+		for _, ws := range m.workspaces {
+			// Check if this is a standalone (non-ecosystem) top-level workspace
+			if ws.Depth == 0 && !ws.IsEcosystem() {
+				ungroupedWorkspaces = append(ungroupedWorkspaces, ws)
+			} else if ws.Depth == 0 || ws.IsEcosystem() {
+				// Top-level ecosystems and their children
+				workspacesToShow = append(workspacesToShow, ws)
+			} else {
+				// Check if this workspace belongs to a standalone project
+				belongsToStandalone := false
+				for _, standalone := range ungroupedWorkspaces {
+					if strings.HasPrefix(ws.Path, standalone.Path+"/") {
+						ungroupedWorkspaces = append(ungroupedWorkspaces, ws)
+						belongsToStandalone = true
+						break
+					}
+				}
+				if !belongsToStandalone {
+					workspacesToShow = append(workspacesToShow, ws)
+				}
+			}
+		}
+		showUngroupedSection = len(ungroupedWorkspaces) > 0
 	}
 
 	// 2. Group notes by workspace path, then by group (directory)
@@ -479,7 +573,22 @@ func (m *Model) buildDisplayTree() {
 	// 3. Build the display node list and jump map
 	m.jumpMap = make(map[rune]int)
 	jumpCounter := '1'
+	needsSeparator := false // Track if we need to add a separator before the next workspace
+
 	for _, ws := range workspacesToShow {
+		// Add separator between ecosystem's own notes and child workspaces
+		if needsSeparator && m.focusedWorkspace != nil && m.focusedWorkspace.IsEcosystem() {
+			isSame, _ := pathutil.ComparePaths(ws.Path, m.focusedWorkspace.Path)
+			if !isSame {
+				// This is a child workspace, add separator
+				nodes = append(nodes, &displayNode{
+					isSeparator: true,
+					prefix:      "  ",
+					depth:       0,
+				})
+				needsSeparator = false // Only add separator once
+			}
+		}
 		// Skip worktrees - they never have their own notes
 		if ws.IsWorktree() {
 			continue
@@ -516,7 +625,8 @@ func (m *Model) buildDisplayTree() {
 
 		// Skip children if workspace is collapsed
 		wsNodeID := node.nodeID()
-		if m.collapsedNodes[wsNodeID] {
+		wsCollapsed := m.collapsedNodes[wsNodeID]
+		if wsCollapsed {
 			continue
 		}
 
@@ -744,7 +854,282 @@ func (m *Model) buildDisplayTree() {
 				}
 			}
 		}
+
+		// Mark that we need a separator before child workspaces
+		// This is set after rendering the focused ecosystem's own note groups
+		// Only show separator if the ecosystem is expanded
+		if m.focusedWorkspace != nil && m.focusedWorkspace.IsEcosystem() && !wsCollapsed {
+			isSame, _ := pathutil.ComparePaths(ws.Path, m.focusedWorkspace.Path)
+			if isSame {
+				needsSeparator = true
+			}
+		}
 	}
+
+	// 4. Add "ungrouped" section if there are standalone workspaces
+	if showUngroupedSection {
+		ungroupedNode := &displayNode{
+			isGroup:   true,
+			groupName: "ungrouped",
+			prefix:    "",
+			depth:     0,
+		}
+		nodes = append(nodes, ungroupedNode)
+
+		// Check if ungrouped section is collapsed
+		if !m.collapsedNodes[ungroupedNode.nodeID()] {
+			// Render each ungrouped workspace
+			for i, ws := range ungroupedWorkspaces {
+				// Skip worktrees
+				if ws.IsWorktree() {
+					continue
+				}
+
+				hasNotes := len(notesByWorkspace[ws.Name]) > 0
+				if !hasNotes && ws.Depth > 0 {
+					continue
+				}
+
+				// Adjust tree prefix to be indented under "Ungrouped"
+				adjustedPrefix := "  " + ws.TreePrefix
+				// If this is a depth-0 workspace, give it proper indentation
+				if ws.Depth == 0 {
+					// Check if this is the last ungrouped workspace
+					isLast := i == len(ungroupedWorkspaces)-1
+					if isLast {
+						adjustedPrefix = "  └─ "
+					} else {
+						adjustedPrefix = "  ├─ "
+					}
+				}
+
+				// Add workspace node
+				node := &displayNode{
+					isWorkspace: true,
+					workspace:   ws,
+					prefix:      adjustedPrefix,
+					depth:       ws.Depth + 1, // Increase depth since it's under "Ungrouped"
+				}
+
+				// Assign jump key for ungrouped workspaces
+				if jumpCounter <= '9' {
+					node.jumpKey = jumpCounter
+					m.jumpMap[jumpCounter] = len(nodes)
+					jumpCounter++
+				}
+				nodes = append(nodes, node)
+
+				// Skip children if workspace is collapsed
+				wsNodeID := node.nodeID()
+				if m.collapsedNodes[wsNodeID] {
+					continue
+				}
+
+				// Render notes for this ungrouped workspace
+				if noteGroups, ok := notesByWorkspace[ws.Name]; ok {
+					// Separate regular groups, plan groups, and archive groups
+					var regularGroups []string
+					planGroups := make(map[string][]*models.Note)
+					archiveGroups := make(map[string][]string)
+
+					for name, notes := range noteGroups {
+						if strings.HasSuffix(name, "/.archive") {
+							parent := strings.TrimSuffix(name, "/.archive")
+							archiveGroups[parent] = append(archiveGroups[parent], name)
+						} else if strings.Contains(name, "/.archive/") {
+							if m.showArchives {
+								regularGroups = append(regularGroups, name)
+							}
+						} else if strings.HasPrefix(name, "plans/") {
+							planName := strings.TrimPrefix(name, "plans/")
+							planGroups[planName] = notes
+						} else {
+							regularGroups = append(regularGroups, name)
+						}
+					}
+					sort.Strings(regularGroups)
+
+					hasPlans := len(planGroups) > 0
+
+					for i, groupName := range regularGroups {
+						isLastGroup := i == len(regularGroups)-1 && !hasPlans
+						notesInGroup := noteGroups[groupName]
+
+						// Calculate group prefix (with extra indentation for ungrouped)
+						var groupPrefix strings.Builder
+						indentPrefix := strings.ReplaceAll(adjustedPrefix, "├─", "│ ")
+						indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+						groupPrefix.WriteString(indentPrefix)
+						groupPrefix.WriteString("  ")
+						if isLastGroup {
+							groupPrefix.WriteString("└─ ")
+						} else {
+							groupPrefix.WriteString("├─ ")
+						}
+
+						// Add group node
+						groupNode := &displayNode{
+							isGroup:       true,
+							groupName:     groupName,
+							workspaceName: ws.Name,
+							prefix:        groupPrefix.String(),
+							depth:         ws.Depth + 2,
+						}
+						nodes = append(nodes, groupNode)
+
+						// Skip notes if group is collapsed
+						groupNodeID := groupNode.nodeID()
+						if m.collapsedNodes[groupNodeID] {
+							continue
+						}
+
+						// Add note nodes
+						hasArchive := len(archiveGroups[groupName]) > 0 && m.showArchives
+
+						for j, note := range notesInGroup {
+							isLastNote := j == len(notesInGroup)-1 && !hasArchive
+							var notePrefix strings.Builder
+							noteIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
+							noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+							notePrefix.WriteString(noteIndent)
+							if isLastNote {
+								notePrefix.WriteString("└─ ")
+							} else {
+								notePrefix.WriteString("├─ ")
+							}
+							nodes = append(nodes, &displayNode{
+								isNote: true,
+								note:   note,
+								prefix: notePrefix.String(),
+								depth:  ws.Depth + 3,
+							})
+						}
+
+						// Add archive subgroup if it exists
+						if hasArchive {
+							for _, archiveName := range archiveGroups[groupName] {
+								archiveNotes := noteGroups[archiveName]
+
+								var archivePrefix strings.Builder
+								archiveIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
+								archiveIndent = strings.ReplaceAll(archiveIndent, "└─", "  ")
+								archivePrefix.WriteString(archiveIndent)
+								archivePrefix.WriteString("└─ ")
+
+								archiveNode := &displayNode{
+									isGroup:       true,
+									groupName:     ".archive",
+									workspaceName: ws.Name,
+									prefix:        archivePrefix.String(),
+									depth:         ws.Depth + 3,
+								}
+								nodes = append(nodes, archiveNode)
+
+								archiveNodeID := archiveNode.nodeID()
+								if m.collapsedNodes[archiveNodeID] {
+									continue
+								}
+
+								for k, note := range archiveNotes {
+									isLastArchiveNote := k == len(archiveNotes)-1
+									var archiveNotePrefix strings.Builder
+									archiveNoteIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
+									archiveNoteIndent = strings.ReplaceAll(archiveNoteIndent, "└─", "  ")
+									archiveNotePrefix.WriteString(archiveNoteIndent)
+									if isLastArchiveNote {
+										archiveNotePrefix.WriteString("└─ ")
+									} else {
+										archiveNotePrefix.WriteString("├─ ")
+									}
+									nodes = append(nodes, &displayNode{
+										isNote: true,
+										note:   note,
+										prefix: archiveNotePrefix.String(),
+										depth:  ws.Depth + 4,
+									})
+								}
+							}
+						}
+					}
+
+					// Add "plans" parent group if there are any plans
+					if hasPlans {
+						var plansPrefix strings.Builder
+						indentPrefix := strings.ReplaceAll(adjustedPrefix, "├─", "│ ")
+						indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+						plansPrefix.WriteString(indentPrefix)
+						plansPrefix.WriteString("  ")
+						plansPrefix.WriteString("└─ ")
+
+						plansParentNode := &displayNode{
+							isGroup:       true,
+							groupName:     "plans",
+							workspaceName: ws.Name,
+							prefix:        plansPrefix.String(),
+							depth:         ws.Depth + 2,
+						}
+						nodes = append(nodes, plansParentNode)
+
+						plansParentNodeID := plansParentNode.nodeID()
+						if !m.collapsedNodes[plansParentNodeID] {
+							var planNames []string
+							for planName := range planGroups {
+								planNames = append(planNames, planName)
+							}
+							sort.Strings(planNames)
+
+							for pi, planName := range planNames {
+								isLastPlan := pi == len(planNames)-1
+								planNotes := planGroups[planName]
+
+								var planPrefix strings.Builder
+								planIndent := strings.ReplaceAll(plansPrefix.String(), "├─", "│ ")
+								planIndent = strings.ReplaceAll(planIndent, "└─", "  ")
+								planPrefix.WriteString(planIndent)
+								if isLastPlan {
+									planPrefix.WriteString("└─ ")
+								} else {
+									planPrefix.WriteString("├─ ")
+								}
+
+								planNode := &displayNode{
+									isGroup:       true,
+									groupName:     "plans/" + planName,
+									workspaceName: ws.Name,
+									prefix:        planPrefix.String(),
+									depth:         ws.Depth + 3,
+								}
+								nodes = append(nodes, planNode)
+
+								planNodeID := planNode.nodeID()
+								if !m.collapsedNodes[planNodeID] {
+									for ni, note := range planNotes {
+										isLastNote := ni == len(planNotes)-1
+										var notePrefix strings.Builder
+										noteIndent := strings.ReplaceAll(planPrefix.String(), "├─", "│ ")
+										noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+										notePrefix.WriteString(noteIndent)
+										if isLastNote {
+											notePrefix.WriteString("└─ ")
+										} else {
+											notePrefix.WriteString("├─ ")
+										}
+										nodes = append(nodes, &displayNode{
+											isNote: true,
+											note:   note,
+											prefix: notePrefix.String(),
+											depth:  ws.Depth + 4,
+										})
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	m.displayNodes = nodes
 	m.clampCursor()
 }
@@ -924,6 +1309,37 @@ func (m *Model) closeAllFolds() {
 func (m *Model) openAllFolds() {
 	m.collapsedNodes = make(map[string]bool)
 	m.buildDisplayTree()
+}
+
+// collapseFocusedWorkspaceGroups collapses individual plans and child workspaces
+func (m *Model) collapseFocusedWorkspaceGroups() {
+	if m.focusedWorkspace == nil {
+		return
+	}
+
+	// If focusing on an ecosystem, collapse all child workspaces
+	if m.focusedWorkspace.IsEcosystem() {
+		for _, ws := range m.workspaces {
+			// Collapse child workspaces (those under this ecosystem)
+			isSame, _ := pathutil.ComparePaths(ws.Path, m.focusedWorkspace.Path)
+			if !isSame && strings.HasPrefix(strings.ToLower(ws.Path), strings.ToLower(m.focusedWorkspace.Path)+string(filepath.Separator)) {
+				wsNodeID := "ws:" + ws.Path
+				m.collapsedNodes[wsNodeID] = true
+			}
+		}
+	}
+
+	// Collapse only individual plans (plans/*) for this workspace
+	// This keeps "current", "issues", etc. expanded while showing plan names collapsed
+	for _, note := range m.allNotes {
+		if note.Workspace == m.focusedWorkspace.Name {
+			// Only collapse individual plans (anything starting with "plans/")
+			if strings.HasPrefix(note.Group, "plans/") {
+				groupNodeID := "grp:" + note.Group
+				m.collapsedNodes[groupNodeID] = true
+			}
+		}
+	}
 }
 
 // getGroupKey returns a unique key for a group node (workspace:groupName)

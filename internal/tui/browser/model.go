@@ -26,6 +26,7 @@ type displayNode struct {
 	isWorkspace bool
 	isGroup     bool
 	isNote      bool
+	isSeparator bool
 
 	workspace     *workspace.WorkspaceNode
 	groupName     string
@@ -109,7 +110,7 @@ func (m Model) FileToEdit() string {
 }
 
 // New creates a new TUI model.
-func New(svc *service.Service) Model {
+func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	helpModel := help.NewBuilder().
 		WithKeys(keys).
 		WithTitle("Notebook Browser - Help").
@@ -135,18 +136,19 @@ func New(svc *service.Service) Model {
 	ti.CharLimit = 100
 
 	return Model{
-		service:        svc,
-		keys:           keys,
-		help:           helpModel,
-		viewMode:       treeView, // Default to tree view
-		table:          tbl,
-		filterInput:    ti,
-		sortColumn:     4,                           // Default sort by modified date (adjusted for new column)
-		sortAsc:        false,                       // Descending
-		jumpMap:        make(map[rune]int),
-		collapsedNodes: make(map[string]bool),
-		selected:       make(map[string]struct{}),  // Initialize selection map
-		selectedGroups: make(map[string]struct{}),  // Initialize group selection map
+		service:          svc,
+		keys:             keys,
+		help:             helpModel,
+		viewMode:         treeView, // Default to tree view
+		table:            tbl,
+		filterInput:      ti,
+		sortColumn:       4,                           // Default sort by modified date (adjusted for new column)
+		sortAsc:          false,                       // Descending
+		jumpMap:          make(map[rune]int),
+		collapsedNodes:   make(map[string]bool),
+		selected:         make(map[string]struct{}),  // Initialize selection map
+		selectedGroups:   make(map[string]struct{}),  // Initialize group selection map
+		focusedWorkspace: initialFocus,
 	}
 }
 

@@ -10,6 +10,8 @@ type KeyMap struct {
 	keymap.Base
 	FocusEcosystem  key.Binding
 	ClearFocus      key.Binding
+	FocusParent     key.Binding
+	FocusSelected   key.Binding
 	ToggleView      key.Binding
 	Search          key.Binding
 	Sort            key.Binding
@@ -36,6 +38,8 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return append(baseHelp, []key.Binding{
 		k.FocusEcosystem,
 		k.ClearFocus,
+		k.FocusParent,
+		k.FocusSelected,
 		k.ToggleView,
 		k.Search,
 		k.Sort,
@@ -65,6 +69,14 @@ var keys = KeyMap{
 	ClearFocus: key.NewBinding(
 		key.WithKeys("ctrl+g"),
 		key.WithHelp("ctrl+g", "clear focus"),
+	),
+	FocusParent: key.NewBinding(
+		key.WithKeys("-"),
+		key.WithHelp("-", "focus parent"),
+	),
+	FocusSelected: key.NewBinding(
+		key.WithKeys("."),
+		key.WithHelp(".", "focus selected"),
 	),
 	ToggleView: key.NewBinding(
 		key.WithKeys("t"),

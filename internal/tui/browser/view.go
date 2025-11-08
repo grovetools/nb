@@ -190,6 +190,9 @@ func (m Model) renderTreeView() string {
 			} else if isArchived {
 				line = lipgloss.NewStyle().Faint(true).Render(line)
 			}
+		} else if node.isSeparator {
+			// Render a visual separator line
+			line = lipgloss.NewStyle().Faint(true).Render("  ─────")
 		}
 		b.WriteString(line)
 		b.WriteString("\n")

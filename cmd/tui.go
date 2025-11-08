@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-notebook/cmd/config"
 	"github.com/mattsolo1/grove-notebook/internal/tui/browser"
 	"github.com/spf13/cobra"
@@ -32,8 +33,19 @@ This view provides a workspace-centric way to explore your entire notebook.`,
 			}
 			defer svc.Close()
 
-			// Create and run TUI
-			model := browser.New(svc)
+			// Get current workspace context to determine initial focus
+			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
+			if err != nil {
+				return fmt.Errorf("failed to get workspace context: %w", err)
+			}
+
+			var initialFocus *workspace.WorkspaceNode
+			if ctx.CurrentWorkspace.Name != "global" {
+				initialFocus = ctx.CurrentWorkspace
+			}
+
+			// Create and run TUI with initial focus
+			model := browser.New(svc, initialFocus)
 			p := tea.NewProgram(model, tea.WithAltScreen())
 
 			if _, err := p.Run(); err != nil {
