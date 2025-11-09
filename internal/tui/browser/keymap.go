@@ -29,6 +29,7 @@ type KeyMap struct {
 	Archive        key.Binding
 	Preview        key.Binding
 	Grep           key.Binding
+	ToggleColumns  key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -61,6 +62,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.SelectNone,
 		k.Archive,
 		k.Preview,
+		k.ToggleColumns,
 	})
 }
 
@@ -149,5 +151,9 @@ var keys = KeyMap{
 	Grep: key.NewBinding(
 		key.WithKeys("*"),
 		key.WithHelp("*", "grep content"),
+	),
+	ToggleColumns: key.NewBinding(
+		key.WithKeys("V"),
+		key.WithHelp("V", "toggle columns"),
 	),
 }

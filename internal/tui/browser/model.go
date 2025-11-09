@@ -1,14 +1,21 @@
 package browser
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/components/help"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
@@ -33,9 +40,10 @@ type displayNode struct {
 	note          *models.Note
 
 	// Pre-calculated for rendering
-	prefix  string
-	depth   int
-	jumpKey rune
+	prefix     string
+	depth      int
+	jumpKey    rune
+	childCount int // For groups: number of notes/plans in the group
 }
 
 // nodeID returns a unique identifier for this node (for tracking collapsed state)
@@ -98,6 +106,12 @@ type Model struct {
 	statusMessage     string
 	confirmingArchive bool
 
+	// Column Visibility
+	columnVisibility map[string]bool
+	columnSelectMode bool
+	columnList       list.Model
+	availableColumns []string
+
 	// File to edit when running in Neovim plugin mode
 	fileToEdit string
 
@@ -121,6 +135,36 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	ti.Placeholder = "Search notes..."
 	ti.CharLimit = 100
 
+	// Column Visibility Setup - load from state
+	availableColumns := []string{"TYPE", "STATUS", "TAGS", "CREATED"}
+
+	// Load saved state
+	state, err := loadState()
+	if err != nil {
+		// On error, use defaults
+		state = &tuiState{
+			ColumnVisibility: map[string]bool{
+				"TYPE":    true,
+				"STATUS":  true,
+				"TAGS":    true,
+				"CREATED": true,
+			},
+		}
+	}
+
+	columnVisibility := state.ColumnVisibility
+	var columnItems []list.Item
+	for _, col := range availableColumns {
+		columnItems = append(columnItems, columnSelectItem{name: col, selected: columnVisibility[col]})
+	}
+
+	columnList := list.New(columnItems, columnSelectDelegate{}, 40, 8)
+	columnList.Title = "Toggle Column Visibility"
+	columnList.SetShowHelp(false)
+	columnList.SetFilteringEnabled(false)
+	columnList.SetShowStatusBar(false)
+	columnList.SetShowPagination(false)
+
 	return Model{
 		service:          svc,
 		keys:             keys,
@@ -132,9 +176,13 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		collapsedNodes: map[string]bool{
 			"ws:::global": true, // Start with global workspace collapsed
 		},
-		selected:         make(map[string]struct{}), // Initialize selection map
-		selectedGroups:   make(map[string]struct{}), // Initialize group selection map
-		focusedWorkspace: initialFocus,
+		selected:          make(map[string]struct{}), // Initialize selection map
+		selectedGroups:    make(map[string]struct{}), // Initialize group selection map
+		focusedWorkspace:  initialFocus,
+		columnVisibility:  columnVisibility,
+		columnSelectMode:  false,
+		columnList:        columnList,
+		availableColumns:  availableColumns,
 	}
 }
 
@@ -178,4 +226,121 @@ func (m Model) openInEditor(path string) tea.Cmd {
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return editorFinishedMsg{err: err}
 	})
+}
+
+// columnSelectItem represents an item in the column visibility list
+type columnSelectItem struct {
+	name     string
+	selected bool
+}
+
+func (i columnSelectItem) FilterValue() string { return i.name }
+func (i columnSelectItem) Title() string {
+	if i.selected {
+		return "[x] " + i.name
+	}
+	return "[ ] " + i.name
+}
+func (i columnSelectItem) Description() string { return "" }
+
+// columnSelectDelegate is a custom delegate with minimal spacing
+type columnSelectDelegate struct{}
+
+func (d columnSelectDelegate) Height() int                             { return 1 }
+func (d columnSelectDelegate) Spacing() int                            { return 0 }
+func (d columnSelectDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d columnSelectDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	i, ok := item.(columnSelectItem)
+	if !ok {
+		return
+	}
+
+	str := i.Title()
+	if index == m.Index() {
+		str = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange).Render("│ " + str)
+	} else {
+		str = "  " + str
+	}
+
+	fmt.Fprint(w, str)
+}
+
+// getColumnListItems returns the current list items for the column selector
+func (m *Model) getColumnListItems() []list.Item {
+	var items []list.Item
+	for _, col := range m.availableColumns {
+		items = append(items, columnSelectItem{
+			name:     col,
+			selected: m.columnVisibility[col],
+		})
+	}
+	return items
+}
+
+// tuiState holds persistent TUI settings
+type tuiState struct {
+	ColumnVisibility map[string]bool `json:"column_visibility"`
+}
+
+// getStateFilePath returns the path to the TUI state file
+func getStateFilePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	stateDir := filepath.Join(home, ".grove", "nb")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		return "", err
+	}
+	return filepath.Join(stateDir, "tui-state.json"), nil
+}
+
+// loadState loads the TUI state from disk
+func loadState() (*tuiState, error) {
+	path, err := getStateFilePath()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Return default state if file doesn't exist
+			return &tuiState{
+				ColumnVisibility: map[string]bool{
+					"TYPE":    true,
+					"STATUS":  true,
+					"TAGS":    true,
+					"CREATED": true,
+				},
+			}, nil
+		}
+		return nil, err
+	}
+
+	var state tuiState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, err
+	}
+
+	return &state, nil
+}
+
+// saveState saves the TUI state to disk
+func (m *Model) saveState() error {
+	path, err := getStateFilePath()
+	if err != nil {
+		return err
+	}
+
+	state := tuiState{
+		ColumnVisibility: m.columnVisibility,
+	}
+
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0644)
 }

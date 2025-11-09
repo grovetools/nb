@@ -56,6 +56,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetSize(msg.Width, msg.Height)
+		m.columnList.SetSize(40, 8) // Set a reasonable size for the column picker
 		return m, nil
 
 	case workspacesLoadedMsg:
@@ -120,6 +121,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.help.ShowAll {
 			m.help.Toggle()
 			return m, nil
+		}
+
+		// Handle column selection mode
+		if m.columnSelectMode {
+			switch msg.String() {
+			case "enter", "esc", "V":
+				m.columnSelectMode = false
+				return m, nil
+			case " ":
+				// Toggle selection
+				if i, ok := m.columnList.SelectedItem().(columnSelectItem); ok {
+					i.selected = !i.selected
+					m.columnVisibility[i.name] = i.selected
+					m.columnList.SetItem(m.columnList.Index(), i)
+					// Save state to disk
+					_ = m.saveState()
+				}
+				return m, nil
+			default:
+				m.columnList, cmd = m.columnList.Update(msg)
+				return m, cmd
+			}
 		}
 
 		// Handle archive confirmation mode
@@ -329,6 +352,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterInput.Placeholder = "Grep content..."
 			m.filterInput.Focus()
 			return m, textinput.Blink
+		case key.Matches(msg, m.keys.ToggleColumns):
+			m.columnSelectMode = true
+			m.columnList.SetItems(m.getColumnListItems())
+			m.columnList.SetSize(40, 8)
+			return m, nil
 		case key.Matches(msg, m.keys.Sort):
 			m.sortAscending = !m.sortAscending
 			m.applyFilterAndSort()
@@ -670,6 +698,7 @@ func (m *Model) buildDisplayTree() {
 					workspaceName: ws.Name,
 					prefix:        groupPrefix.String(),
 					depth:         ws.Depth + 1,
+					childCount:    len(notesInGroup),
 				}
 				nodes = append(nodes, groupNode)
 
@@ -727,6 +756,7 @@ func (m *Model) buildDisplayTree() {
 							workspaceName: ws.Name,
 							prefix:        archivePrefix.String(),
 							depth:         ws.Depth + 2,
+							childCount:    len(archiveNotes),
 						}
 						nodes = append(nodes, archiveNode)
 
@@ -778,6 +808,7 @@ func (m *Model) buildDisplayTree() {
 					workspaceName: ws.Name,
 					prefix:        plansPrefix.String(),
 					depth:         ws.Depth + 1,
+					childCount:    len(planGroups), // Count of plans, not notes
 				}
 				nodes = append(nodes, plansParentNode)
 
@@ -822,6 +853,7 @@ func (m *Model) buildDisplayTree() {
 							workspaceName: ws.Name,
 							prefix:        planPrefix.String(),
 							depth:         ws.Depth + 2,
+							childCount:    len(planNotes),
 						}
 						nodes = append(nodes, planNode)
 

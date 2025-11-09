@@ -19,31 +19,59 @@ type notesLoadedMsg struct {
 
 func fetchFocusedNotesCmd(svc *service.Service, focusedWS *workspace.WorkspaceNode) tea.Cmd {
 	return func() tea.Msg {
-		// Get context for the focused workspace
-		wsCtx, err := svc.GetWorkspaceContext(focusedWS.Path)
-		if err != nil {
-			// Return empty list on error
-			return notesLoadedMsg{notes: []*models.Note{}}
+		var notesToLoad []*workspace.WorkspaceNode
+		notesToLoad = append(notesToLoad, focusedWS)
+
+		// If focused on an ecosystem, also load notes from its direct children
+		if focusedWS.IsEcosystem() {
+			allWorkspaces := svc.GetWorkspaceProvider().All()
+			for _, ws := range allWorkspaces {
+				if ws.IsChildOf(focusedWS.Path) {
+					notesToLoad = append(notesToLoad, ws)
+				}
+			}
 		}
 
-		// Fetch notes for the focused workspace
-		focusedNotes, err := svc.ListAllNotes(wsCtx)
-		if err != nil {
-			focusedNotes = []*models.Note{} // Continue with empty list on error
+		var allNotes []*models.Note
+		// Use a map to deduplicate notes by path
+		seenNotes := make(map[string]bool)
+
+		for _, wsNode := range notesToLoad {
+			// Get context for the workspace
+			wsCtx, err := svc.GetWorkspaceContext(wsNode.Path)
+			if err != nil {
+				// Log or handle error, for now, we skip
+				continue
+			}
+
+			// Fetch notes for the workspace
+			notes, err := svc.ListAllNotes(wsCtx)
+			if err == nil {
+				for _, note := range notes {
+					if !seenNotes[note.Path] {
+						allNotes = append(allNotes, note)
+						seenNotes[note.Path] = true
+					}
+				}
+			}
 		}
 
 		// Also fetch global notes explicitly
 		globalNotes, err := svc.ListAllGlobalNotes()
-		if err != nil {
-			globalNotes = []*models.Note{} // Continue with empty list on error
+		if err == nil {
+			for _, note := range globalNotes {
+				if !seenNotes[note.Path] {
+					allNotes = append(allNotes, note)
+					seenNotes[note.Path] = true
+				}
+			}
 		}
 
 		// Combine and sort
-		notes := append(focusedNotes, globalNotes...)
-		sort.Slice(notes, func(i, j int) bool {
-			return notes[i].ModifiedAt.After(notes[j].ModifiedAt)
+		sort.Slice(allNotes, func(i, j int) bool {
+			return allNotes[i].ModifiedAt.After(allNotes[j].ModifiedAt)
 		})
-		return notesLoadedMsg{notes: notes}
+		return notesLoadedMsg{notes: allNotes}
 	}
 }
 

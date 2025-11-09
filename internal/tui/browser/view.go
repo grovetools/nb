@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 )
@@ -19,6 +20,22 @@ func (m Model) View() string {
 
 	if m.help.ShowAll {
 		return m.help.View()
+	}
+
+	if m.columnSelectMode {
+		listView := m.columnList.View()
+		styledView := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(theme.DefaultTheme.Colors.Cyan).
+			Padding(1, 2).
+			Render(listView)
+		helpText := lipgloss.NewStyle().
+			Faint(true).
+			Width(lipgloss.Width(styledView)).
+			Align(lipgloss.Center).
+			Render("\n\nPress space to toggle • Enter/Esc/V to close")
+		content := lipgloss.JoinVertical(lipgloss.Left, styledView, helpText)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 	}
 
 	var viewContent string
@@ -119,7 +136,7 @@ func (m Model) renderTreeView() string {
 		node := m.displayNodes[i]
 		cursor := "  "
 		if i == m.cursor {
-			cursor = theme.DefaultTheme.Highlight.Render("▶ ")
+			cursor = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange).Render("▶ ")
 		}
 
 		var line string
@@ -136,18 +153,24 @@ func (m Model) renderTreeView() string {
 			}
 
 			wsName := node.workspace.Name
-			line = fmt.Sprintf("%s%s%s%s", cursor, node.prefix, foldIndicator, wsName)
+
 			if i == m.cursor {
-				line = theme.DefaultTheme.Highlight.Render(line)
-			} else if node.workspace.Name == "global" {
-				// Global notes workspace: green + bold
-				line = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Green).Render(line)
-			} else if node.workspace.IsEcosystem() {
-				// Ecosystems: cyan + bold
-				line = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Cyan).Render(line)
+				// For selected rows, use underline instead of background
+				prefix := theme.DefaultTheme.Muted.Render(node.prefix + foldIndicator)
+				styledName := lipgloss.NewStyle().Underline(true).Render(wsName)
+				line = cursor + prefix + styledName
 			} else {
-				// Regular workspaces: violet + bold
-				line = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Violet).Render(line)
+				// For non-selected rows, apply muted to prefix and color to name
+				prefix := theme.DefaultTheme.Muted.Render(node.prefix + foldIndicator)
+				var styledName string
+				if node.workspace.Name == "global" {
+					styledName = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Green).Render(wsName)
+				} else if node.workspace.IsEcosystem() {
+					styledName = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Cyan).Render(wsName)
+				} else {
+					styledName = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Violet).Render(wsName)
+				}
+				line = cursor + prefix + styledName
 			}
 		} else if node.isGroup {
 			// Add fold indicator
@@ -197,14 +220,32 @@ func (m Model) renderTreeView() string {
 				}
 			}
 
-			line = fmt.Sprintf("%s%s%s%s%s", cursor, node.prefix, foldIndicator, selIndicator, displayName)
+			// Add count if available
+			countSuffix := ""
+			if node.childCount > 0 {
+				countSuffix = fmt.Sprintf(" (%d)", node.childCount)
+			}
+
 			if i == m.cursor {
-				line = theme.DefaultTheme.Highlight.Render(line)
-			} else if isArchived {
-				line = lipgloss.NewStyle().Faint(true).Render(line)
-			} else if node.isPlan() {
-				// Individual plan nodes: yellow (not bold)
-				line = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Yellow).Render(line)
+				// For selected rows, use underline instead of background
+				prefix := theme.DefaultTheme.Muted.Render(node.prefix + foldIndicator)
+				content := lipgloss.NewStyle().Underline(true).Render(selIndicator + displayName)
+				count := theme.DefaultTheme.Muted.Render(countSuffix)
+				line = cursor + prefix + content + count
+			} else {
+				// For non-selected rows, apply muted to prefix and count, color to name
+				prefix := theme.DefaultTheme.Muted.Render(node.prefix + foldIndicator)
+				count := theme.DefaultTheme.Muted.Render(countSuffix)
+
+				var styledName string
+				if isArchived {
+					styledName = lipgloss.NewStyle().Faint(true).Render(selIndicator + displayName)
+				} else if node.isPlan() {
+					styledName = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Yellow).Render(selIndicator + displayName)
+				} else {
+					styledName = selIndicator + displayName
+				}
+				line = cursor + prefix + styledName + count
 			}
 		} else if node.isNote {
 			// Get type-specific icon
@@ -234,12 +275,21 @@ func (m Model) renderTreeView() string {
 				}
 			}
 
-			line = fmt.Sprintf("%s%s%s %s", cursor, node.prefix, selIndicator, title)
-
 			if i == m.cursor {
-				line = theme.DefaultTheme.Highlight.Render(line)
-			} else if isArchived {
-				line = lipgloss.NewStyle().Faint(true).Render(line)
+				// For selected rows, use underline instead of background
+				prefix := theme.DefaultTheme.Muted.Render(node.prefix)
+				content := lipgloss.NewStyle().Underline(true).Render(fmt.Sprintf("%s %s", selIndicator, title))
+				line = cursor + prefix + content
+			} else {
+				// For non-selected rows, apply muted to prefix
+				prefix := theme.DefaultTheme.Muted.Render(node.prefix)
+				var styledContent string
+				if isArchived {
+					styledContent = lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("%s %s", selIndicator, title))
+				} else {
+					styledContent = fmt.Sprintf("%s %s", selIndicator, title)
+				}
+				line = cursor + prefix + styledContent
 			}
 		} else if node.isSeparator {
 			// Render a visual separator line
@@ -261,7 +311,7 @@ func (m Model) renderTreeView() string {
 func (m Model) renderTableView() string {
 	var b strings.Builder
 
-	const separator = " │ "
+	separator := theme.DefaultTheme.Muted.Render(" │ ")
 	const selectionWidth = 2
 
 	// Calculate column widths based on content
@@ -273,12 +323,22 @@ func (m Model) renderTableView() string {
 	createdWidth := colWidths[4]
 
 	// Header
-	header := padOrTruncate("", selectionWidth) +
-		padOrTruncate("WORKSPACE / NOTE", nameWidth) + separator +
-		padOrTruncate("TYPE", typeWidth) + separator +
-		padOrTruncate("STATUS", statusWidth) + separator +
-		padOrTruncate("TAGS", tagsWidth) + separator +
-		padOrTruncate("CREATED", createdWidth)
+	var headerParts []string
+	headerParts = append(headerParts, padOrTruncate("", selectionWidth))
+	headerParts = append(headerParts, padOrTruncate("WORKSPACE / NOTE", nameWidth))
+	if m.columnVisibility["TYPE"] {
+		headerParts = append(headerParts, separator, padOrTruncate("TYPE", typeWidth))
+	}
+	if m.columnVisibility["STATUS"] {
+		headerParts = append(headerParts, separator, padOrTruncate("STATUS", statusWidth))
+	}
+	if m.columnVisibility["TAGS"] {
+		headerParts = append(headerParts, separator, padOrTruncate("TAGS", tagsWidth))
+	}
+	if m.columnVisibility["CREATED"] {
+		headerParts = append(headerParts, separator, padOrTruncate("CREATED", createdWidth))
+	}
+	header := strings.Join(headerParts, "")
 
 	b.WriteString(theme.DefaultTheme.TableHeader.Render(header))
 	b.WriteString("\n")
@@ -302,7 +362,7 @@ func (m Model) renderTableView() string {
 		// Selection and Name Column (Hierarchical)
 		selIndicator := " "
 		if isSelected {
-			selIndicator = theme.DefaultTheme.Highlight.Render("▶")
+			selIndicator = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange).Render("▶")
 		}
 		selCol = selIndicator
 
@@ -316,7 +376,7 @@ func (m Model) renderTableView() string {
 					foldIndicator = "▼ "
 				}
 			}
-			nameBuilder.WriteString(fmt.Sprintf("%s%s%s", node.prefix, foldIndicator, node.workspace.Name))
+			nameBuilder.WriteString(fmt.Sprintf("%s%s", node.prefix+foldIndicator, node.workspace.Name))
 		} else if node.isGroup {
 			foldIndicator := " "
 			if node.isFoldable() {
@@ -330,7 +390,11 @@ func (m Model) renderTableView() string {
 			if node.isPlan() {
 				displayName = strings.TrimPrefix(displayName, "plans/")
 			}
-			nameBuilder.WriteString(fmt.Sprintf("%s%s%s", node.prefix, foldIndicator, displayName))
+			// Add count if available
+			if node.childCount > 0 {
+				displayName = fmt.Sprintf("%s (%d)", displayName, node.childCount)
+			}
+			nameBuilder.WriteString(fmt.Sprintf("%s%s", node.prefix+foldIndicator, displayName))
 		} else if node.isNote {
 			nameBuilder.WriteString(fmt.Sprintf("%s%s %s", node.prefix, getNoteIcon(string(node.note.Type)), node.note.Title))
 		} else if node.isSeparator {
@@ -348,59 +412,173 @@ func (m Model) renderTableView() string {
 			statusCol = m.getPlanStatus(node.workspaceName, node.groupName)
 		}
 
-		// Determine the style to apply
-		var rowStyle lipgloss.Style
-		hasStyle := false
+		// Build row with proper styling
+		var row string
 
-		if node.isWorkspace {
-			hasStyle = true
-			if node.workspace.Name == "global" {
-				rowStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Green)
-			} else if node.workspace.IsEcosystem() {
-				rowStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Cyan)
-			} else {
-				rowStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Violet)
-			}
-		} else if node.isGroup {
-			isArchived := strings.Contains(node.groupName, "/.archive/") || node.groupName == ".archive"
-			if isArchived {
-				hasStyle = true
-				rowStyle = lipgloss.NewStyle().Faint(true)
-			} else if node.isPlan() {
-				hasStyle = true
-				rowStyle = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Yellow)
-			}
-		} else if node.isNote {
-			isArchived := strings.Contains(node.note.Path, "/.archive/")
-			if isArchived {
-				hasStyle = true
-				rowStyle = lipgloss.NewStyle().Faint(true)
-			}
-		}
-
-		// Add reverse video for selection
 		if isSelected {
-			if !hasStyle {
-				rowStyle = lipgloss.NewStyle()
+			// For selected rows, only underline the name column content (not prefix, not other columns)
+			// Build the name column with muted prefix and underlined content
+			var styledNameCol string
+			if node.isSeparator {
+				styledNameCol = theme.DefaultTheme.Muted.Render(padOrTruncate(nameCol, nameWidth))
+			} else {
+				// Parse out the actual prefix and content from the raw name parts
+				var prefix, content string
+
+				if node.isWorkspace {
+					foldIndicator := " "
+					if node.isFoldable() {
+						if m.collapsedNodes[node.nodeID()] {
+							foldIndicator = "▶ "
+						} else {
+							foldIndicator = "▼ "
+						}
+					}
+					prefix = theme.DefaultTheme.Muted.Render(node.prefix + foldIndicator)
+					content = lipgloss.NewStyle().Underline(true).Render(node.workspace.Name)
+				} else if node.isGroup {
+					foldIndicator := " "
+					if node.isFoldable() {
+						if m.collapsedNodes[node.nodeID()] {
+							foldIndicator = "▶ "
+						} else {
+							foldIndicator = "▼ "
+						}
+					}
+					displayName := node.groupName
+					if node.isPlan() {
+						displayName = strings.TrimPrefix(displayName, "plans/")
+					}
+					if node.childCount > 0 {
+						displayName = fmt.Sprintf("%s (%d)", displayName, node.childCount)
+					}
+					prefix = theme.DefaultTheme.Muted.Render(node.prefix + foldIndicator)
+					content = lipgloss.NewStyle().Underline(true).Render(displayName)
+				} else if node.isNote {
+					prefix = theme.DefaultTheme.Muted.Render(node.prefix)
+					content = lipgloss.NewStyle().Underline(true).Render(fmt.Sprintf("%s %s", getNoteIcon(string(node.note.Type)), node.note.Title))
+				}
+
+				styledNameCol = padOrTruncate(prefix+content, nameWidth)
 			}
-			rowStyle = rowStyle.Reverse(true)
-			hasStyle = true
-		}
 
-		// Build row by concatenating plain padded columns with separators
-		row := padOrTruncate(selCol, selectionWidth) +
-			padOrTruncate(nameCol, nameWidth) + separator +
-			padOrTruncate(typeCol, typeWidth) + separator +
-			padOrTruncate(statusCol, statusWidth) + separator +
-			padOrTruncate(tagsCol, tagsWidth) + separator +
-			padOrTruncate(createdCol, createdWidth)
+			// Other columns just padded, no styling
+			typeCol = padOrTruncate(typeCol, typeWidth)
+			statusCol = padOrTruncate(statusCol, statusWidth)
+			tagsCol = padOrTruncate(tagsCol, tagsWidth)
+			createdCol = padOrTruncate(createdCol, createdWidth)
 
-		// Apply style if any, ensuring no width limit
-		if hasStyle {
-			b.WriteString(rowStyle.Inline(true).Render(row))
+			var rowParts []string
+			rowParts = append(rowParts, padOrTruncate(selCol, selectionWidth))
+			rowParts = append(rowParts, styledNameCol)
+			if m.columnVisibility["TYPE"] {
+				rowParts = append(rowParts, separator, typeCol)
+			}
+			if m.columnVisibility["STATUS"] {
+				rowParts = append(rowParts, separator, statusCol)
+			}
+			if m.columnVisibility["TAGS"] {
+				rowParts = append(rowParts, separator, tagsCol)
+			}
+			if m.columnVisibility["CREATED"] {
+				rowParts = append(rowParts, separator, createdCol)
+			}
+			row = strings.Join(rowParts, "")
 		} else {
-			b.WriteString(row)
+			// For non-selected rows, rebuild name column with proper styling
+			var styledNameCol string
+			if node.isSeparator {
+				styledNameCol = theme.DefaultTheme.Muted.Render(padOrTruncate(nameCol, nameWidth))
+			} else {
+				// Rebuild from node components to properly style prefix vs content
+				var prefix, content string
+
+				if node.isWorkspace {
+					foldIndicator := " "
+					if node.isFoldable() {
+						if m.collapsedNodes[node.nodeID()] {
+							foldIndicator = "▶ "
+						} else {
+							foldIndicator = "▼ "
+						}
+					}
+					prefix = theme.DefaultTheme.Muted.Render(node.prefix + foldIndicator)
+
+					// Apply workspace color
+					if node.workspace.Name == "global" {
+						content = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Green).Render(node.workspace.Name)
+					} else if node.workspace.IsEcosystem() {
+						content = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Cyan).Render(node.workspace.Name)
+					} else {
+						content = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Violet).Render(node.workspace.Name)
+					}
+				} else if node.isGroup {
+					foldIndicator := " "
+					if node.isFoldable() {
+						if m.collapsedNodes[node.nodeID()] {
+							foldIndicator = "▶ "
+						} else {
+							foldIndicator = "▼ "
+						}
+					}
+					displayName := node.groupName
+					if node.isPlan() {
+						displayName = strings.TrimPrefix(displayName, "plans/")
+					}
+					if node.childCount > 0 {
+						displayName = fmt.Sprintf("%s (%d)", displayName, node.childCount)
+					}
+					prefix = theme.DefaultTheme.Muted.Render(node.prefix + foldIndicator)
+
+					// Apply group styling
+					isArchived := strings.Contains(node.groupName, "/.archive/") || node.groupName == ".archive"
+					if isArchived {
+						content = lipgloss.NewStyle().Faint(true).Render(displayName)
+					} else if node.isPlan() {
+						content = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Yellow).Render(displayName)
+					} else {
+						content = displayName
+					}
+				} else if node.isNote {
+					prefix = theme.DefaultTheme.Muted.Render(node.prefix)
+					noteContent := fmt.Sprintf("%s %s", getNoteIcon(string(node.note.Type)), node.note.Title)
+
+					// Apply note styling
+					isArchived := strings.Contains(node.note.Path, "/.archive/")
+					if isArchived {
+						content = lipgloss.NewStyle().Faint(true).Render(noteContent)
+					} else {
+						content = noteContent
+					}
+				}
+
+				styledNameCol = padOrTruncate(prefix+content, nameWidth)
+			}
+
+			typeCol = padOrTruncate(typeCol, typeWidth)
+			statusCol = padOrTruncate(statusCol, statusWidth)
+			tagsCol = padOrTruncate(tagsCol, tagsWidth)
+			createdCol = padOrTruncate(createdCol, createdWidth)
+
+			var rowParts []string
+			rowParts = append(rowParts, padOrTruncate(selCol, selectionWidth))
+			rowParts = append(rowParts, styledNameCol)
+			if m.columnVisibility["TYPE"] {
+				rowParts = append(rowParts, separator, typeCol)
+			}
+			if m.columnVisibility["STATUS"] {
+				rowParts = append(rowParts, separator, statusCol)
+			}
+			if m.columnVisibility["TAGS"] {
+				rowParts = append(rowParts, separator, tagsCol)
+			}
+			if m.columnVisibility["CREATED"] {
+				rowParts = append(rowParts, separator, createdCol)
+			}
+			row = strings.Join(rowParts, "")
 		}
+
+		b.WriteString(row)
 		b.WriteString("\n")
 	}
 
@@ -508,6 +686,20 @@ func (m Model) calculateTableColumnWidths() [5]int {
 		maxCreated = maxCreatedWidth
 	}
 
+	// Apply visibility constraints
+	if !m.columnVisibility["TYPE"] {
+		maxType = 0
+	}
+	if !m.columnVisibility["STATUS"] {
+		maxStatus = 0
+	}
+	if !m.columnVisibility["TAGS"] {
+		maxTags = 0
+	}
+	if !m.columnVisibility["CREATED"] {
+		maxCreated = 0
+	}
+
 	return [5]int{maxName, maxType, maxStatus, maxTags, maxCreated}
 }
 
@@ -600,25 +792,31 @@ func getNoteIcon(noteType string) string {
 	}
 }
 
-// getPlanStatus reads the plan status from the .grove-plan yaml file
+// getPlanStatus reads the plan status from the .grove-plan.yml file
 func (m *Model) getPlanStatus(workspaceName, planGroup string) string {
-	// Find workspace to get path
-	var wsPath string
+	// Find workspace to get the node
+	var wsNode *workspace.WorkspaceNode
 	for _, ws := range m.workspaces {
 		if ws.Name == workspaceName {
-			wsPath = ws.Path
+			wsNode = ws
 			break
 		}
 	}
-	if wsPath == "" {
+	if wsNode == nil {
+		return "unknown"
+	}
+
+	// Get the plans base directory for this workspace using the locator
+	plansBaseDir, err := m.service.GetNotebookLocator().GetPlansDir(wsNode)
+	if err != nil {
 		return "unknown"
 	}
 
 	// Extract plan name (e.g., "plans/my-plan" -> "my-plan")
 	planName := strings.TrimPrefix(planGroup, "plans/")
 
-	// Construct path to .grove-plan file
-	planFile := filepath.Join(wsPath, "plans", planName, ".grove-plan")
+	// Construct path to .grove-plan.yml file
+	planFile := filepath.Join(plansBaseDir, planName, ".grove-plan.yml")
 
 	// Read and parse the file
 	data, err := os.ReadFile(planFile)
@@ -633,11 +831,13 @@ func (m *Model) getPlanStatus(workspaceName, planGroup string) string {
 		if strings.HasPrefix(line, "status:") {
 			status := strings.TrimSpace(strings.TrimPrefix(line, "status:"))
 			status = strings.Trim(status, `"'`)
-			return status
+			if status != "" {
+				return status
+			}
 		}
 	}
 
-	return "unknown"
+	return "pending" // Default to pending if status field is empty or not found
 }
 
 // getPlanStatusIcon returns the appropriate icon for a plan status
