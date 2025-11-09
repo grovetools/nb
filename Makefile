@@ -28,15 +28,15 @@ LDFLAGS = -ldflags="\
 .PHONY: all build test clean fmt vet lint run check dev build-all help
 all: build
 
-# Build the binary with FTS5 support
+# Build the binary
 build:
 	@mkdir -p $(BUILD_DIR)
 	@echo "Building $(BINARY_NAME) version $(VERSION)..."
 	@if [ -n "$(GOOS)" ] && [ -n "$(GOARCH)" ]; then \
 		echo "Cross-compiling for $(GOOS)/$(GOARCH)..."; \
-		GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .; \
+		GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .; \
 	else \
-		$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .; \
+		$(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .; \
 	fi
 
 # Clean build artifacts
@@ -45,35 +45,35 @@ clean:
 
 # Run tests
 test:
-	$(GO) test $(GOFLAGS) ./...
+	$(GO) test ./...
 
 # Run tests with verbose output
 test-verbose:
-	$(GO) test $(GOFLAGS) -v ./...
+	$(GO) test -v ./...
 
 # Run tests with coverage
 test-coverage:
-	$(GO) test $(GOFLAGS) -coverprofile=coverage.out ./...
+	$(GO) test -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
 # Run tests for a specific package
 test-pkg:
-	$(GO) test $(GOFLAGS) -v ./$(PKG)
+	$(GO) test -v ./$(PKG)
 
 # Run a specific test
 test-run:
-	$(GO) test $(GOFLAGS) -v -run $(TEST) ./...
+	$(GO) test -v -run $(TEST) ./...
 
 # Run benchmarks
 bench:
-	$(GO) test $(GOFLAGS) -bench=. -benchmem ./...
+	$(GO) test -bench=. -benchmem ./...
 
 # Development build with race detector
 dev:
 	@mkdir -p $(BUILD_DIR)
 	@echo "Building $(BINARY_NAME) version $(VERSION) with race detector..."
-	$(GO) build $(GOFLAGS) -race $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .
+	$(GO) build -race $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .
 
 # Lint the code
 lint:
@@ -94,13 +94,13 @@ build-all:
 		arch=$$(echo $$platform | cut -d'/' -f2); \
 		output_name="$(BINARY_NAME)-$${os}-$${arch}"; \
 		echo "  -> Building $${output_name} version $(VERSION)"; \
-		GOOS=$$os GOARCH=$$arch $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(DIST_DIR)/$${output_name} .; \
+		GOOS=$$os GOARCH=$$arch $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$${output_name} .; \
 	done
 
 # Help
 help:
 	@echo "Available targets:"
-	@echo "  make build          - Build nb with FTS5 support"
+	@echo "  make build          - Build nb"
 	@echo "  make clean          - Remove build artifacts"
 	@echo "  make test           - Run all tests"
 	@echo "  make test-verbose   - Run tests with verbose output"

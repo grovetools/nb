@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
-# nb build script with FTS5 support
+# nb build script
 
 set -e
 
 BINARY_NAME="nb"
-BUILD_FLAGS="-tags fts5"
+BUILD_FLAGS=""
 
-echo "Building nb with FTS5 support..."
+echo "Building nb..."
 
 # Detect OS and architecture
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')

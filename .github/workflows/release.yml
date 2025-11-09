@@ -52,13 +52,12 @@ jobs:
 
       - name: Build binary
         run: |
-          export CGO_ENABLED=1
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
           mkdir -p dist
           output_name="nb-${{ matrix.goos }}-${{ matrix.goarch }}"
           echo "Building ${output_name} version ${{ github.ref_name }}"
-          go build -tags "fts5" -ldflags="-X 'github.com/mattsolo1/grove-core/version.Version=${{ github.ref_name }}'" -o dist/${output_name} .
+          go build -ldflags="-X 'github.com/mattsolo1/grove-core/version.Version=${{ github.ref_name }}'" -o dist/${output_name} .
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
