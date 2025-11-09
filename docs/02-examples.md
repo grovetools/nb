@@ -38,7 +38,7 @@ This example covers the fundamental commands for creating, finding, and organizi
 
 3.  **List and Search Notes**
 
-    The `list` and `search` commands query the note database. The search is powered by SQLite FTS5 for full-text queries.
+    The `list` and `search` commands query notes on the filesystem. Search uses ripgrep (or grep as a fallback) for fast full-text queries.
 
     ```bash
     # List all notes in the current workspace and branch
@@ -46,14 +46,6 @@ This example covers the fundamental commands for creating, finding, and organizi
 
     # Search for notes containing "api" across ALL workspaces
     nb search "api" --workspaces
-    ```
-
-4.  **Manage Notes in the TUI**
-
-    The `nb manage` command starts a terminal interface for browsing, filtering, and performing bulk actions like archiving.
-
-    ```bash
-    nb manage
     ```
 
 ### Example 2: Neovim Integration

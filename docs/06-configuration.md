@@ -9,7 +9,7 @@ The `nb` command-line tool is configured through a YAML file, environment variab
 **Example `config.yaml`:**
 
 ```yaml
-# Directory where nb stores its data, including the workspace database and search index.
+# Directory where nb stores its data, including the workspace database.
 data_dir: ~/.local/share/nb
 
 # The editor command to use when creating new notes.
@@ -49,7 +49,7 @@ templates:
 
 The following keys can be set in `config.yaml`:
 
--   **`data_dir`**: Specifies the directory for operational data, including the SQLite databases for the workspace registry (`workspaces.db`) and the search index (`index.db`).
+-   **`data_dir`**: Specifies the directory for operational data, including the SQLite database for the workspace registry (`workspaces.db`).
     -   **Default**: `~/.local/share/nb`
 
 -   **`editor`**: The command used to open a text editor for new or existing notes.

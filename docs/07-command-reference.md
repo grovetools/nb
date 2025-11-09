@@ -134,7 +134,7 @@ nb search <query> [flags]
 
 **Description**
 
-Searches the content and titles of notes using SQLite's FTS5 extension for full-text queries. The search is scoped to the current workspace by default.
+Searches the content and titles of notes using ripgrep (or grep as a fallback) for full-text queries. The search is scoped to the current workspace by default.
 
 **Arguments & Flags**
 
@@ -153,45 +153,6 @@ nb search "API authentication"
 
 # Search for "database" in 'learn' notes across all workspaces
 nb search "database" --all -t learn
-```
-
----
-
-### `nb manage`
-
-Launches a terminal user interface (TUI) to browse and manage notes.
-
-**Usage**
-
-```bash
-nb manage [flags]
-```
-
-**Description**
-
-This command starts a full-screen TUI for interacting with notes. It allows for navigation, filtering, selection, and bulk operations like archiving.
-
-**Arguments & Flags**
-
-| Flag              | Shorthand | Description                                                                     | Default |
-| ----------------- | --------- | ------------------------------------------------------------------------------- | ------- |
-| `--type`          | `-t`      | Start the TUI with an initial filter for a specific type (prefix match).        | (none)  |
-| `--exclude-type`  | `-e`      | Exclude notes by type (prefix match, can be specified multiple times).          | (none)  |
-
-**Examples**
-
-```bash
-# Open the interactive note manager for the current workspace
-nb manage
-
-# Show only LLM notes
-nb manage --type llm
-
-# Show all notes except plans
-nb manage --exclude-type plans
-
-# Exclude multiple types
-nb manage --exclude-type plans --exclude-type archive
 ```
 
 ---
@@ -305,7 +266,6 @@ Analyzes notes and fixes common formatting and metadata issues, which is useful 
 | `--all-workspaces`   |           | Run the migration on all registered workspaces.                    | `false`    |
 | `--no-backup`        |           | Do not create backup files.                                        | `false`    |
 | `--preserve-timestamps` |        | Preserve original file modification times.                         | `true`     |
-| `--index-sqlite`     |           | Create or update SQLite entries for the notes.                     | `false`    |
 
 **Example**
 

@@ -14,7 +14,6 @@ For each of the following commands, provide:
 - `nb quick` (from `cmd/quick.go`)
 - `nb list` (from `cmd/list.go`)
 - `nb search` (from `cmd/search.go`)
-- `nb manage` (from `cmd/manage.go`)
 - `nb archive` (from `cmd/archive.go`)
 - `nb move` (from `cmd/move.go`)
 - `nb migrate` (from `cmd/migrate.go`)

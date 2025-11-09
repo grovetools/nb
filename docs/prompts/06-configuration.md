@@ -8,7 +8,7 @@ You are an expert technical writer. Based on `cmd/config/config.go` and `pkg/ser
     - Provide an example `config.yaml` showing all default settings.
 2.  **Configuration Keys**:
     - Detail each key that can be set in the config file:
-        - `data_dir`: Explain its purpose (stores SQLite databases for workspaces and search index). Default: `~/.local/share/nb`.
+        - `data_dir`: Explain its purpose (stores SQLite database for workspace registry). Default: `~/.local/share/nb`.
         - `editor`: The command to open the default text editor. Default: `$EDITOR` environment variable.
         - `default_type`: The default note type for `nb new`. Default: `current`.
         - `templates`: Explain how users can define custom templates for different note types.

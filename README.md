@@ -13,7 +13,7 @@ The main notebook directory (default: `~/Documents/nb`) is intended to be stored
 ## Key Features
 
 *   **Note Organization**: Notes are stored as Markdown files.
-*   **Search**: Provides full-text search capabilities using a SQLite FTS5 index.
+*   **Search**: Provides full-text search capabilities using ripgrep (with grep fallback).
 *   **`grove-flow` Storage**: Can be configured as a storage location for `grove-flow` plans and chat sessions.
 *   **Editor Integration**: Includes a Neovim plugin for creating and searching notes.
 *   **Obsidian Compatibility**: The notebook directory can be opened as an Obsidian vault.
@@ -23,7 +23,7 @@ The main notebook directory (default: `~/Documents/nb`) is intended to be stored
 
 `nb` uses a SQLite database (`workspaces.db`) in its data directory (`~/.local/share/nb`) to register project directories as workspaces. When a command is run, `nb` detects the current workspace by traversing up from the current directory to find a registered path.
 
-Notes are stored in a hierarchical directory structure, typically `NOTEBOOK_DIR/TYPE/WORKSPACE_NAME/BRANCH_NAME/NOTE_TYPE/`. For example, a note of type `current` for the `main` branch of the `my-api` repository would be stored in `~/Documents/nb/repos/my-api/main/current/`. A SQLite database (`index.db`) is used to index notes for search.
+Notes are stored in a hierarchical directory structure, typically `NOTEBOOK_DIR/TYPE/WORKSPACE_NAME/BRANCH_NAME/NOTE_TYPE/`. For example, a note of type `current` for the `main` branch of the `my-api` repository would be stored in `~/Documents/nb/repos/my-api/main/current/`. Search is performed directly on the filesystem using ripgrep or grep.
 
 ## Ecosystem Integration
 
