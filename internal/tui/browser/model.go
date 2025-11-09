@@ -103,6 +103,9 @@ type Model struct {
 
 	// File to edit when running in Neovim plugin mode
 	fileToEdit string
+
+	// Grep mode state
+	isGrepping bool // True when in content search mode
 }
 
 // FileToEdit returns the file path that should be edited (for Neovim integration)

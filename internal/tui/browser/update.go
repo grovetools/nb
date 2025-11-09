@@ -3,6 +3,7 @@ package browser
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -146,6 +147,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, m.keys.Back): // Esc
 				m.filterInput.SetValue("")
 				m.filterInput.Blur()
+				m.isGrepping = false // Exit grep mode
 				m.applyFilterAndSort()
 				return m, nil
 			case key.Matches(msg, m.keys.Confirm): // Enter
@@ -153,7 +155,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			default:
 				m.filterInput, cmd = m.filterInput.Update(msg)
-				m.applyFilterAndSort()
+				if m.isGrepping {
+					m.applyGrepFilter()
+				} else {
+					m.applyFilterAndSort()
+				}
 				return m, cmd
 			}
 		}
@@ -345,6 +351,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 			m.table.SetCursor(0)
 		case key.Matches(msg, m.keys.Search):
+			m.isGrepping = false
+			m.filterInput.Placeholder = "Search notes..."
+			m.filterInput.Focus()
+			return m, textinput.Blink
+		case key.Matches(msg, m.keys.Grep):
+			m.isGrepping = true
+			m.filterInput.Placeholder = "Grep content..."
 			m.filterInput.Focus()
 			return m, textinput.Blink
 		case key.Matches(msg, m.keys.Sort):
@@ -1163,6 +1176,181 @@ func (m *Model) buildDisplayTree() {
 
 	m.displayNodes = nodes
 	m.clampCursor()
+}
+
+// applyGrepFilter performs a content search and filters the tree view.
+func (m *Model) applyGrepFilter() {
+	query := m.filterInput.Value()
+
+	if query == "" {
+		// Restore the full tree with original collapsed state
+		m.buildDisplayTree()
+		m.statusMessage = ""
+		return
+	}
+
+	// Use ripgrep to search actual file content
+	// Build a map of all note paths for quick lookup
+	notePathsMap := make(map[string]bool)
+	for _, note := range m.allNotes {
+		notePathsMap[note.Path] = true
+	}
+
+	// Use NotebookLocator to properly get notebook directories for each workspace
+	// Build a map of workspace name -> workspace node for quick lookup
+	workspaceMap := make(map[string]*workspace.WorkspaceNode)
+	for _, ws := range m.workspaces {
+		workspaceMap[ws.Name] = ws
+	}
+
+	// Get unique workspace names from notes
+	uniqueWorkspaces := make(map[string]bool)
+	for _, note := range m.allNotes {
+		uniqueWorkspaces[note.Workspace] = true
+	}
+
+	// For each workspace, get its notebook directory using NotebookLocator
+	searchDirs := make(map[string]bool)
+	locator := m.service.GetNotebookLocator()
+
+	for wsName := range uniqueWorkspaces {
+		ws, ok := workspaceMap[wsName]
+		if !ok || ws == nil {
+			continue
+		}
+
+		// Get the notes directory for this workspace (we'll use "current" as a sample)
+		// Then take the parent directory to get the workspace root
+		notesDir, err := locator.GetNotesDir(ws, "current")
+		if err != nil || notesDir == "" {
+			continue
+		}
+
+		// The notes directory is something like /path/to/nb/repos/workspace/branch/current
+		// We want to search at the branch level: /path/to/nb/repos/workspace/branch
+		workspaceRoot := filepath.Dir(notesDir)
+		searchDirs[workspaceRoot] = true
+	}
+
+	resultPaths := make(map[string]bool)
+	totalRgFiles := 0
+
+	// Run ripgrep once with all directories (much faster than multiple invocations)
+	if len(searchDirs) > 0 {
+		// Build args: rg -l --type md -i query dir1 dir2 dir3...
+		args := []string{
+			"-l",        // files-with-matches
+			"--type", "md", // markdown only
+			"-i",        // case-insensitive
+			query,
+		}
+		for dir := range searchDirs {
+			args = append(args, dir)
+		}
+
+		cmd := exec.Command("rg", args...)
+		output, err := cmd.Output()
+
+		if err != nil {
+			// rg returns exit code 1 when no matches found, which is not an error
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() != 1 {
+				// Some other error occurred
+				m.statusMessage = fmt.Sprintf("ripgrep error: %v", err)
+			}
+		}
+
+		if len(output) > 0 {
+			// Parse output - one file path per line
+			lines := strings.Split(string(output), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line != "" {
+					totalRgFiles++
+					// Only include files that are in our note list
+					if notePathsMap[line] {
+						resultPaths[line] = true
+					}
+				}
+			}
+		}
+	}
+
+	m.statusMessage = fmt.Sprintf("Found %d matching notes", len(resultPaths))
+
+	// Temporarily expand all nodes to show grep results
+	savedCollapsed := m.collapsedNodes
+	m.collapsedNodes = make(map[string]bool)
+
+	// Filter the display tree to show only matches and their parents
+	m.filterDisplayTreeByPaths(resultPaths)
+
+	// Keep the tree expanded for grep results
+	// (savedCollapsed will be restored when exiting grep mode)
+	_ = savedCollapsed
+}
+
+// filterDisplayTreeByPaths filters the tree view to show only nodes whose paths are in the provided map,
+// along with their parent nodes.
+func (m *Model) filterDisplayTreeByPaths(pathsToKeep map[string]bool) {
+	// Rebuild the full tree (already expanded by caller)
+	m.buildDisplayTree()
+	fullTree := m.displayNodes
+
+	// Normalize all paths to keep for case-insensitive comparison
+	normalizedPaths := make(map[string]bool)
+	for path := range pathsToKeep {
+		normalized, err := pathutil.NormalizeForLookup(path)
+		if err == nil {
+			normalizedPaths[normalized] = true
+		}
+	}
+
+	nodesToKeep := make(map[int]bool)
+	parentMap := make(map[int]int)
+	lastNodeAtDepth := make(map[int]int)
+
+	// First pass: build parent map
+	for i, node := range fullTree {
+		if node.depth > 0 {
+			if parentIndex, ok := lastNodeAtDepth[node.depth-1]; ok {
+				parentMap[i] = parentIndex
+			}
+		}
+		lastNodeAtDepth[node.depth] = i
+	}
+
+	// Second pass: mark nodes to keep
+	for i, node := range fullTree {
+		if node.isNote {
+			// Try normalized path comparison
+			normalizedNotePath, err := pathutil.NormalizeForLookup(node.note.Path)
+			if err == nil && normalizedPaths[normalizedNotePath] {
+				// Mark this note and all its parents to be kept
+				curr := i
+				for {
+					nodesToKeep[curr] = true
+					parentIndex, ok := parentMap[curr]
+					if !ok {
+						break // No more parents
+					}
+					curr = parentIndex
+				}
+			}
+		}
+	}
+
+	// Third pass: build the filtered tree
+	var filteredTree []*displayNode
+	for i, node := range fullTree {
+		if nodesToKeep[i] {
+			filteredTree = append(filteredTree, node)
+		}
+	}
+
+	m.displayNodes = filteredTree
+	m.clampCursor()
+
+	// Don't overwrite status message - let the caller handle it
 }
 
 // clampCursor ensures the cursor is within the valid range of display nodes.

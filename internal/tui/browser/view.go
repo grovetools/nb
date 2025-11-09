@@ -29,7 +29,9 @@ func (m Model) View() string {
 
 	// Header
 	var header string
-	if m.ecosystemPickerMode {
+	if m.isGrepping {
+		header = theme.DefaultTheme.Warning.Render("[Grep Mode]")
+	} else if m.ecosystemPickerMode {
 		header = theme.DefaultTheme.Info.Render("[Select Ecosystem to Focus]")
 	} else if m.focusedWorkspace != nil {
 		focusIndicator := theme.DefaultTheme.Info.Render(
@@ -74,7 +76,11 @@ func (m Model) View() string {
 	// Search bar (if active)
 	var searchBar string
 	if m.filterInput.Focused() || m.filterInput.Value() != "" {
-		searchBar = "Search: " + m.filterInput.View()
+		prefix := "Search: "
+		if m.isGrepping {
+			prefix = "Grep: "
+		}
+		searchBar = prefix + m.filterInput.View()
 	}
 
 	// Combine components vertically
@@ -219,7 +225,7 @@ func (m Model) renderTreeView() string {
 			// Handle search highlighting
 			title := node.note.Title
 			filterValue := m.filterInput.Value()
-			if filterValue != "" {
+			if filterValue != "" && !m.isGrepping { // Only highlight title in normal filter mode
 				lowerTitle := strings.ToLower(title)
 				lowerFilter := strings.ToLower(filterValue)
 				if idx := strings.Index(lowerTitle, lowerFilter); idx != -1 {

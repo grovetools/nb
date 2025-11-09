@@ -28,6 +28,7 @@ type KeyMap struct {
 	SelectNone     key.Binding
 	Archive        key.Binding
 	Preview        key.Binding
+	Grep           key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -43,6 +44,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.FocusSelected,
 		k.ToggleView,
 		k.Search,
+		k.Grep,
 		k.Sort,
 		k.JumpToWorkspace,
 	}, []key.Binding{
@@ -143,5 +145,9 @@ var keys = KeyMap{
 	Preview: key.NewBinding(
 		key.WithKeys("tab"),
 		key.WithHelp("tab", "preview note"),
+	),
+	Grep: key.NewBinding(
+		key.WithKeys("*"),
+		key.WithHelp("*", "grep content"),
 	),
 }
