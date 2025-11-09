@@ -160,9 +160,15 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 
 // Init initializes the TUI.
 func (m Model) Init() tea.Cmd {
+	var notesCmd tea.Cmd
+	if m.focusedWorkspace != nil {
+		notesCmd = fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+	} else {
+		notesCmd = fetchAllNotesCmd(m.service)
+	}
 	return tea.Batch(
 		fetchWorkspacesCmd(m.service.GetWorkspaceProvider()),
-		fetchAllNotesCmd(m.service),
+		notesCmd,
 	)
 }
 

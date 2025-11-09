@@ -17,6 +17,36 @@ type notesLoadedMsg struct {
 	notes []*models.Note
 }
 
+func fetchFocusedNotesCmd(svc *service.Service, focusedWS *workspace.WorkspaceNode) tea.Cmd {
+	return func() tea.Msg {
+		// Get context for the focused workspace
+		wsCtx, err := svc.GetWorkspaceContext(focusedWS.Path)
+		if err != nil {
+			// Return empty list on error
+			return notesLoadedMsg{notes: []*models.Note{}}
+		}
+
+		// Fetch notes for the focused workspace
+		focusedNotes, err := svc.ListAllNotes(wsCtx)
+		if err != nil {
+			focusedNotes = []*models.Note{} // Continue with empty list on error
+		}
+
+		// Also fetch global notes explicitly
+		globalNotes, err := svc.ListAllGlobalNotes()
+		if err != nil {
+			globalNotes = []*models.Note{} // Continue with empty list on error
+		}
+
+		// Combine and sort
+		notes := append(focusedNotes, globalNotes...)
+		sort.Slice(notes, func(i, j int) bool {
+			return notes[i].ModifiedAt.After(notes[j].ModifiedAt)
+		})
+		return notesLoadedMsg{notes: notes}
+	}
+}
+
 func fetchWorkspacesCmd(provider *workspace.Provider) tea.Cmd {
 	return func() tea.Msg {
 		// Get the real workspaces from the provider.

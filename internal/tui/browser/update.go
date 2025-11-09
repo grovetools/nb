@@ -76,10 +76,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case notesLoadedMsg:
 		m.allNotes = msg.notes
-		// Collapse groups if we have a focused workspace
-		if m.focusedWorkspace != nil {
-			m.collapseFocusedWorkspaceGroups()
-		}
+		// Set collapse state based on current focus level
+		m.setCollapseStateForFocus()
 		m.buildDisplayTree()
 		m.applyFilterAndSort()
 		return m, nil
@@ -292,26 +290,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusedWorkspace != nil || m.ecosystemPickerMode {
 				m.focusedWorkspace = nil
 				m.ecosystemPickerMode = false
-				m.buildDisplayTree()
-				m.applyFilterAndSort()
-				m.cursor = 0
+				// Re-fetch all notes for the global view
+				return m, fetchAllNotesCmd(m.service)
 			}
 		case key.Matches(msg, m.keys.FocusParent):
 			if m.focusedWorkspace != nil {
 				var parent *workspace.WorkspaceNode
-				var parentPath string
 
+				// Try to find parent in this order:
+				// 1. ParentEcosystemPath (immediate parent ecosystem)
+				// 2. RootEcosystemPath (if not already at root)
+				// 3. ParentProjectPath (parent project)
+				// 4. nil (go to global view)
+
+				var parentPath string
 				if m.focusedWorkspace.ParentEcosystemPath != "" {
 					parentPath = m.focusedWorkspace.ParentEcosystemPath
+				} else if m.focusedWorkspace.RootEcosystemPath != "" &&
+				          m.focusedWorkspace.RootEcosystemPath != m.focusedWorkspace.Path {
+					// Not at root yet, go to root ecosystem
+					parentPath = m.focusedWorkspace.RootEcosystemPath
 				} else if m.focusedWorkspace.ParentProjectPath != "" {
 					parentPath = m.focusedWorkspace.ParentProjectPath
-				} else if m.focusedWorkspace.RootEcosystemPath != "" && m.focusedWorkspace.RootEcosystemPath != m.focusedWorkspace.Path {
-					parentPath = m.focusedWorkspace.RootEcosystemPath
 				}
 
 				if parentPath != "" {
+					// Find the parent workspace node
 					for _, ws := range m.workspaces {
-						if ws.Path == parentPath {
+						isSame, _ := pathutil.ComparePaths(ws.Path, parentPath)
+						if isSame {
 							parent = ws
 							break
 						}
@@ -319,14 +326,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				m.focusedWorkspace = parent // This can be nil if no parent is found, effectively clearing focus
-				// Ensure new focused workspace is expanded
-				if m.focusedWorkspace != nil {
-					wsNodeID := "ws:" + m.focusedWorkspace.Path
-					delete(m.collapsedNodes, wsNodeID)
-				}
-				m.buildDisplayTree()
-				m.applyFilterAndSort()
 				m.cursor = 0
+				// Re-fetch notes for the new focus level
+				if m.focusedWorkspace != nil {
+					return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+				} else {
+					return m, fetchAllNotesCmd(m.service)
+				}
 			}
 		case key.Matches(msg, m.keys.FocusSelected):
 			if m.viewMode == treeView && m.cursor < len(m.displayNodes) {
@@ -334,12 +340,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if node.isWorkspace {
 					m.focusedWorkspace = node.workspace
 					m.ecosystemPickerMode = false // Focusing on a workspace exits picker mode
-					// Ensure focused workspace is expanded
-					wsNodeID := "ws:" + m.focusedWorkspace.Path
-					delete(m.collapsedNodes, wsNodeID)
-					m.buildDisplayTree()
-					m.applyFilterAndSort()
 					m.cursor = 0
+					// Re-fetch notes for the newly focused workspace
+					return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
 				}
 			}
 		case key.Matches(msg, m.keys.ToggleView):
@@ -448,9 +451,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if selected.isWorkspace && selected.workspace.IsEcosystem() {
 						m.focusedWorkspace = selected.workspace
 						m.ecosystemPickerMode = false
-						m.buildDisplayTree()
-						m.applyFilterAndSort()
 						m.cursor = 0
+						// Re-fetch notes for the selected ecosystem
+						return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
 					}
 				}
 			} else {
@@ -1639,6 +1642,96 @@ func (m *Model) collapseFocusedWorkspaceGroups() {
 				m.collapsedNodes[groupNodeID] = true
 			}
 		}
+	}
+}
+
+// collapseChildWorkspaces collapses all child workspaces under the given workspace
+func (m *Model) collapseChildWorkspaces(parent *workspace.WorkspaceNode) {
+	if parent == nil {
+		return
+	}
+
+	normParent, _ := pathutil.NormalizeForLookup(parent.Path)
+	for _, ws := range m.workspaces {
+		// Skip the parent workspace itself
+		isSame, _ := pathutil.ComparePaths(ws.Path, parent.Path)
+		if isSame {
+			continue
+		}
+
+		// Check if this workspace is a child of parent
+		normWs, _ := pathutil.NormalizeForLookup(ws.Path)
+		if strings.HasPrefix(normWs, normParent+string(filepath.Separator)) {
+			wsNodeID := "ws:" + ws.Path
+			m.collapsedNodes[wsNodeID] = true
+		}
+	}
+}
+
+// collapseAllWorkspaces collapses all top-level workspaces
+func (m *Model) collapseAllWorkspaces() {
+	for _, ws := range m.workspaces {
+		wsNodeID := "ws:" + ws.Path
+		m.collapsedNodes[wsNodeID] = true
+	}
+}
+
+// setCollapseStateForFocus systematically sets the collapse state based on the current focus level
+func (m *Model) setCollapseStateForFocus() {
+	if m.focusedWorkspace == nil {
+		// Global/top level view: collapse all workspaces for a clean overview
+		m.collapseAllWorkspaces()
+	} else if m.focusedWorkspace.IsEcosystem() {
+		// Ecosystem focus: collapse ALL note groups and child workspaces
+		// to show a clean view of the ecosystem structure
+		// First, ensure the focused ecosystem itself is expanded
+		wsNodeID := "ws:" + m.focusedWorkspace.Path
+		delete(m.collapsedNodes, wsNodeID)
+
+		// Collapse all child workspaces under this ecosystem
+		m.collapseChildWorkspaces(m.focusedWorkspace)
+
+		// Collapse ALL note groups within the focused ecosystem
+		// (current, learn, quick, etc.) BUT keep "plans" parent expanded
+		groupsSeen := make(map[string]bool)
+		for _, note := range m.allNotes {
+			if note.Workspace == m.focusedWorkspace.Name && !groupsSeen[note.Group] {
+				groupNodeID := "grp:" + note.Group
+				// Collapse individual plan directories but not other top-level groups
+				if strings.HasPrefix(note.Group, "plans/") {
+					m.collapsedNodes[groupNodeID] = true
+				} else if note.Group != "plans" {
+					// Collapse regular groups (current, learn, quick, etc.)
+					m.collapsedNodes[groupNodeID] = true
+				}
+				groupsSeen[note.Group] = true
+			}
+		}
+		// Ensure the "plans" parent group is expanded
+		plansParentID := "grp:plans"
+		delete(m.collapsedNodes, plansParentID)
+	} else {
+		// Leaf workspace focus: expand the workspace, collapse child workspaces and individual plans
+		// Ensure the focused workspace itself is expanded
+		wsNodeID := "ws:" + m.focusedWorkspace.Path
+		delete(m.collapsedNodes, wsNodeID)
+
+		// Collapse any child workspaces (if this workspace has children)
+		m.collapseChildWorkspaces(m.focusedWorkspace)
+
+		// Collapse individual plan directories within the focused workspace
+		// but keep the "plans" parent group expanded
+		for _, note := range m.allNotes {
+			if note.Workspace == m.focusedWorkspace.Name {
+				if strings.HasPrefix(note.Group, "plans/") {
+					groupNodeID := "grp:" + note.Group
+					m.collapsedNodes[groupNodeID] = true
+				}
+			}
+		}
+		// Ensure the "plans" parent group is expanded
+		plansParentID := "grp:plans"
+		delete(m.collapsedNodes, plansParentID)
 	}
 }
 
