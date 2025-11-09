@@ -8,8 +8,6 @@ import (
 	"strings"
 
 	coreworkspace "github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-notebook/pkg/models"
-	"github.com/mattsolo1/grove-notebook/pkg/search"
 )
 
 func Migrate(basePath string, options MigrationOptions, output io.Writer) (*MigrationReport, error) {
@@ -120,7 +118,6 @@ func AnalyzeFile(filePath, basePath string) ([]MigrationIssue, error) {
 type StructuralMigration struct {
 	basePath        string
 	locator         *coreworkspace.NotebookLocator
-	index           *search.Index
 	provider        *coreworkspace.Provider
 	options         MigrationOptions
 	report          *MigrationReport
@@ -129,11 +126,10 @@ type StructuralMigration struct {
 
 // NewStructuralMigration creates a new structural migration instance
 func NewStructuralMigration(basePath string, locator *coreworkspace.NotebookLocator,
-	index *search.Index, provider *coreworkspace.Provider, options MigrationOptions, output io.Writer) *StructuralMigration {
+	provider *coreworkspace.Provider, options MigrationOptions, output io.Writer) *StructuralMigration {
 	return &StructuralMigration{
 		basePath: basePath,
 		locator:  locator,
-		index:    index,
 		provider: provider,
 		options:  options,
 		report:   NewMigrationReport(),
@@ -357,24 +353,6 @@ func (sm *StructuralMigration) migrateFile(ftm fileToMigrate) error {
 	// Remove old file
 	if err := os.Remove(ftm.oldPath); err != nil {
 		return fmt.Errorf("failed to remove old file: %w", err)
-	}
-
-	// Re-index the note
-	if sm.index != nil {
-		note := &models.Note{
-			Path:      newPath,
-			Workspace: ftm.workspace,
-			Branch:    ftm.branch,
-			Type:      models.NoteType(ftm.noteType),
-			Title:     fm.Title,
-			Content:   bodyContent,
-		}
-		if err := sm.index.IndexNote(note); err != nil {
-			// Non-fatal, just log
-			if sm.options.Verbose {
-				fmt.Fprintf(sm.output, "⚠ Failed to index %s: %v\n", newPath, err)
-			}
-		}
 	}
 
 	sm.report.MigratedFiles++

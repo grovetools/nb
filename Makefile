@@ -4,7 +4,6 @@
 BINARY_NAME=nb
 BUILD_DIR=bin
 GO=go
-GOFLAGS=-tags "fts5"
 VERSION_PKG=github.com/mattsolo1/grove-core/version
 
 # --- Versioning ---
@@ -80,11 +79,6 @@ dev:
 lint:
 	@echo "Running linter..."
 	golangci-lint run ./...
-
-# Check if FTS5 is working
-check-fts5: build
-	$(BUILD_DIR)/$(BINARY_NAME) init --minimal
-	@echo "FTS5 check passed!"
 
 # Cross-compilation targets
 # Note: Cross-compilation with CGO requires appropriate C compilers for target platforms

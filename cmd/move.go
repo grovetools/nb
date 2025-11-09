@@ -235,12 +235,6 @@ func moveNote(svc *service.Service, sourcePath, destType, destWorkspace, destBra
 		}
 	}
 
-	// Update search index
-	if err := svc.IndexFile(finalPath); err != nil {
-		// Non-fatal - warn but continue
-		fmt.Fprintf(os.Stderr, "Warning: failed to update search index: %v\n", err)
-	}
-
 	if copy {
 		fmt.Printf("Copied note successfully:\n")
 	} else {

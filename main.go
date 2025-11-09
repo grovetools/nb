@@ -19,7 +19,6 @@ func main() {
 	rootCmd.AddCommand(cmd.NewSearchCmd())
 	rootCmd.AddCommand(cmd.NewListCmd())
 	rootCmd.AddCommand(cmd.NewArchiveCmd())
-	rootCmd.AddCommand(cmd.NewManageCmd())
 	rootCmd.AddCommand(cmd.NewContextCmd())
 	rootCmd.AddCommand(cmd.NewInitCmd())
 	rootCmd.AddCommand(cmd.NewMigrateCmd())

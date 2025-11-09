@@ -13,14 +13,12 @@ import (
 	coreworkspace "github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
-	"github.com/mattsolo1/grove-notebook/pkg/search"
 )
 
 // Service is the core note service
 type Service struct {
 	workspaceProvider *coreworkspace.Provider
 	notebookLocator   *coreworkspace.NotebookLocator
-	Index             *search.Index
 	Config            *Config
 	CoreConfig        *coreconfig.Config
 }
@@ -35,11 +33,6 @@ type Config struct {
 
 // New creates a new note service
 func New(config *Config, provider *coreworkspace.Provider) (*Service, error) {
-	index, err := search.NewIndex(filepath.Join(config.DataDir, "index.db"))
-	if err != nil {
-		return nil, fmt.Errorf("create index: %w", err)
-	}
-
 	// Load core config and initialize NotebookLocator
 	coreCfg, err := coreconfig.LoadDefault()
 	if err != nil {
@@ -52,7 +45,6 @@ func New(config *Config, provider *coreworkspace.Provider) (*Service, error) {
 	return &Service{
 		workspaceProvider: provider,
 		notebookLocator:   notebookLocator,
-		Index:             index,
 		Config:            config,
 		CoreConfig:        coreCfg,
 	}, nil
@@ -148,10 +140,6 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 	note.Branch = currentContext.Branch
 	note.Type = noteType
 
-	// Index the note
-	if err := s.Index.IndexNote(note); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to index note: %v\n", err)
-	}
 
 	// Open in editor if requested
 	if opts.openEditor && s.Config.Editor != "" {
@@ -163,7 +151,7 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 	return note, nil
 }
 
-// SearchNotes searches for notes matching the query
+// SearchNotes searches for notes matching the query using filesystem tools.
 func (s *Service) SearchNotes(ctx *WorkspaceContext, query string, options ...SearchOption) ([]*models.Note, error) {
 	opts := &searchOptions{
 		limit: 50,
@@ -172,18 +160,97 @@ func (s *Service) SearchNotes(ctx *WorkspaceContext, query string, options ...Se
 		opt(opts)
 	}
 
-	var searchWorkspaceName string
-	if !opts.allWorkspaces {
-		searchWorkspaceName = ctx.NotebookContextWorkspace.Name
+	// 1. Determine directories to search
+	var searchDirs []string
+	uniqueDirs := make(map[string]bool)
+
+	if opts.allWorkspaces {
+		allWorkspaces := s.workspaceProvider.All()
+		for _, ws := range allWorkspaces {
+			contextNode, err := s.findNotebookContextNode(ws)
+			if err != nil {
+				continue
+			}
+			sampleDir, err := s.notebookLocator.GetNotesDir(contextNode, "current")
+			if err == nil {
+				notesRoot := filepath.Dir(sampleDir)
+				uniqueDirs[notesRoot] = true
+			}
+		}
+	} else {
+		sampleDir, err := s.notebookLocator.GetNotesDir(ctx.NotebookContextWorkspace, "current")
+		if err != nil {
+			return nil, fmt.Errorf("could not determine search directory for context: %w", err)
+		}
+		notesRoot := filepath.Dir(sampleDir)
+		uniqueDirs[notesRoot] = true
 	}
 
-	results, err := s.Index.Search(query, &search.Options{
-		WorkspaceName: searchWorkspaceName,
-		Type:          string(opts.noteType),
-		Limit:         opts.limit,
-	})
+	for dir := range uniqueDirs {
+		searchDirs = append(searchDirs, dir)
+	}
+
+	if len(searchDirs) == 0 {
+		return []*models.Note{}, nil
+	}
+
+	// 2. Execute search command
+	var cmd *exec.Cmd
+	rgPath, err := exec.LookPath("rg")
+	if err == nil {
+		args := []string{"--glob", "*.md", "--ignore-case", "-l", query}
+		args = append(args, searchDirs...)
+		cmd = exec.Command(rgPath, args...)
+	} else {
+		// Fallback to grep
+		grepPath, err := exec.LookPath("grep")
+		if err != nil {
+			return nil, fmt.Errorf("neither 'rg' nor 'grep' found in PATH")
+		}
+		args := []string{"-rli", "--include=*.md", query}
+		args = append(args, searchDirs...)
+		cmd = exec.Command(grepPath, args...)
+	}
+
+	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("search index: %w", err)
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			// grep and rg exit with 1 if no matches are found, which is not an error for us.
+			if exitErr.ExitCode() != 1 {
+				return nil, fmt.Errorf("search command failed: %w, stderr: %s", err, exitErr.Stderr)
+			}
+		} else {
+			return nil, fmt.Errorf("search command failed: %w", err)
+		}
+	}
+
+	// 3. Parse results
+	var results []*models.Note
+	filePaths := strings.Split(string(output), "\n")
+
+	for _, path := range filePaths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+
+		note, err := ParseNote(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not parse note %s: %v\n", path, err)
+			continue
+		}
+
+		// 4. In-memory filtering by type
+		if opts.noteType != "" && note.Type != opts.noteType {
+			continue
+		}
+
+		results = append(results, note)
+	}
+
+	// 5. Apply limit
+	if len(results) > opts.limit {
+		results = results[:opts.limit]
 	}
 
 	return results, nil
@@ -328,14 +395,6 @@ func (s *Service) ArchiveNotes(ctx *WorkspaceContext, paths []string) error {
 			return fmt.Errorf("move %s to archive: %w", path, err)
 		}
 
-		if note, err := ParseNote(dest); err == nil {
-			note.IsArchived = true
-			note.Workspace = ctx.NotebookContextWorkspace.Name
-			note.Branch = ctx.Branch
-			if err := s.Index.IndexNote(note); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to index archived note: %v\n", err)
-			}
-		}
 	}
 	return nil
 }
@@ -516,12 +575,6 @@ func (s *Service) UpdateNoteContent(path string, content string) error {
 	note.Branch = branch
 	note.Type = models.NoteType(noteType)
 
-	// Index the updated note
-	if err := s.Index.IndexNote(note); err != nil {
-		// Don't fail if indexing fails
-		fmt.Fprintf(os.Stderr, "Warning: failed to index note: %v\n", err)
-	}
-
 	return nil
 }
 
@@ -554,29 +607,8 @@ func (s *Service) BuildNotePath(workspaceName, branch, noteType, filename string
 	return filepath.Join(noteDir, filename), nil
 }
 
-// IndexFile indexes a single file
-func (s *Service) IndexFile(path string) error {
-	note, err := ParseNote(path)
-	if err != nil {
-		return fmt.Errorf("parse note: %w", err)
-	}
-
-	// Extract metadata from path
-	ws, branch, noteType := GetNoteMetadata(path)
-	note.Workspace = ws
-	note.Branch = branch
-	note.Type = models.NoteType(noteType)
-
-	return s.Index.IndexNote(note)
-}
-
 // Close closes the service
 func (s *Service) Close() error {
-	if s.Index != nil {
-		if err := s.Index.Close(); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 

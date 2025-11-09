@@ -29,7 +29,6 @@ func NewMigrateCmd() *cobra.Command {
 		fixIDs             bool
 		fixFilenames       bool
 		preserveTimestamps bool
-		indexSQLite        bool
 		migrateAll         bool
 		migrateGlobal      bool
 		migrateWorkspace   string
@@ -74,10 +73,9 @@ Examples:
 				fixTags = true
 				fixIDs = true
 				fixFilenames = true
-				indexSQLite = true
 			}
 
-			if !fixTitles && !fixDates && !fixTags && !fixIDs && !fixFilenames && !indexSQLite {
+			if !fixTitles && !fixDates && !fixTags && !fixIDs && !fixFilenames {
 				return fmt.Errorf("specify at least one fix option or use --all")
 			}
 
@@ -140,7 +138,6 @@ Examples:
 	cmd.Flags().BoolVar(&fixIDs, "fix-ids", false, "Generate missing IDs")
 	cmd.Flags().BoolVar(&fixFilenames, "fix-filenames", false, "Standardize filenames to YYYYMMDD-title.md format")
 	cmd.Flags().BoolVar(&preserveTimestamps, "preserve-timestamps", true, "Preserve original file modification times")
-	cmd.Flags().BoolVar(&indexSQLite, "index-sqlite", false, "Create/update SQLite entries")
 	cmd.Flags().BoolVar(&migrateAll, "all", false, "Apply all fixes")
 	cmd.Flags().BoolVar(&migrateGlobal, globalStr, false, "Process global notes instead of current context")
 	cmd.Flags().StringVar(&migrateWorkspace, "workspace", "", "Process specific workspace")
@@ -200,9 +197,8 @@ func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bo
 	// Get workspace provider and locator from service
 	provider := svc.GetWorkspaceProvider()
 	locator := svc.GetNotebookLocator()
-	index := svc.Index
 
-	sm := migration.NewStructuralMigration(basePath, locator, index, provider, options, os.Stdout)
+	sm := migration.NewStructuralMigration(basePath, locator, provider, options, os.Stdout)
 
 	if !dryRun {
 		fmt.Println("⚠️  WARNING: This will migrate notes from the old repos/ structure to the new notebooks/ structure.")
