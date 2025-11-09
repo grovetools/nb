@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
@@ -73,7 +72,6 @@ type Model struct {
 	workspaces     []*workspace.WorkspaceNode
 	allNotes       []*models.Note
 	displayNodes   []*displayNode
-	filteredNotes  []*models.Note // For table view
 	cursor         int
 	scrollOffset   int
 	keys           KeyMap
@@ -81,10 +79,8 @@ type Model struct {
 	width          int
 	height         int
 	filterInput    textinput.Model
-	table          table.Model
 	viewMode       viewMode
-	sortColumn     int
-	sortAsc        bool
+	sortAscending  bool
 	jumpMap        map[rune]int
 	lastKey        string // For detecting 'gg' and 'z' sequences
 	collapsedNodes map[string]bool // Tracks collapsed workspaces and groups
@@ -94,6 +90,7 @@ type Model struct {
 	// Focus mode state
 	ecosystemPickerMode bool
 	focusedWorkspace    *workspace.WorkspaceNode
+	focusChanged        bool // Tracks if focus just changed (to reset collapse state)
 
 	// Selection and archiving state
 	selected          map[string]struct{} // Tracks selected note paths
@@ -120,21 +117,6 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		WithTitle("Notebook Browser - Help").
 		Build()
 
-	// Define table columns
-	columns := []table.Column{
-		{Title: " ", Width: 3}, // Selection indicator
-		{Title: "WORKSPACE", Width: 20},
-		{Title: "TYPE", Width: 15},
-		{Title: "TITLE", Width: 40},
-		{Title: "MODIFIED", Width: 20},
-	}
-
-	tbl := table.New(
-		table.WithColumns(columns),
-		table.WithFocused(true),
-		table.WithHeight(15), // Will be resized
-	)
-
 	ti := textinput.New()
 	ti.Placeholder = "Search notes..."
 	ti.CharLimit = 100
@@ -144,11 +126,9 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		keys:             keys,
 		help:             helpModel,
 		viewMode:         treeView, // Default to tree view
-		table:            tbl,
 		filterInput:      ti,
-		sortColumn:       4,                           // Default sort by modified date (adjusted for new column)
-		sortAsc:          false,                       // Descending
-		jumpMap:        make(map[rune]int),
+		sortAscending:    false, // Descending by default
+		jumpMap:          make(map[rune]int),
 		collapsedNodes: map[string]bool{
 			"ws:::global": true, // Start with global workspace collapsed
 		},

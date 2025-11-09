@@ -92,7 +92,7 @@ var keys = KeyMap{
 	),
 	Sort: key.NewBinding(
 		key.WithKeys("s"),
-		key.WithHelp("s", "sort"),
+		key.WithHelp("s", "toggle sort order"),
 	),
 	JumpToWorkspace: key.NewBinding(
 		key.WithKeys("1", "2", "3", "4", "5", "6", "7", "8", "9"),

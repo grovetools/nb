@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
@@ -57,7 +56,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetSize(msg.Width, msg.Height)
-		m.table.SetHeight(m.getViewportHeight())
 		return m, nil
 
 	case workspacesLoadedMsg:
@@ -66,9 +64,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.focusedWorkspace != nil {
 			wsNodeID := "ws:" + m.focusedWorkspace.Path
 			delete(m.collapsedNodes, wsNodeID)
-			// Collapse all groups within the focused workspace for a cleaner initial view
-			// Users can expand individual groups as needed
-			m.collapseFocusedWorkspaceGroups()
 		}
 		m.buildDisplayTree()
 		m.applyFilterAndSort()
@@ -76,8 +71,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case notesLoadedMsg:
 		m.allNotes = msg.notes
-		// Set collapse state based on current focus level
-		m.setCollapseStateForFocus()
+		// Only reset collapse state if focus just changed
+		if m.focusChanged {
+			m.setCollapseStateForFocus()
+			m.focusChanged = false
+		}
 		m.buildDisplayTree()
 		m.applyFilterAndSort()
 		return m, nil
@@ -169,113 +167,79 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.help.Toggle()
 			return m, nil
 		case key.Matches(msg, m.keys.Up):
-			if m.viewMode == treeView {
-				if m.cursor > 0 {
-					m.cursor--
-					m.adjustScroll()
-				}
-			} else {
-				m.table.MoveUp(1)
+			if m.cursor > 0 {
+				m.cursor--
+				m.adjustScroll()
 			}
 		case key.Matches(msg, m.keys.Down):
-			if m.viewMode == treeView {
-				if m.cursor < len(m.displayNodes)-1 {
-					m.cursor++
-					m.adjustScroll()
-				}
-			} else {
-				m.table.MoveDown(1)
+			if m.cursor < len(m.displayNodes)-1 {
+				m.cursor++
+				m.adjustScroll()
 			}
 		case key.Matches(msg, m.keys.PageUp):
-			if m.viewMode == treeView {
-				pageSize := m.getViewportHeight() / 2
-				if pageSize < 1 {
-					pageSize = 1
-				}
-				m.cursor -= pageSize
-				if m.cursor < 0 {
-					m.cursor = 0
-				}
-				m.adjustScroll()
-			} else {
-				pageSize := m.getViewportHeight() / 2
-				for i := 0; i < pageSize; i++ {
-					m.table.MoveUp(1)
-				}
+			pageSize := m.getViewportHeight() / 2
+			if pageSize < 1 {
+				pageSize = 1
 			}
+			m.cursor -= pageSize
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+			m.adjustScroll()
 		case key.Matches(msg, m.keys.PageDown):
-			if m.viewMode == treeView {
-				pageSize := m.getViewportHeight() / 2
-				if pageSize < 1 {
-					pageSize = 1
-				}
-				m.cursor += pageSize
-				if m.cursor >= len(m.displayNodes) {
-					m.cursor = len(m.displayNodes) - 1
-				}
-				m.adjustScroll()
-			} else {
-				pageSize := m.getViewportHeight() / 2
-				for i := 0; i < pageSize; i++ {
-					m.table.MoveDown(1)
-				}
+			pageSize := m.getViewportHeight() / 2
+			if pageSize < 1 {
+				pageSize = 1
 			}
+			m.cursor += pageSize
+			if m.cursor >= len(m.displayNodes) {
+				m.cursor = len(m.displayNodes) - 1
+			}
+			m.adjustScroll()
 		case key.Matches(msg, m.keys.GoToTop):
 			// Handle 'gg' - go to top when g is pressed twice
 			if m.lastKey == "g" {
-				if m.viewMode == treeView {
-					m.cursor = 0
-					m.adjustScroll()
-				} else {
-					m.table.SetCursor(0)
-				}
+				m.cursor = 0
+				m.adjustScroll()
 				m.lastKey = ""
 			} else {
 				m.lastKey = "g"
 			}
 		case key.Matches(msg, m.keys.GoToBottom):
-			if m.viewMode == treeView {
-				if len(m.displayNodes) > 0 {
-					m.cursor = len(m.displayNodes) - 1
-					m.adjustScroll()
-				}
-			} else {
-				if len(m.filteredNotes) > 0 {
-					m.table.SetCursor(len(m.filteredNotes) - 1)
-				}
+			if len(m.displayNodes) > 0 {
+				m.cursor = len(m.displayNodes) - 1
+				m.adjustScroll()
 			}
 		case key.Matches(msg, m.keys.FoldPrefix):
 			// Handle 'z' prefix for fold commands
-			if m.viewMode == treeView {
-				m.lastKey = "z"
-			}
+			m.lastKey = "z"
 		case msg.String() == "a":
 			// za - toggle fold
-			if m.lastKey == "z" && m.viewMode == treeView {
+			if m.lastKey == "z" {
 				m.toggleFold()
 				m.lastKey = ""
 			}
 		case msg.String() == "o":
 			// zo - open fold
-			if m.lastKey == "z" && m.viewMode == treeView {
+			if m.lastKey == "z" {
 				m.openFold()
 				m.lastKey = ""
 			}
 		case msg.String() == "c":
 			// zc - close fold
-			if m.lastKey == "z" && m.viewMode == treeView {
+			if m.lastKey == "z" {
 				m.closeFold()
 				m.lastKey = ""
 			}
 		case msg.String() == "M":
 			// zM - close all folds
-			if m.lastKey == "z" && m.viewMode == treeView {
+			if m.lastKey == "z" {
 				m.closeAllFolds()
 				m.lastKey = ""
 			}
 		case msg.String() == "R":
 			// zR - open all folds
-			if m.lastKey == "z" && m.viewMode == treeView {
+			if m.lastKey == "z" {
 				m.openAllFolds()
 				m.lastKey = ""
 			}
@@ -290,6 +254,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusedWorkspace != nil || m.ecosystemPickerMode {
 				m.focusedWorkspace = nil
 				m.ecosystemPickerMode = false
+				m.focusChanged = true
 				// Re-fetch all notes for the global view
 				return m, fetchAllNotesCmd(m.service)
 			}
@@ -326,6 +291,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				m.focusedWorkspace = parent // This can be nil if no parent is found, effectively clearing focus
+				m.focusChanged = true
 				m.cursor = 0
 				// Re-fetch notes for the new focus level
 				if m.focusedWorkspace != nil {
@@ -335,11 +301,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case key.Matches(msg, m.keys.FocusSelected):
-			if m.viewMode == treeView && m.cursor < len(m.displayNodes) {
+			if m.cursor < len(m.displayNodes) {
 				node := m.displayNodes[m.cursor]
 				if node.isWorkspace {
 					m.focusedWorkspace = node.workspace
 					m.ecosystemPickerMode = false // Focusing on a workspace exits picker mode
+					m.focusChanged = true
 					m.cursor = 0
 					// Re-fetch notes for the newly focused workspace
 					return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
@@ -352,7 +319,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewMode = treeView
 			}
 			m.cursor = 0
-			m.table.SetCursor(0)
 		case key.Matches(msg, m.keys.Search):
 			m.isGrepping = false
 			m.filterInput.Placeholder = "Search notes..."
@@ -364,73 +330,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterInput.Focus()
 			return m, textinput.Blink
 		case key.Matches(msg, m.keys.Sort):
-			if m.viewMode == tableView {
-				m.sortColumn = (m.sortColumn + 1) % 5
-				m.applyFilterAndSort()
-			}
+			m.sortAscending = !m.sortAscending
+			m.applyFilterAndSort()
 		case key.Matches(msg, m.keys.ToggleArchives):
-			if m.viewMode == treeView {
-				m.showArchives = !m.showArchives
-				m.buildDisplayTree()
-			}
+			m.showArchives = !m.showArchives
+			m.buildDisplayTree()
 		case key.Matches(msg, m.keys.ToggleGlobal):
-			if m.viewMode == treeView {
-				m.hideGlobal = !m.hideGlobal
-				m.buildDisplayTree()
-			}
+			m.hideGlobal = !m.hideGlobal
+			m.buildDisplayTree()
 		case key.Matches(msg, m.keys.ToggleSelect):
 			// Toggle selection for the current note or plan group
-			if m.viewMode == treeView {
-				if m.cursor < len(m.displayNodes) {
-					node := m.displayNodes[m.cursor]
-					if node.isNote {
-						if _, ok := m.selected[node.note.Path]; ok {
-							delete(m.selected, node.note.Path)
-						} else {
-							m.selected[node.note.Path] = struct{}{}
-						}
-					} else if node.isPlan() {
-						// Allow selection of plan groups
-						groupKey := m.getGroupKey(node)
-						if _, ok := m.selectedGroups[groupKey]; ok {
-							delete(m.selectedGroups, groupKey)
-						} else {
-							m.selectedGroups[groupKey] = struct{}{}
-						}
-					}
-				}
-			} else { // Table view
-				if m.table.Cursor() < len(m.filteredNotes) {
-					note := m.filteredNotes[m.table.Cursor()]
-					if _, ok := m.selected[note.Path]; ok {
-						delete(m.selected, note.Path)
+			if m.cursor < len(m.displayNodes) {
+				node := m.displayNodes[m.cursor]
+				if node.isNote {
+					if _, ok := m.selected[node.note.Path]; ok {
+						delete(m.selected, node.note.Path)
 					} else {
-						m.selected[note.Path] = struct{}{}
+						m.selected[node.note.Path] = struct{}{}
 					}
-					m.buildTableRows()
+				} else if node.isPlan() {
+					// Allow selection of plan groups
+					groupKey := m.getGroupKey(node)
+					if _, ok := m.selectedGroups[groupKey]; ok {
+						delete(m.selectedGroups, groupKey)
+					} else {
+						m.selectedGroups[groupKey] = struct{}{}
+					}
 				}
 			}
 		case key.Matches(msg, m.keys.SelectAll):
 			// Select all visible notes
-			if m.viewMode == treeView {
-				for _, node := range m.displayNodes {
-					if node.isNote {
-						m.selected[node.note.Path] = struct{}{}
-					}
+			for _, node := range m.displayNodes {
+				if node.isNote {
+					m.selected[node.note.Path] = struct{}{}
 				}
-			} else { // Table view
-				for _, note := range m.filteredNotes {
-					m.selected[note.Path] = struct{}{}
-				}
-				m.buildTableRows()
 			}
 		case key.Matches(msg, m.keys.SelectNone):
 			// Clear all selections
 			m.selected = make(map[string]struct{})
 			m.selectedGroups = make(map[string]struct{})
-			if m.viewMode == tableView {
-				m.buildTableRows()
-			}
 		case key.Matches(msg, m.keys.Archive):
 			// Archive selected notes and/or plan groups
 			totalSelected := len(m.selected) + len(m.selectedGroups)
@@ -446,11 +384,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.Confirm):
 			if m.ecosystemPickerMode {
-				if m.viewMode == treeView && m.cursor < len(m.displayNodes) {
+				if m.cursor < len(m.displayNodes) {
 					selected := m.displayNodes[m.cursor]
 					if selected.isWorkspace && selected.workspace.IsEcosystem() {
 						m.focusedWorkspace = selected.workspace
 						m.ecosystemPickerMode = false
+						m.focusChanged = true
 						m.cursor = 0
 						// Re-fetch notes for the selected ecosystem
 						return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
@@ -458,20 +397,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else {
 				var noteToOpen *models.Note
-				if m.viewMode == treeView {
-					if m.cursor < len(m.displayNodes) {
-						node := m.displayNodes[m.cursor]
-						if node.isNote {
-							noteToOpen = node.note
-						} else if node.isFoldable() {
-							// Toggle fold on workspaces and groups
-							m.toggleFold()
-							return m, nil
-						}
-					}
-				} else { // Table view
-					if m.table.Cursor() < len(m.filteredNotes) {
-						noteToOpen = m.filteredNotes[m.table.Cursor()]
+				if m.cursor < len(m.displayNodes) {
+					node := m.displayNodes[m.cursor]
+					if node.isNote {
+						noteToOpen = node.note
+					} else if node.isFoldable() {
+						// Toggle fold on workspaces and groups
+						m.toggleFold()
+						return m, nil
 					}
 				}
 				if noteToOpen != nil {
@@ -486,16 +419,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Preview):
 			if !m.ecosystemPickerMode {
 				var noteToPreview *models.Note
-				if m.viewMode == treeView {
-					if m.cursor < len(m.displayNodes) {
-						node := m.displayNodes[m.cursor]
-						if node.isNote {
-							noteToPreview = node.note
-						}
-					}
-				} else { // Table view
-					if m.table.Cursor() < len(m.filteredNotes) {
-						noteToPreview = m.filteredNotes[m.table.Cursor()]
+				if m.cursor < len(m.displayNodes) {
+					node := m.displayNodes[m.cursor]
+					if node.isNote {
+						noteToPreview = node.note
 					}
 				}
 				if noteToPreview != nil && os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
@@ -714,6 +641,14 @@ func (m *Model) buildDisplayTree() {
 				isLastGroup := i == len(regularGroups)-1 && !hasPlans
 				notesInGroup := noteGroups[groupName]
 
+				// Sort notes within the group
+				sort.SliceStable(notesInGroup, func(i, j int) bool {
+					if m.sortAscending {
+						return notesInGroup[i].CreatedAt.Before(notesInGroup[j].CreatedAt)
+					}
+					return notesInGroup[i].CreatedAt.After(notesInGroup[j].CreatedAt)
+				})
+
 				// Calculate group prefix
 				var groupPrefix strings.Builder
 				indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
@@ -770,6 +705,14 @@ func (m *Model) buildDisplayTree() {
 				if hasArchive {
 					for _, archiveName := range archiveGroups[groupName] {
 						archiveNotes := noteGroups[archiveName]
+
+						// Sort archived notes
+						sort.SliceStable(archiveNotes, func(i, j int) bool {
+							if m.sortAscending {
+								return archiveNotes[i].CreatedAt.Before(archiveNotes[j].CreatedAt)
+							}
+							return archiveNotes[i].CreatedAt.After(archiveNotes[j].CreatedAt)
+						})
 
 						// Calculate archive prefix
 						var archivePrefix strings.Builder
@@ -852,6 +795,14 @@ func (m *Model) buildDisplayTree() {
 					for pi, planName := range planNames {
 						isLastPlan := pi == len(planNames)-1
 						planNotes := planGroups[planName]
+
+						// Sort notes within the plan
+						sort.SliceStable(planNotes, func(i, j int) bool {
+							if m.sortAscending {
+								return planNotes[i].CreatedAt.Before(planNotes[j].CreatedAt)
+							}
+							return planNotes[i].CreatedAt.After(planNotes[j].CreatedAt)
+						})
 
 						// Calculate plan prefix
 						var planPrefix strings.Builder
@@ -1002,6 +953,14 @@ func (m *Model) buildDisplayTree() {
 						isLastGroup := i == len(regularGroups)-1 && !hasPlans
 						notesInGroup := noteGroups[groupName]
 
+						// Sort notes in group
+						sort.SliceStable(notesInGroup, func(i, j int) bool {
+							if m.sortAscending {
+								return notesInGroup[i].CreatedAt.Before(notesInGroup[j].CreatedAt)
+							}
+							return notesInGroup[i].CreatedAt.After(notesInGroup[j].CreatedAt)
+						})
+
 						// Calculate group prefix (with extra indentation for ungrouped)
 						var groupPrefix strings.Builder
 						indentPrefix := strings.ReplaceAll(adjustedPrefix, "├─", "│ ")
@@ -1056,6 +1015,14 @@ func (m *Model) buildDisplayTree() {
 						if hasArchive {
 							for _, archiveName := range archiveGroups[groupName] {
 								archiveNotes := noteGroups[archiveName]
+
+								// Sort archived notes
+								sort.SliceStable(archiveNotes, func(i, j int) bool {
+									if m.sortAscending {
+										return archiveNotes[i].CreatedAt.Before(archiveNotes[j].CreatedAt)
+									}
+									return archiveNotes[i].CreatedAt.After(archiveNotes[j].CreatedAt)
+								})
 
 								var archivePrefix strings.Builder
 								archiveIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
@@ -1128,6 +1095,14 @@ func (m *Model) buildDisplayTree() {
 							for pi, planName := range planNames {
 								isLastPlan := pi == len(planNames)-1
 								planNotes := planGroups[planName]
+
+								// Sort notes in plan
+								sort.SliceStable(planNotes, func(i, j int) bool {
+									if m.sortAscending {
+										return planNotes[i].CreatedAt.Before(planNotes[j].CreatedAt)
+									}
+									return planNotes[i].CreatedAt.After(planNotes[j].CreatedAt)
+								})
 
 								var planPrefix strings.Builder
 								planIndent := strings.ReplaceAll(plansPrefix.String(), "├─", "│ ")
@@ -1401,92 +1376,13 @@ func (m *Model) adjustScroll() {
 
 // applyFilterAndSort filters and sorts notes for both table and tree views.
 func (m *Model) applyFilterAndSort() {
-	// For Tree View: rebuild the tree and then filter it if necessary
-	if m.viewMode == treeView {
-		if m.filterInput.Value() != "" {
-			// When filtering, temporarily expand all nodes so we can search everything
-			savedCollapsed := m.collapsedNodes
-			m.collapsedNodes = make(map[string]bool)
-			m.buildDisplayTree() // Rebuild the full tree with everything expanded
-			m.filterDisplayTree()
-			m.collapsedNodes = savedCollapsed // Restore collapsed state for when filter is cleared
-		} else {
-			// No filter - use normal collapsed state
-			m.buildDisplayTree()
-		}
+	// Rebuild the tree which now includes sorting logic
+	m.buildDisplayTree()
+
+	// Apply text filter if present
+	if m.filterInput.Value() != "" {
+		m.filterDisplayTree()
 	}
-
-	// For Table View:
-	var notesToConsider []*models.Note
-	if m.focusedWorkspace != nil {
-		for _, note := range m.allNotes {
-			// Filter to notes within the focused workspace
-			if strings.HasPrefix(note.Path, m.focusedWorkspace.Path) {
-				notesToConsider = append(notesToConsider, note)
-			}
-		}
-	} else {
-		notesToConsider = m.allNotes
-	}
-
-	filter := strings.ToLower(m.filterInput.Value())
-	if filter == "" {
-		m.filteredNotes = notesToConsider
-	} else {
-		var filtered []*models.Note
-		for _, note := range notesToConsider {
-			if strings.Contains(strings.ToLower(note.Title), filter) ||
-				strings.Contains(strings.ToLower(note.Workspace), filter) ||
-				strings.Contains(strings.ToLower(string(note.Type)), filter) ||
-				strings.Contains(strings.ToLower(note.Group), filter) {
-				filtered = append(filtered, note)
-			}
-		}
-		m.filteredNotes = filtered
-	}
-
-	// Sort the notes
-	sort.SliceStable(m.filteredNotes, func(i, j int) bool {
-		a, b := m.filteredNotes[i], m.filteredNotes[j]
-		var less bool
-		switch m.sortColumn {
-		case 0: // Selection indicator (no sorting)
-			return false
-		case 1: // Workspace
-			less = strings.ToLower(a.Workspace) < strings.ToLower(b.Workspace)
-		case 2: // Type
-			less = strings.ToLower(string(a.Type)) < strings.ToLower(string(b.Type))
-		case 3: // Title
-			less = strings.ToLower(a.Title) < strings.ToLower(b.Title)
-		default: // Modified (case 4)
-			less = a.ModifiedAt.Before(b.ModifiedAt)
-		}
-		if m.sortAsc {
-			return less
-		}
-		return !less
-	})
-
-	m.buildTableRows()
-}
-
-// buildTableRows converts filtered notes into table rows.
-func (m *Model) buildTableRows() {
-	rows := make([]table.Row, len(m.filteredNotes))
-	for i, note := range m.filteredNotes {
-		selIndicator := " "
-		if _, ok := m.selected[note.Path]; ok {
-			selIndicator = "✓"
-		}
-		rows[i] = table.Row{
-			selIndicator,
-			note.Workspace,
-			string(note.Type),
-			note.Title,
-			note.ModifiedAt.Format(time.RFC822),
-		}
-	}
-	m.table.SetRows(rows)
 }
 
 // filterDisplayTree filters the tree view, preserving parent nodes of matches.
