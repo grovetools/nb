@@ -230,6 +230,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		selectedGroups:    make(map[string]struct{}), // Initialize group selection map
 		cutPaths:          make(map[string]struct{}), // Initialize cut paths map
 		focusedWorkspace:  initialFocus,
+		focusChanged:      initialFocus != nil, // Trigger initial collapse state setup
 		noteTitleInput:    noteTitleInput,
 		noteTypePicker:    noteTypePicker,
 		renameInput:       renameInput,

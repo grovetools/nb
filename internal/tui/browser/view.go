@@ -84,62 +84,86 @@ func (m *Model) getNodeRenderInfo(node *displayNode) nodeRenderInfo {
 	return info
 }
 
-// applySearchHighlight highlights the filter match in a string.
-func (m *Model) applySearchHighlight(text string) string {
+// getSearchHighlightIndices returns the start and end indices of the search match, or -1, -1 if no match
+func (m *Model) getSearchHighlightIndices(text string) (int, int) {
 	filterValue := m.filterInput.Value()
 	if filterValue == "" || m.isGrepping {
-		return text
+		return -1, -1
 	}
 
 	lowerText := strings.ToLower(text)
 	lowerFilter := strings.ToLower(filterValue)
 	if idx := strings.Index(lowerText, lowerFilter); idx != -1 {
-		pre := text[:idx]
-		match := text[idx : idx+len(filterValue)]
-		post := text[idx+len(filterValue):]
-		highlightStyle := theme.DefaultTheme.Highlight.Copy().Reverse(true)
-		return fmt.Sprintf("%s%s%s", pre, highlightStyle.Render(match), post)
+		return idx, idx + len(filterValue)
 	}
-	return text
+	return -1, -1
 }
 
 // styleNodeContent applies styling to the main content (name/title) of a node.
 func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
+	// Build base content
 	content := info.indicator
 	if info.indicator != "" && !strings.HasSuffix(info.indicator, " ") {
 		content += " "
 	}
-	content += m.applySearchHighlight(info.name)
+
+	// Get search match indices before building content
+	matchStart, matchEnd := m.getSearchHighlightIndices(info.name)
+	hasMatch := matchStart != -1
+
+	// Determine the base style for the node type
+	var baseStyle lipgloss.Style
+	hasStyle := false
 
 	if isSelected {
-		return lipgloss.NewStyle().Underline(true).Render(content)
-	}
-
-	// Check if note is cut (staged for moving)
-	if info.note != nil {
+		baseStyle = lipgloss.NewStyle().Underline(true)
+		hasStyle = true
+	} else if info.note != nil {
 		if _, isCut := m.cutPaths[info.note.Path]; isCut {
-			return lipgloss.NewStyle().Faint(true).Strikethrough(true).Render(content)
+			baseStyle = lipgloss.NewStyle().Faint(true).Strikethrough(true)
+			hasStyle = true
+		} else if info.isArchived {
+			baseStyle = lipgloss.NewStyle().Faint(true)
+			hasStyle = true
 		}
-	}
-
-	if info.isArchived {
-		return lipgloss.NewStyle().Faint(true).Render(content)
-	}
-
-	if info.isWorkspace {
+	} else if info.isArchived {
+		baseStyle = lipgloss.NewStyle().Faint(true)
+		hasStyle = true
+	} else if info.isWorkspace {
 		ws := info.workspace
 		if ws.Name == "global" {
-			return lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Green).Render(content)
+			baseStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Green)
 		} else if ws.IsEcosystem() {
-			return lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Cyan).Render(content)
+			baseStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Cyan)
+		} else {
+			baseStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Violet)
 		}
-		return lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Violet).Render(content)
+		hasStyle = true
+	} else if info.isPlan {
+		baseStyle = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Yellow)
+		hasStyle = true
 	}
 
-	if info.isPlan {
-		return lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Yellow).Render(content)
+	// If there's a search match, build the string with highlighted portion
+	if hasMatch {
+		pre := info.name[:matchStart]
+		match := info.name[matchStart:matchEnd]
+		post := info.name[matchEnd:]
+
+		highlightStyle := theme.DefaultTheme.Highlight.Copy().Reverse(true)
+
+		// Render each part separately and concatenate
+		if hasStyle {
+			return content + baseStyle.Render(pre) + highlightStyle.Render(match) + baseStyle.Render(post)
+		}
+		return content + pre + highlightStyle.Render(match) + post
 	}
 
+	// No search match - render normally
+	content += info.name
+	if hasStyle {
+		return baseStyle.Render(content)
+	}
 	return content
 }
 
@@ -263,19 +287,37 @@ func (m Model) View() string {
 		viewContent = m.renderTableView()
 	}
 
-	// Header
-	var header string
-	if m.isGrepping {
-		header = theme.DefaultTheme.Warning.Render("[Grep Mode]")
-	} else if m.ecosystemPickerMode {
-		header = theme.DefaultTheme.Info.Render("[Select Ecosystem to Focus]")
-	} else if m.focusedWorkspace != nil {
-		focusIndicator := theme.DefaultTheme.Info.Render(
-			fmt.Sprintf("[Focus: %s]", m.focusedWorkspace.Name))
-		header = focusIndicator
-	} else {
-		header = theme.DefaultTheme.Header.Render("Notebook Browser")
+	// Header - breadcrumb style
+	// Get notebook title from config
+	notebookTitle := "Notebook Browser"
+	if m.service.CoreConfig != nil && m.service.CoreConfig.Notebooks != nil && len(m.service.CoreConfig.Notebooks) > 0 {
+		// Prefer "default" notebook if it exists, otherwise use the first one
+		if _, ok := m.service.CoreConfig.Notebooks["default"]; ok {
+			notebookTitle = "default"
+		} else {
+			// Use the first notebook name
+			for name := range m.service.CoreConfig.Notebooks {
+				notebookTitle = name
+				break
+			}
+		}
 	}
+
+	// Build header string without styling first
+	headerText := notebookTitle
+	if m.focusedWorkspace != nil {
+		headerText += " > " + m.focusedWorkspace.Name
+	}
+	if m.isGrepping {
+		headerText += " [Grep Mode]"
+	} else if m.filterInput.Focused() && !m.isGrepping {
+		headerText += " [Find Mode]"
+	} else if m.ecosystemPickerMode {
+		headerText += " [Select Ecosystem]"
+	}
+
+	// Apply styling to complete header
+	header := theme.DefaultTheme.Header.Render(headerText)
 
 	footer := m.help.View()
 
@@ -316,14 +358,11 @@ func (m Model) View() string {
 	}
 
 	// Combine components vertically
-	mainContent := lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		searchBar,
-	)
-
-	// Ensure there is spacing between header/search and content
-	if mainContent != "" {
-		mainContent = lipgloss.JoinVertical(lipgloss.Left, mainContent, "")
+	var mainContent string
+	if searchBar != "" {
+		mainContent = lipgloss.JoinVertical(lipgloss.Left, header, searchBar, "")
+	} else {
+		mainContent = header
 	}
 
 	fullView := lipgloss.JoinVertical(lipgloss.Left,

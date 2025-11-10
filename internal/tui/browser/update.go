@@ -421,6 +421,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focusedWorkspace = nil
 				m.ecosystemPickerMode = false
 				m.focusChanged = true
+				m.cursor = 0
+				m.scrollOffset = 0
 				// Re-fetch all notes for the global view
 				return m, fetchAllNotesCmd(m.service)
 			}
@@ -438,7 +440,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.focusedWorkspace.ParentEcosystemPath != "" {
 					parentPath = m.focusedWorkspace.ParentEcosystemPath
 				} else if m.focusedWorkspace.RootEcosystemPath != "" &&
-				          m.focusedWorkspace.RootEcosystemPath != m.focusedWorkspace.Path {
+					m.focusedWorkspace.RootEcosystemPath != m.focusedWorkspace.Path {
 					// Not at root yet, go to root ecosystem
 					parentPath = m.focusedWorkspace.RootEcosystemPath
 				} else if m.focusedWorkspace.ParentProjectPath != "" {
@@ -487,11 +489,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 		case key.Matches(msg, m.keys.Search):
 			m.isGrepping = false
+			m.filterInput.SetValue("")
 			m.filterInput.Placeholder = "Search notes..."
 			m.filterInput.Focus()
 			return m, textinput.Blink
 		case key.Matches(msg, m.keys.Grep):
 			m.isGrepping = true
+			m.filterInput.SetValue("")
 			m.filterInput.Placeholder = "Grep content..."
 			m.filterInput.Focus()
 			return m, textinput.Blink
@@ -716,6 +720,9 @@ func (m *Model) buildDisplayTree() {
 	var nodes []*displayNode
 	var workspacesToShow []*workspace.WorkspaceNode
 
+	// Check if we should ignore collapsed state (when searching)
+	hasSearchFilter := m.filterInput.Value() != "" && !m.isGrepping
+
 	// 1. Filter workspaces based on focus mode
 	var showUngroupedSection bool
 	var ungroupedWorkspaces []*workspace.WorkspaceNode
@@ -861,10 +868,10 @@ func (m *Model) buildDisplayTree() {
 			continue
 		}
 
-		// Skip children if workspace is collapsed
+		// Skip children if workspace is collapsed (unless searching)
 		wsNodeID := node.nodeID()
 		wsCollapsed := m.collapsedNodes[wsNodeID]
-		if wsCollapsed {
+		if wsCollapsed && !hasSearchFilter {
 			continue
 		}
 
@@ -938,9 +945,9 @@ func (m *Model) buildDisplayTree() {
 				}
 				nodes = append(nodes, groupNode)
 
-				// Skip notes if group is collapsed
+				// Skip notes if group is collapsed (unless searching)
 				groupNodeID := groupNode.nodeID()
-				if m.collapsedNodes[groupNodeID] {
+				if m.collapsedNodes[groupNodeID] && !hasSearchFilter {
 					continue
 				}
 
@@ -996,9 +1003,9 @@ func (m *Model) buildDisplayTree() {
 						}
 						nodes = append(nodes, archiveNode)
 
-						// Skip archive notes if collapsed
+						// Skip archive notes if collapsed (unless searching)
 						archiveNodeID := archiveNode.nodeID()
-						if m.collapsedNodes[archiveNodeID] {
+						if m.collapsedNodes[archiveNodeID] && !hasSearchFilter {
 							continue
 						}
 
@@ -1048,9 +1055,9 @@ func (m *Model) buildDisplayTree() {
 				}
 				nodes = append(nodes, plansParentNode)
 
-				// Check if plans parent is collapsed
+				// Check if plans parent is collapsed (unless searching)
 				plansParentNodeID := plansParentNode.nodeID()
-				if !m.collapsedNodes[plansParentNodeID] {
+				if !m.collapsedNodes[plansParentNodeID] || hasSearchFilter {
 					// Sort plan names
 					var planNames []string
 					for planName := range planGroups {
@@ -1093,9 +1100,9 @@ func (m *Model) buildDisplayTree() {
 						}
 						nodes = append(nodes, planNode)
 
-						// Check if this plan is collapsed
+						// Check if this plan is collapsed (unless searching)
 						planNodeID := planNode.nodeID()
-						if !m.collapsedNodes[planNodeID] {
+						if !m.collapsedNodes[planNodeID] || hasSearchFilter {
 							// Add notes in this plan
 							for ni, note := range planNotes {
 								isLastNote := ni == len(planNotes)-1
@@ -1142,8 +1149,8 @@ func (m *Model) buildDisplayTree() {
 		}
 		nodes = append(nodes, ungroupedNode)
 
-		// Check if ungrouped section is collapsed
-		if !m.collapsedNodes[ungroupedNode.nodeID()] {
+		// Check if ungrouped section is collapsed (unless searching)
+		if !m.collapsedNodes[ungroupedNode.nodeID()] || hasSearchFilter {
 			// Render each ungrouped workspace
 			for i, ws := range ungroupedWorkspaces {
 				// Skip worktrees
@@ -1185,9 +1192,9 @@ func (m *Model) buildDisplayTree() {
 				}
 				nodes = append(nodes, node)
 
-				// Skip children if workspace is collapsed
+				// Skip children if workspace is collapsed (unless searching)
 				wsNodeID := node.nodeID()
-				if m.collapsedNodes[wsNodeID] {
+				if m.collapsedNodes[wsNodeID] && !hasSearchFilter {
 					continue
 				}
 
@@ -1251,9 +1258,9 @@ func (m *Model) buildDisplayTree() {
 						}
 						nodes = append(nodes, groupNode)
 
-						// Skip notes if group is collapsed
+						// Skip notes if group is collapsed (unless searching)
 						groupNodeID := groupNode.nodeID()
-						if m.collapsedNodes[groupNodeID] {
+						if m.collapsedNodes[groupNodeID] && !hasSearchFilter {
 							continue
 						}
 
@@ -1308,7 +1315,7 @@ func (m *Model) buildDisplayTree() {
 								nodes = append(nodes, archiveNode)
 
 								archiveNodeID := archiveNode.nodeID()
-								if m.collapsedNodes[archiveNodeID] {
+								if m.collapsedNodes[archiveNodeID] && !hasSearchFilter {
 									continue
 								}
 
@@ -1353,7 +1360,7 @@ func (m *Model) buildDisplayTree() {
 						nodes = append(nodes, plansParentNode)
 
 						plansParentNodeID := plansParentNode.nodeID()
-						if !m.collapsedNodes[plansParentNodeID] {
+						if !m.collapsedNodes[plansParentNodeID] || hasSearchFilter {
 							var planNames []string
 							for planName := range planGroups {
 								planNames = append(planNames, planName)
@@ -1392,7 +1399,7 @@ func (m *Model) buildDisplayTree() {
 								nodes = append(nodes, planNode)
 
 								planNodeID := planNode.nodeID()
-								if !m.collapsedNodes[planNodeID] {
+								if !m.collapsedNodes[planNodeID] || hasSearchFilter {
 									for ni, note := range planNotes {
 										isLastNote := ni == len(planNotes)-1
 										var notePrefix strings.Builder
@@ -1485,9 +1492,9 @@ func (m *Model) applyGrepFilter() {
 	if len(searchDirs) > 0 {
 		// Build args: rg -l --type md -i query dir1 dir2 dir3...
 		args := []string{
-			"-l",        // files-with-matches
+			"-l",           // files-with-matches
 			"--type", "md", // markdown only
-			"-i",        // case-insensitive
+			"-i", // case-insensitive
 			query,
 		}
 		for dir := range searchDirs {
@@ -1613,14 +1620,13 @@ func (m *Model) clampCursor() {
 // getViewportHeight calculates how many lines are available for the list.
 func (m *Model) getViewportHeight() int {
 	// Account for:
-	// - Top margin: 1 line
+	// - Top margin: 2 lines
 	// - Header: 1 line
-	// - Blank line after header: 1 line
 	// - Blank line before footer: 1 line
 	// - Status bar: 1 line
 	// - Footer (help): 1 line
 	// - Scroll indicator (when shown): 2 lines (blank + indicator)
-	const fixedLines = 8
+	const fixedLines = 15
 	availableHeight := m.height - fixedLines
 	if availableHeight < 1 {
 		return 1
