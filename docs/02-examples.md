@@ -48,23 +48,7 @@ This example covers the fundamental commands for creating, finding, and organizi
     nb search "api" --workspaces
     ```
 
-### Example 2: Neovim Integration
-
-The `nb.nvim` plugin integrates `grove-notebook` into Neovim.
-
-1.  **Create a New Note**
-
-    Pressing `<leader>nn` opens a picker to select a note type. After choosing a type (e.g., "todos") and entering a title ("Refactor User Model"), `nb` creates the note and opens it in a new buffer.
-
-2.  **Search for Notes**
-
-    Pressing `<leader>ns` opens a picker that searches all notes in the current repository. As you type, the list filters and a preview panel shows the content of the selected note.
-
-3.  **Create a Global Note**
-
-    For notes not tied to a specific project, `<leader>nng` opens a picker for global note types. Selecting a type (e.g., "learn") and entering a title creates a note in the global notebook, which is accessible from any workspace.
-
-### Example 3: Grove Flow Integration
+### Example 2: Grove Flow Integration
 
 `grove-notebook` can serve as the persistent storage backend for `grove-flow`.
 
@@ -102,7 +86,7 @@ The `nb.nvim` plugin integrates `grove-notebook` into Neovim.
                         └── ...
     ```
 
-### Example 4: Obsidian Integration
+### Example 3: Obsidian Integration
 
 The `nb` notebook directory can be opened as an Obsidian vault for graphical interaction.
 

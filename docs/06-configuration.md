@@ -14,7 +14,7 @@ data_dir: ~/.local/share/nb
 
 # The editor command to use when creating new notes.
 # Defaults to the value of the $EDITOR environment variable.
-editor: nvim
+editor: vim
 
 # The default note type to use for `nb new` if not specified.
 default_type: current

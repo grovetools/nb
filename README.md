@@ -15,7 +15,6 @@ The main notebook directory (default: `~/Documents/nb`) is intended to be stored
 *   **Note Organization**: Notes are stored as Markdown files.
 *   **Search**: Provides full-text search capabilities using ripgrep (with grep fallback).
 *   **`grove-flow` Storage**: Can be configured as a storage location for `grove-flow` plans and chat sessions.
-*   **Editor Integration**: Includes a Neovim plugin for creating and searching notes.
 *   **Obsidian Compatibility**: The notebook directory can be opened as an Obsidian vault.
 *   **CLI**: A command-line interface for creating and managing notes.
 
@@ -30,7 +29,6 @@ Notes are stored in a hierarchical directory structure, typically `NOTEBOOK_DIR/
 `grove-notebook` can function as a storage backend for other tools in the Grove ecosystem.
 
 *   **`grove-flow`**: The `plans_directory` and `chat_directory` in `grove-flow`'s configuration can be set to paths within the `nb` directory structure. This stores all `flow` plans and chat logs in the central notebook.
-*   **Neovim Plugin**: The `nb.nvim` plugin provides commands to create notes and execute searches from within the editor. It can also be used to create files that are then used by `grove-flow` commands.
 
 ## Installation
 
@@ -53,7 +51,6 @@ Requires the `grove` meta-CLI. See the [Grove Installation Guide](https://github
 See the [documentation](docs/) for detailed usage instructions:
 - [Overview](docs/01-overview.md)
 - [Examples](docs/02-examples.md)
-- [Neovim Plugin](docs/03-neovim-plugin.md)
 - [Obsidian Integration](docs/04-obsidian-integration.md)
 - [Grove Flow Integration](docs/05-grove-flow-integration.md)
 - [Configuration](docs/06-configuration.md)

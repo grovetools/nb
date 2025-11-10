@@ -2,9 +2,9 @@
 
 ## v0.2.14 (2025-10-01)
 
-This release introduces documentation for `grove-notebook`, covering everything from initial setup and examples to integration with Neovim, Obsidian, and `grove-flow` (6979f17, 460a70b). The documentation generation process itself was improved with support for table of contents generation and other configuration updates (30fe0d0, c47ad2c, 57cd2c3). The release workflow has also been updated to extract release notes directly from the `CHANGELOG.md` file for better consistency (6a4871b).
+This release introduces documentation for `grove-notebook`, covering everything from initial setup and examples to integration with Obsidian and `grove-flow` (6979f17, 460a70b). The documentation generation process itself was improved with support for table of contents generation and other configuration updates (30fe0d0, c47ad2c, 57cd2c3). The release workflow has also been updated to extract release notes directly from the `CHANGELOG.md` file for better consistency (6a4871b).
 
-The interactive note manager (`nb manage`) has been enhanced with improved filtering capabilities, including a new command-line flag for type filtering, an interactive type selection menu, and a more comprehensive search function that filters across multiple fields (61ea4cd). The manager's UI has been migrated to use a centralized theme for better visual consistency (3833216) and now includes a standardized help component with more detailed navigation options (83e186b). A bug in the Neovim plugin that caused misaligned columns in note pickers has also been fixed (526c35d).
+The interactive note manager (`nb manage`) has been enhanced with improved filtering capabilities, including a new command-line flag for type filtering, an interactive type selection menu, and a more comprehensive search function that filters across multiple fields (61ea4cd). The manager's UI has been migrated to use a centralized theme for better visual consistency (3833216) and now includes a standardized help component with more detailed navigation options (83e186b).
 
 ### Features
 
@@ -19,7 +19,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
 ### Bug Fixes
 
 - Update CI workflow to use `branches: [ none ]` to disable execution (6f9f140)
-- **nvim:** Dynamically calculate column widths in note pickers to fix alignment (526c35d)
 
 ### Documentation
 
@@ -47,7 +46,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
  cmd/manage.go                             |  17 +
  docs/01-overview.md                       |  47 +++
  docs/02-examples.md                       | 130 ++++++
- docs/03-neovim-plugin.md                  |  98 +++++
  docs/04-obsidian-integration.md           |  53 +++
  docs/05-grove-flow-integration.md         |  68 ++++
  docs/06-configuration.md                  |  82 ++++
@@ -58,7 +56,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
  docs/images/grove-notebook-inkscape.svg   | 654 ++++++++++++++++++++++++++++++
  docs/prompts/01-overview.md               |  43 ++
  docs/prompts/02-examples.md               |  10 +
- docs/prompts/03-neovim-plugin.md          |  30 ++
  docs/prompts/04-obsidian-integration.md   |  19 +
  docs/prompts/05-grove-flow-integration.md |  32 ++
  docs/prompts/06-configuration.md          |  17 +
@@ -66,7 +63,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
  go.mod                                    |  31 +-
  go.sum                                    | 124 +-----
  internal/tui/manager/model.go             | 377 ++++++++++++++---
- nvim-plugin/lua/nb/mappings.lua           |  87 +++-
  pkg/docs/docs.json                        | 164 ++++++++
  30 files changed, 2811 insertions(+), 352 deletions(-)
 ```
@@ -75,8 +71,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
 
 ### Bug Fixes
 
-* **nvim:** dynamically calculate column widths in note pickers
-
 ### Documentation
 
 * **changelog:** update CHANGELOG.md for v0.2.13
@@ -105,8 +99,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
 ## v0.2.13 (2025-09-17)
 
 ### Bug Fixes
-
-* **nvim:** dynamically calculate column widths in note pickers
 
 ### Documentation
 
@@ -147,8 +139,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
 
 ### Bug Fixes
 
-* **nvim:** dynamically calculate column widths in note pickers
-
 ### Documentation
 
 * **changelog:** update CHANGELOG.md for v0.2.13
@@ -168,8 +158,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
 * enhance nb manage with improved filtering capabilities
 
 ### Bug Fixes
-
-* **nvim:** dynamically calculate column widths in note pickers
 
 ### Documentation
 
@@ -204,8 +192,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
 
 ### Bug Fixes
 
-* **nvim:** dynamically calculate column widths in note pickers
-
 ### Documentation
 
 * **changelog:** update CHANGELOG.md for v0.2.13
@@ -235,8 +221,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
 
 ### Bug Fixes
 
-* **nvim:** dynamically calculate column widths in note pickers
-
 ## v0.2.13 (2025-09-13)
 
 ### Chores
@@ -255,13 +239,9 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
 
 ### Bug Fixes
 
-* **nvim:** dynamically calculate column widths in note pickers
-
 ## v0.2.13 (2025-09-12)
 
 ### Bug Fixes
-
-* **nvim:** dynamically calculate column widths in note pickers
 
 ### Documentation
 
@@ -285,8 +265,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
 
 ### Bug Fixes
 
-* **nvim:** dynamically calculate column widths in note pickers
-
 ### Chores
 
 * add Grove ecosystem files
@@ -300,8 +278,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
 * update readme
 
 ### Bug Fixes
-
-* **nvim:** dynamically calculate column widths in note pickers
 
 ### Documentation
 
@@ -311,8 +287,6 @@ The interactive note manager (`nb manage`) has been enhanced with improved filte
 ## v0.2.14 (2025-08-28)
 
 ### Bug Fixes
-
-* **nvim:** dynamically calculate column widths in note pickers
 
 ### Chores
 
