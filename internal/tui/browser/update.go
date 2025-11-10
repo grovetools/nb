@@ -53,6 +53,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tmuxSplitFinishedMsg:
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("tmux error: %v", msg.err)
+			return m, nil // Stay in TUI to show the error
+		}
+		// Split was successful, store the pane IDs and stay in TUI
+		if msg.clearPanes {
+			// Old pane was closed, clear stored IDs
+			m.tmuxSplitPaneID = ""
+			m.tmuxTUIPaneID = ""
+		}
+		if msg.paneID != "" {
+			m.tmuxSplitPaneID = msg.paneID
+		}
+		if msg.tuiPaneID != "" {
+			m.tmuxTUIPaneID = msg.tuiPaneID
+		}
+		m.statusMessage = ""
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetSize(msg.Width, msg.Height)
@@ -614,6 +634,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return editFileAndQuitMsg{filePath: noteToOpen.Path}
 						}
 					}
+
+					// If in a tmux session, open in a split and quit.
+					if os.Getenv("TMUX") != "" {
+						return m, m.openInTmuxSplitCmd(noteToOpen.Path)
+					}
+
 					return m, m.openInEditor(noteToOpen.Path)
 				}
 			}
@@ -626,9 +652,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						noteToPreview = node.note
 					}
 				}
-				if noteToPreview != nil && os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
-					return m, func() tea.Msg {
-						return previewFileMsg{filePath: noteToPreview.Path}
+				if noteToPreview != nil {
+					if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
+						return m, func() tea.Msg {
+							return previewFileMsg{filePath: noteToPreview.Path}
+						}
+					}
+
+					// If in a tmux session, preview in split without switching focus
+					if os.Getenv("TMUX") != "" {
+						return m, m.previewInTmuxSplitCmd(noteToPreview.Path)
 					}
 				}
 			}
