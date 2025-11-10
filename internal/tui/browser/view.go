@@ -26,6 +26,7 @@ type nodeRenderInfo struct {
 	isWorkspace bool
 	isSeparator bool
 	workspace   *workspace.WorkspaceNode // a reference to the workspace node if applicable
+	note        *models.Note             // a reference to the note if applicable
 }
 
 // getNodeRenderInfo populates a nodeRenderInfo struct with unstyled data from a displayNode.
@@ -70,6 +71,7 @@ func (m *Model) getNodeRenderInfo(node *displayNode) nodeRenderInfo {
 			info.count = fmt.Sprintf(" (%d)", node.childCount)
 		}
 	} else if node.isNote {
+		info.note = node.note
 		info.name = node.note.Title
 		info.isArchived = strings.Contains(node.note.Path, "/.archive/")
 		if _, ok := m.selected[node.note.Path]; ok {
@@ -113,6 +115,13 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 		return lipgloss.NewStyle().Underline(true).Render(content)
 	}
 
+	// Check if note is cut (staged for moving)
+	if info.note != nil {
+		if _, isCut := m.cutPaths[info.note.Path]; isCut {
+			return lipgloss.NewStyle().Faint(true).Strikethrough(true).Render(content)
+		}
+	}
+
 	if info.isArchived {
 		return lipgloss.NewStyle().Faint(true).Render(content)
 	}
@@ -134,6 +143,38 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 	return content
 }
 
+// getNoteCreationContext returns a description of where the note will be created
+func (m Model) getNoteCreationContext() string {
+	if m.noteCreationMode == "inbox" {
+		// Inbox mode: goes to focused workspace or global
+		if m.focusedWorkspace != nil {
+			return fmt.Sprintf("%s (inbox)", m.focusedWorkspace.Name)
+		}
+		return "global (inbox)"
+	}
+
+	if m.noteCreationMode == "global" {
+		// Global mode: always creates in global
+		return "global"
+	}
+
+	// Context mode: use the cursor position when creation started
+	if m.noteCreationCursor >= len(m.displayNodes) {
+		return "global/current"
+	}
+
+	node := m.displayNodes[m.noteCreationCursor]
+	if node.isWorkspace {
+		return fmt.Sprintf("%s/current", node.workspace.Name)
+	} else if node.isGroup {
+		return fmt.Sprintf("%s/%s", node.workspaceName, node.groupName)
+	} else if node.isNote {
+		return fmt.Sprintf("%s/%s", node.note.Workspace, node.note.Group)
+	}
+
+	return "global/current"
+}
+
 func (m Model) View() string {
 	if len(m.workspaces) == 0 && len(m.allNotes) == 0 {
 		return "Loading..."
@@ -141,6 +182,62 @@ func (m Model) View() string {
 
 	if m.help.ShowAll {
 		return m.help.View()
+	}
+
+	// Render note creation UI if active
+	if m.isCreatingNote {
+		// Get context information
+		contextInfo := m.getNoteCreationContext()
+		contextLine := lipgloss.NewStyle().
+			Faint(true).
+			Render(fmt.Sprintf("Creating in: %s", contextInfo))
+
+		var content string
+		if m.noteCreationStep == 0 { // Type picker
+			content = contextLine + "\n\n" + m.noteTypePicker.View()
+		} else { // Title input
+			content = contextLine + "\n\nEnter Title:\n" + m.noteTitleInput.View()
+		}
+
+		dialogBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(theme.DefaultTheme.Colors.Cyan).
+			Padding(1, 2).
+			Render(content)
+
+		helpText := lipgloss.NewStyle().
+			Faint(true).
+			Width(lipgloss.Width(dialogBox)).
+			Align(lipgloss.Center).
+			Render("\n\nPress Enter to confirm • Esc to cancel")
+
+		overlay := lipgloss.JoinVertical(lipgloss.Left, dialogBox, helpText)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+	}
+
+	// Render note rename UI if active
+	if m.isRenamingNote && m.noteToRename != nil {
+		oldTitle := m.noteToRename.Title
+		contextLine := lipgloss.NewStyle().
+			Faint(true).
+			Render(fmt.Sprintf("Renaming: %s", oldTitle))
+
+		content := contextLine + "\n\nNew Title:\n" + m.renameInput.View()
+
+		dialogBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(theme.DefaultTheme.Colors.Cyan).
+			Padding(1, 2).
+			Render(content)
+
+		helpText := lipgloss.NewStyle().
+			Faint(true).
+			Width(lipgloss.Width(dialogBox)).
+			Align(lipgloss.Center).
+			Render("\n\nPress Enter to confirm • Esc to cancel")
+
+		overlay := lipgloss.JoinVertical(lipgloss.Left, dialogBox, helpText)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
 	}
 
 	if m.columnSelectMode {

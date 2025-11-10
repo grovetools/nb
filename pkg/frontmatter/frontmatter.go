@@ -69,6 +69,9 @@ func Build(fm *Frontmatter) string {
 	// Always include these fields in a consistent order
 	sb.WriteString(fmt.Sprintf("id: %s\n", fm.ID))
 	sb.WriteString(fmt.Sprintf("title: %s\n", fm.Title))
+	if fm.Type != "" {
+		sb.WriteString(fmt.Sprintf("type: %s\n", fm.Type))
+	}
 	sb.WriteString(fmt.Sprintf("aliases: %s\n", formatYAMLArray(fm.Aliases)))
 	sb.WriteString(fmt.Sprintf("tags: %s\n", formatYAMLArray(fm.Tags)))
 

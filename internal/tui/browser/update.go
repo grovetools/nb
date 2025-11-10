@@ -81,6 +81,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyFilterAndSort()
 		return m, nil
 
+	case notesDeletedMsg:
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Error deleting notes: %v", msg.err)
+			return m, nil
+		}
+		// Create a lookup map of deleted paths
+		deletedMap := make(map[string]bool)
+		for _, path := range msg.deletedPaths {
+			deletedMap[path] = true
+		}
+		// Filter out deleted notes
+		newAllNotes := make([]*models.Note, 0, len(m.allNotes))
+		for _, note := range m.allNotes {
+			if !deletedMap[note.Path] {
+				newAllNotes = append(newAllNotes, note)
+			}
+		}
+		m.allNotes = newAllNotes
+		// Clear selections
+		m.selected = make(map[string]struct{})
+		m.selectedGroups = make(map[string]struct{})
+		// Rebuild display
+		m.buildDisplayTree()
+		m.applyFilterAndSort()
+		m.statusMessage = fmt.Sprintf("Deleted %d note(s)", len(msg.deletedPaths))
+		return m, nil
+
+	case notesPastedMsg:
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Error pasting notes: %v", msg.err)
+			return m, nil
+		}
+		// If it was a cut operation, clear the clipboard and cut paths
+		if m.clipboardMode == "cut" {
+			m.clipboard = nil
+			m.clipboardMode = ""
+			m.cutPaths = make(map[string]struct{})
+		}
+		m.statusMessage = fmt.Sprintf("Pasted %d note(s) successfully", msg.pastedCount)
+		// Refresh notes to show the new locations
+		if m.focusedWorkspace != nil {
+			return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+		}
+		return m, fetchAllNotesCmd(m.service)
+
 	case notesArchivedMsg:
 		if msg.err != nil {
 			m.statusMessage = fmt.Sprintf("Error archiving notes: %v", msg.err)
@@ -117,10 +162,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case noteCreatedMsg:
+		m.isCreatingNote = false
+		m.noteTitleInput.Blur()
+		m.noteTitleInput.SetValue("")
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Error creating note: %v", msg.err)
+			return m, nil
+		}
+		m.statusMessage = fmt.Sprintf("Created note: %s", msg.note.Title)
+		// Refresh notes to show the new one
+		if m.focusedWorkspace != nil {
+			return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+		}
+		return m, fetchAllNotesCmd(m.service)
+
+	case noteRenamedMsg:
+		m.isRenamingNote = false
+		m.renameInput.Blur()
+		m.renameInput.SetValue("")
+		m.noteToRename = nil
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Error renaming note: %v", msg.err)
+			return m, nil
+		}
+		m.statusMessage = "Note renamed successfully"
+		// Refresh notes to show the updated name
+		if m.focusedWorkspace != nil {
+			return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+		}
+		return m, fetchAllNotesCmd(m.service)
+
 	case tea.KeyMsg:
 		if m.help.ShowAll {
 			m.help.Toggle()
 			return m, nil
+		}
+
+		// Handle note creation mode
+		if m.isCreatingNote {
+			return m.updateNoteCreation(msg)
+		}
+
+		// Handle note rename mode
+		if m.isRenamingNote {
+			return m.updateNoteRename(msg)
 		}
 
 		// Handle column selection mode
@@ -154,6 +240,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.archiveSelectedNotesCmd()
 			case "n", "N", "esc":
 				m.confirmingArchive = false
+				m.statusMessage = ""
+				return m, nil
+			}
+			return m, nil
+		}
+
+		// Handle delete confirmation mode
+		if m.confirmingDelete {
+			switch msg.String() {
+			case "y", "Y":
+				m.confirmingDelete = false
+				m.statusMessage = ""
+				return m, m.deleteSelectedNotesCmd()
+			case "n", "N", "esc":
+				m.confirmingDelete = false
 				m.statusMessage = ""
 				return m, nil
 			}
@@ -397,6 +498,78 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Clear all selections
 			m.selected = make(map[string]struct{})
 			m.selectedGroups = make(map[string]struct{})
+		case key.Matches(msg, m.keys.Delete):
+			if m.lastKey == "d" { // This is the second 'd'
+				pathsToDelete := m.getTargetedNotePaths()
+				if len(pathsToDelete) > 0 {
+					m.confirmingDelete = true
+					m.statusMessage = fmt.Sprintf("Permanently delete %d note(s)? This cannot be undone. (y/N)", len(pathsToDelete))
+				}
+				m.lastKey = "" // Reset sequence
+			} else {
+				m.lastKey = "d" // This is the first 'd'
+			}
+		case key.Matches(msg, m.keys.Cut):
+			paths := m.getTargetedNotePaths()
+			if len(paths) > 0 {
+				m.clipboard = paths
+				m.clipboardMode = "cut"
+				m.cutPaths = make(map[string]struct{})
+				for _, p := range paths {
+					m.cutPaths[p] = struct{}{}
+				}
+				m.statusMessage = fmt.Sprintf("Cut %d note(s) to clipboard", len(paths))
+			}
+		case key.Matches(msg, m.keys.Copy):
+			paths := m.getTargetedNotePaths()
+			if len(paths) > 0 {
+				m.clipboard = paths
+				m.clipboardMode = "copy"
+				m.cutPaths = make(map[string]struct{}) // Clear cut visual
+				m.statusMessage = fmt.Sprintf("Copied %d note(s) to clipboard", len(paths))
+			}
+		case key.Matches(msg, m.keys.Paste):
+			if len(m.clipboard) > 0 {
+				m.statusMessage = fmt.Sprintf("Pasting %d note(s)...", len(m.clipboard))
+				return m, m.pasteNotesCmd()
+			}
+		case key.Matches(msg, m.keys.CreateNote):
+			// Context-based creation: create at cursor, skip type picker
+			m.isCreatingNote = true
+			m.noteCreationMode = "context"
+			m.noteCreationStep = 1 // Skip type picker, go straight to title
+			m.noteCreationCursor = m.cursor
+			m.noteTitleInput.SetValue("")
+			m.noteTitleInput.Focus()
+			return m, textinput.Blink
+		case key.Matches(msg, m.keys.CreateNoteInbox):
+			// Inbox-style creation: show type picker, create in focused workspace or global
+			m.isCreatingNote = true
+			m.noteCreationMode = "inbox"
+			m.noteCreationStep = 0 // Start with type picker
+			m.noteCreationCursor = m.cursor
+			m.noteTitleInput.SetValue("")
+			return m, nil
+		case key.Matches(msg, m.keys.CreateNoteGlobal):
+			// Global note creation: show type picker, always create in global
+			m.isCreatingNote = true
+			m.noteCreationMode = "global"
+			m.noteCreationStep = 0 // Start with type picker
+			m.noteCreationCursor = m.cursor
+			m.noteTitleInput.SetValue("")
+			return m, nil
+		case key.Matches(msg, m.keys.Rename):
+			// Rename note: only works when cursor is on a note
+			if m.cursor < len(m.displayNodes) {
+				node := m.displayNodes[m.cursor]
+				if node.isNote {
+					m.isRenamingNote = true
+					m.noteToRename = node.note
+					m.renameInput.SetValue(node.note.Title)
+					m.renameInput.Focus()
+					return m, textinput.Blink
+				}
+			}
 		case key.Matches(msg, m.keys.Archive):
 			// Archive selected notes and/or plan groups
 			totalSelected := len(m.selected) + len(m.selectedGroups)
@@ -465,9 +638,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.buildDisplayTree()
 				return m, nil
 			}
+			// If in cut mode, escape cancels the cut operation
+			if m.clipboardMode == "cut" {
+				m.clipboard = nil
+				m.clipboardMode = ""
+				m.cutPaths = make(map[string]struct{})
+				m.statusMessage = "Cut operation cancelled"
+				return m, nil
+			}
 		default:
-			// Reset lastKey for any other key press (for gg and z* detection)
-			if !key.Matches(msg, m.keys.GoToTop) && !key.Matches(msg, m.keys.FoldPrefix) {
+			// Reset lastKey for any other key press (for gg, dd and z* detection)
+			if !key.Matches(msg, m.keys.GoToTop) && !key.Matches(msg, m.keys.FoldPrefix) && !key.Matches(msg, m.keys.Delete) {
 				m.lastKey = ""
 			}
 		}
@@ -1666,6 +1847,263 @@ func (m *Model) setCollapseStateForFocus() {
 // getGroupKey returns a unique key for a group node (workspace:groupName)
 func (m *Model) getGroupKey(node *displayNode) string {
 	return node.workspaceName + ":" + node.groupName
+}
+
+// getTargetedNotePaths returns a slice of note paths to be operated on,
+// based on selection or the current cursor position.
+func (m *Model) getTargetedNotePaths() []string {
+	if len(m.selected) > 0 {
+		paths := make([]string, 0, len(m.selected))
+		for path := range m.selected {
+			paths = append(paths, path)
+		}
+		return paths
+	}
+
+	if m.cursor < len(m.displayNodes) {
+		node := m.displayNodes[m.cursor]
+		if node.isNote {
+			return []string{node.note.Path}
+		}
+		// If on a group, collect all notes within that group
+		if node.isGroup {
+			var paths []string
+			// Find all notes belonging to this group
+			for _, n := range m.allNotes {
+				if n.Workspace == node.workspaceName && n.Group == node.groupName {
+					paths = append(paths, n.Path)
+				}
+			}
+			return paths
+		}
+	}
+	return nil
+}
+
+// deleteSelectedNotesCmd creates a command to delete the selected notes.
+func (m *Model) deleteSelectedNotesCmd() tea.Cmd {
+	pathsToDelete := m.getTargetedNotePaths()
+	if len(pathsToDelete) == 0 {
+		return nil
+	}
+	return func() tea.Msg {
+		err := m.service.DeleteNotes(pathsToDelete)
+		return notesDeletedMsg{
+			deletedPaths: pathsToDelete,
+			err:          err,
+		}
+	}
+}
+
+// pasteNotesCmd creates a command to paste notes from the clipboard.
+func (m *Model) pasteNotesCmd() tea.Cmd {
+	if len(m.clipboard) == 0 {
+		return nil
+	}
+
+	// Determine destination from cursor
+	var destWorkspace *workspace.WorkspaceNode
+	var destGroup string
+
+	if m.cursor < len(m.displayNodes) {
+		node := m.displayNodes[m.cursor]
+		if node.isWorkspace {
+			destWorkspace = node.workspace
+			destGroup = "current" // Default group when pasting on a workspace
+		} else if node.isGroup {
+			destWorkspace, _ = m.findWorkspaceNodeByName(node.workspaceName)
+			destGroup = node.groupName
+		} else if node.isNote {
+			destWorkspace, _ = m.findWorkspaceNodeByName(node.note.Workspace)
+			destGroup = node.note.Group
+		}
+	}
+
+	if destWorkspace == nil {
+		// Fallback to global if no context can be determined
+		destWorkspace, _ = m.findWorkspaceNodeByName("global")
+		destGroup = "current"
+	}
+
+	mode := m.clipboardMode
+	paths := m.clipboard
+
+	return func() tea.Msg {
+		var newPaths []string
+		var err error
+		if mode == "copy" {
+			newPaths, err = m.service.CopyNotes(paths, destWorkspace, destGroup)
+		} else {
+			newPaths, err = m.service.MoveNotes(paths, destWorkspace, destGroup)
+		}
+		return notesPastedMsg{
+			pastedCount: len(paths),
+			newPaths:    newPaths,
+			err:         err,
+		}
+	}
+}
+
+func (m *Model) findWorkspaceNodeByName(name string) (*workspace.WorkspaceNode, bool) {
+	for _, ws := range m.workspaces {
+		if ws.Name == name {
+			return ws, true
+		}
+	}
+	return nil, false
+}
+
+// updateNoteCreation handles input when the note creation UI is active.
+func (m *Model) updateNoteCreation(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.isCreatingNote = false
+			m.noteTitleInput.Blur()
+			return m, nil
+		case "enter":
+			if m.noteCreationStep == 0 { // From type picker to title
+				m.noteCreationStep = 1
+				m.noteTitleInput.Focus()
+				return m, textinput.Blink
+			} else { // From title to creating note
+				return m, m.createNoteCmd()
+			}
+		}
+	}
+
+	if m.noteCreationStep == 0 {
+		m.noteTypePicker, cmd = m.noteTypePicker.Update(msg)
+	} else {
+		m.noteTitleInput, cmd = m.noteTitleInput.Update(msg)
+	}
+	return m, cmd
+}
+
+// createNoteCmd creates a command to create a new note.
+func (m *Model) createNoteCmd() tea.Cmd {
+	title := m.noteTitleInput.Value()
+	if title == "" {
+		title = "Untitled Note"
+	}
+
+	var wsCtx *service.WorkspaceContext
+	var noteType models.NoteType
+	var err error
+
+	if m.noteCreationMode == "context" {
+		// Context-based: Create at the cursor position stored when creation started
+		if m.noteCreationCursor < len(m.displayNodes) {
+			node := m.displayNodes[m.noteCreationCursor]
+			var wsPath string
+
+			if node.isWorkspace {
+				wsPath = node.workspace.Path
+				noteType = "current" // Default to current for workspace
+			} else if node.isGroup {
+				// Find workspace by name to get its path
+				ws, found := m.findWorkspaceNodeByName(node.workspaceName)
+				if found {
+					wsPath = ws.Path
+				}
+				noteType = models.NoteType(node.groupName)
+			} else if node.isNote {
+				// Find workspace by name to get its path
+				ws, found := m.findWorkspaceNodeByName(node.note.Workspace)
+				if found {
+					wsPath = ws.Path
+				}
+				noteType = models.NoteType(node.note.Group)
+			}
+
+			if wsPath != "" {
+				wsCtx, err = m.service.GetWorkspaceContext(wsPath)
+			}
+		}
+
+		if wsCtx == nil || err != nil {
+			// Default to focused workspace or global
+			if m.focusedWorkspace != nil {
+				wsCtx, _ = m.service.GetWorkspaceContext(m.focusedWorkspace.Path)
+				noteType = "current"
+			} else {
+				wsCtx, _ = m.service.GetWorkspaceContext("global")
+				noteType = "current"
+			}
+		}
+	} else if m.noteCreationMode == "inbox" {
+		// Inbox mode: Use selected type from picker, create in focused workspace or global
+		selectedType := m.noteTypePicker.SelectedItem().(noteTypeItem)
+		noteType = models.NoteType(selectedType)
+
+		if m.focusedWorkspace != nil {
+			wsCtx, _ = m.service.GetWorkspaceContext(m.focusedWorkspace.Path)
+		} else {
+			wsCtx, _ = m.service.GetWorkspaceContext("global")
+		}
+	} else if m.noteCreationMode == "global" {
+		// Global mode: Use selected type from picker, always create in global
+		selectedType := m.noteTypePicker.SelectedItem().(noteTypeItem)
+		noteType = models.NoteType(selectedType)
+		wsCtx, _ = m.service.GetWorkspaceContext("global")
+	}
+
+	return func() tea.Msg {
+		note, err := m.service.CreateNote(wsCtx, noteType, title, service.WithoutEditor())
+		return noteCreatedMsg{note: note, err: err}
+	}
+}
+
+// updateNoteRename handles input when the note rename UI is active.
+func (m *Model) updateNoteRename(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.isRenamingNote = false
+			m.renameInput.Blur()
+			m.noteToRename = nil
+			return m, nil
+		case "enter":
+			return m, m.renameNoteCmd()
+		}
+	}
+
+	m.renameInput, cmd = m.renameInput.Update(msg)
+	return m, cmd
+}
+
+// renameNoteCmd creates a command to rename a note.
+func (m *Model) renameNoteCmd() tea.Cmd {
+	if m.noteToRename == nil {
+		return nil
+	}
+
+	newTitle := m.renameInput.Value()
+	if newTitle == "" || newTitle == m.noteToRename.Title {
+		// No change, just cancel
+		return func() tea.Msg {
+			return noteRenamedMsg{
+				oldPath: m.noteToRename.Path,
+				newPath: m.noteToRename.Path,
+				err:     nil,
+			}
+		}
+	}
+
+	oldPath := m.noteToRename.Path
+
+	return func() tea.Msg {
+		newPath, err := m.service.RenameNote(oldPath, newTitle)
+		return noteRenamedMsg{
+			oldPath: oldPath,
+			newPath: newPath,
+			err:     err,
+		}
+	}
 }
 
 // archivePlanDirectory moves a plan directory to the .archive subdirectory

@@ -490,3 +490,71 @@ func GetNoteMetadata(path string) (workspaceIdentifier, branch, noteType string)
 
 	return "", "", ""
 }
+
+// RenameNote renames a note by updating its filename, ID, title, and first heading
+func (s *Service) RenameNote(oldPath, newTitle string) (string, error) {
+	// Read the note content
+	content, err := os.ReadFile(oldPath)
+	if err != nil {
+		return "", fmt.Errorf("read note: %w", err)
+	}
+
+	contentStr := string(content)
+
+	// Parse frontmatter
+	fm, body, err := frontmatter.Parse(contentStr)
+	if err != nil || fm == nil {
+		return "", fmt.Errorf("parse frontmatter: %w", err)
+	}
+
+	// Generate new ID from new title
+	newID := GenerateNoteID(newTitle)
+
+	// Update frontmatter fields
+	fm.ID = newID
+	fm.Title = newTitle
+	fm.Modified = frontmatter.FormatTimestamp(time.Now())
+
+	// Update the first heading in the body (# Old Title -> # New Title)
+	bodyLines := strings.Split(body, "\n")
+	for i, line := range bodyLines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "# ") {
+			bodyLines[i] = "# " + newTitle
+			break
+		}
+	}
+	newBody := strings.Join(bodyLines, "\n")
+
+	// Build the updated content
+	updatedContent := frontmatter.BuildContent(fm, newBody)
+
+	// Generate new filename
+	oldDir := filepath.Dir(oldPath)
+	newFilename := GenerateFilename(newTitle)
+	newPath := filepath.Join(oldDir, newFilename)
+
+	// Handle collision: if file exists, add timestamp suffix
+	if _, err := os.Stat(newPath); err == nil && newPath != oldPath {
+		timestamp := time.Now().Format("150405")
+		base := strings.TrimSuffix(newFilename, ".md")
+		newFilename = fmt.Sprintf("%s-%s.md", base, timestamp)
+		newPath = filepath.Join(oldDir, newFilename)
+	}
+
+	// Write to new path
+	if err := os.WriteFile(newPath, []byte(updatedContent), 0644); err != nil {
+		return "", fmt.Errorf("write new file: %w", err)
+	}
+
+	// Delete old file (only if paths are different)
+	if newPath != oldPath {
+		if err := os.Remove(oldPath); err != nil {
+			// If we can't delete the old file, remove the new one and return error
+			os.Remove(newPath)
+			return "", fmt.Errorf("remove old file: %w", err)
+		}
+	}
+
+	return newPath, nil
+}

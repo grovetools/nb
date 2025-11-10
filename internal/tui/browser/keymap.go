@@ -30,6 +30,14 @@ type KeyMap struct {
 	Preview        key.Binding
 	Grep           key.Binding
 	ToggleColumns  key.Binding
+	Cut              key.Binding
+	Copy             key.Binding
+	Paste            key.Binding
+	Delete           key.Binding
+	CreateNote       key.Binding
+	CreateNoteInbox  key.Binding
+	CreateNoteGlobal key.Binding
+	Rename           key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -63,6 +71,15 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.Archive,
 		k.Preview,
 		k.ToggleColumns,
+	}, []key.Binding{
+		k.CreateNote,
+		k.CreateNoteInbox,
+		k.CreateNoteGlobal,
+		k.Rename,
+		k.Delete,
+		k.Cut,
+		k.Copy,
+		k.Paste,
 	})
 }
 
@@ -137,12 +154,12 @@ var keys = KeyMap{
 		key.WithHelp("a", "select all (visible)"),
 	),
 	SelectNone: key.NewBinding(
-		key.WithKeys("n"),
-		key.WithHelp("n", "deselect all"),
+		key.WithKeys("N"),
+		key.WithHelp("N", "deselect all"),
 	),
 	Archive: key.NewBinding(
-		key.WithKeys("x"),
-		key.WithHelp("x", "archive selected"),
+		key.WithKeys("X"),
+		key.WithHelp("X", "archive selected"),
 	),
 	Preview: key.NewBinding(
 		key.WithKeys("tab"),
@@ -155,5 +172,37 @@ var keys = KeyMap{
 	ToggleColumns: key.NewBinding(
 		key.WithKeys("V"),
 		key.WithHelp("V", "toggle columns"),
+	),
+	CreateNote: key.NewBinding(
+		key.WithKeys("n"),
+		key.WithHelp("n", "create note at cursor"),
+	),
+	CreateNoteInbox: key.NewBinding(
+		key.WithKeys("i"),
+		key.WithHelp("i", "inbox note (quick capture)"),
+	),
+	CreateNoteGlobal: key.NewBinding(
+		key.WithKeys("I"),
+		key.WithHelp("I", "global note"),
+	),
+	Rename: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "rename note"),
+	),
+	Delete: key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("dd", "delete selected"),
+	),
+	Cut: key.NewBinding(
+		key.WithKeys("x"),
+		key.WithHelp("x", "cut selected"),
+	),
+	Copy: key.NewBinding(
+		key.WithKeys("y", "c"),
+		key.WithHelp("y/c", "copy selected"),
+	),
+	Paste: key.NewBinding(
+		key.WithKeys("p"),
+		key.WithHelp("p", "paste from clipboard"),
 	),
 }

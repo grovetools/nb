@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,8 +13,191 @@ import (
 	"github.com/mattsolo1/grove-core/git"
 	coreworkspace "github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/util/pathutil"
+	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 )
+
+// DeleteNotes removes note files from the filesystem.
+func (s *Service) DeleteNotes(paths []string) error {
+	var errs []string
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil {
+			errs = append(errs, fmt.Sprintf("failed to delete %s: %v", path, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// MoveNotes moves notes to a new workspace and group.
+func (s *Service) MoveNotes(sourcePaths []string, destWorkspace *coreworkspace.WorkspaceNode, destGroup string) ([]string, error) {
+	return s.transferNotes(sourcePaths, destWorkspace, destGroup, "move")
+}
+
+// CopyNotes copies notes to a new workspace and group.
+func (s *Service) CopyNotes(sourcePaths []string, destWorkspace *coreworkspace.WorkspaceNode, destGroup string) ([]string, error) {
+	return s.transferNotes(sourcePaths, destWorkspace, destGroup, "copy")
+}
+
+// transferNotes is a helper for moving or copying notes.
+func (s *Service) transferNotes(sourcePaths []string, destWorkspace *coreworkspace.WorkspaceNode, destGroup, mode string) ([]string, error) {
+	var newPaths []string
+	var errs []string
+
+	for _, sourcePath := range sourcePaths {
+		filename := filepath.Base(sourcePath)
+		destDir, err := s.notebookLocator.GetNotesDir(destWorkspace, destGroup)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("failed to get dest dir for %s: %v", sourcePath, err))
+			continue
+		}
+
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			errs = append(errs, fmt.Sprintf("failed to create dest dir %s: %v", destDir, err))
+			continue
+		}
+
+		destPath := filepath.Join(destDir, filename)
+		isCopyToSameLocation := false
+
+		// Handle filename collisions
+		if _, err := os.Stat(destPath); err == nil && destPath != sourcePath {
+			base := strings.TrimSuffix(filename, filepath.Ext(filename))
+			ext := filepath.Ext(filename)
+			timestamp := time.Now().Format("20060102150405")
+			destPath = filepath.Join(destDir, fmt.Sprintf("%s-%s%s", base, timestamp, ext))
+
+			// Check if copying to same directory
+			if mode == "copy" && filepath.Dir(sourcePath) == filepath.Dir(destPath) {
+				isCopyToSameLocation = true
+			}
+		}
+
+		var opErr error
+		if mode == "copy" {
+			opErr = copyFile(sourcePath, destPath)
+		} else { // move
+			opErr = os.Rename(sourcePath, destPath)
+			if opErr != nil {
+				// Fallback to copy and delete if rename fails (e.g., cross-device)
+				opErr = copyAndDelete(sourcePath, destPath)
+			}
+		}
+
+		if opErr != nil {
+			errs = append(errs, fmt.Sprintf("failed to %s %s: %v", mode, sourcePath, opErr))
+			continue
+		}
+
+		// Update frontmatter to match the new location
+		if updateErr := s.updateNoteFrontmatter(destPath, destWorkspace, destGroup, isCopyToSameLocation); updateErr != nil {
+			// Log warning but don't fail the operation
+			fmt.Fprintf(os.Stderr, "Warning: failed to update frontmatter for %s: %v\n", destPath, updateErr)
+		}
+
+		newPaths = append(newPaths, destPath)
+	}
+
+	if len(errs) > 0 {
+		return nil, fmt.Errorf(strings.Join(errs, "; "))
+	}
+	return newPaths, nil
+}
+
+// updateNoteFrontmatter updates frontmatter fields to match the new location
+func (s *Service) updateNoteFrontmatter(notePath string, destWorkspace *coreworkspace.WorkspaceNode, newType string, isCopyToSameLocation bool) error {
+	content, err := os.ReadFile(notePath)
+	if err != nil {
+		return fmt.Errorf("read note: %w", err)
+	}
+
+	contentStr := string(content)
+	fm, body, err := frontmatter.Parse(contentStr)
+	if err != nil || fm == nil {
+		// No frontmatter or parsing error - skip update
+		return nil
+	}
+
+	// If copying to same location, update title and ID to distinguish the copy
+	if isCopyToSameLocation {
+		// Add "Copy" suffix to title
+		if !strings.Contains(fm.Title, "Copy") {
+			fm.Title = fm.Title + " Copy"
+		} else {
+			// If already has "Copy", add a number
+			copyCount := 2
+			for {
+				newTitle := fmt.Sprintf("%s %d", fm.Title, copyCount)
+				if newTitle != fm.Title {
+					fm.Title = newTitle
+					break
+				}
+				copyCount++
+			}
+		}
+
+		// Generate new ID based on new title
+		fm.ID = GenerateNoteID(fm.Title)
+
+		// Update modified timestamp
+		fm.Modified = frontmatter.FormatTimestamp(time.Now())
+
+		// Update the first heading in the body to match new title
+		bodyLines := strings.Split(body, "\n")
+		for i, line := range bodyLines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "# ") {
+				bodyLines[i] = "# " + fm.Title
+				break
+			}
+		}
+		body = strings.Join(bodyLines, "\n")
+	}
+
+	// Update the type field
+	fm.Type = newType
+
+	// Update tags to reflect the new type/location
+	// Extract tags from the new type (e.g., "issues/bugs" -> ["issues", "bugs"])
+	pathTags := frontmatter.ExtractPathTags(newType)
+
+	// Keep the repository tag
+	var repoTags []string
+	if destWorkspace != nil && destWorkspace.Name != "global" {
+		repoTags = []string{destWorkspace.Name}
+	}
+
+	// Merge path tags and repository tag
+	fm.Tags = frontmatter.MergeTags(pathTags, repoTags)
+
+	// Update repository, branch, and worktree fields based on destination workspace
+	if destWorkspace != nil {
+		fm.Repository = destWorkspace.Name
+
+		// Get branch information if it's a git repo
+		if git.IsGitRepo(destWorkspace.Path) {
+			_, branch, _ := git.GetRepoInfo(destWorkspace.Path)
+			fm.Branch = branch
+		} else {
+			fm.Branch = ""
+		}
+
+		// Set worktree name if applicable
+		fm.Worktree = destWorkspace.GetWorktreeName()
+	}
+
+	// Rebuild content with updated frontmatter
+	updatedContent := frontmatter.BuildContent(fm, body)
+
+	// Write back to file
+	if err := os.WriteFile(notePath, []byte(updatedContent), 0644); err != nil {
+		return fmt.Errorf("write note: %w", err)
+	}
+
+	return nil
+}
 
 // Service is the core note service
 type Service struct {
@@ -664,6 +848,41 @@ func WithLimit(limit int) SearchOption {
 	return func(o *searchOptions) {
 		o.limit = limit
 	}
+}
+
+func copyFile(src, dst string) error {
+	source, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	destination, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destination.Close()
+
+	_, err = io.Copy(destination, source)
+	if err != nil {
+		return err
+	}
+
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	return os.Chmod(dst, srcInfo.Mode())
+}
+
+func copyAndDelete(src, dst string) error {
+	if err := copyFile(src, dst); err != nil {
+		return fmt.Errorf("failed to copy file: %w", err)
+	}
+	if err := os.Remove(src); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to remove source file: %v\n", err)
+	}
+	return nil
 }
 
 // getCurrentGitBranch returns the current git branch

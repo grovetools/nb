@@ -105,6 +105,25 @@ type Model struct {
 	selectedGroups    map[string]struct{} // Tracks selected groups (workspace:groupName)
 	statusMessage     string
 	confirmingArchive bool
+	confirmingDelete  bool
+
+	// Clipboard state
+	clipboard     []string            // Paths of notes to be cut/copied
+	clipboardMode string              // "cut" or "copy"
+	cutPaths      map[string]struct{} // For visual indication of cut items
+
+	// Note creation state
+	isCreatingNote     bool   // True when in the note creation flow
+	noteCreationMode   string // "context" or "inbox"
+	noteCreationStep   int    // 0: type picker, 1: title input
+	noteTypePicker     list.Model
+	noteTitleInput     textinput.Model
+	noteCreationCursor int // Cursor position when creation started
+
+	// Note rename state
+	isRenamingNote bool
+	renameInput    textinput.Model
+	noteToRename   *models.Note
 
 	// Column Visibility
 	columnVisibility map[string]bool
@@ -134,6 +153,31 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	ti := textinput.New()
 	ti.Placeholder = "Search notes..."
 	ti.CharLimit = 100
+
+	// Note creation setup
+	noteTitleInput := textinput.New()
+	noteTitleInput.Placeholder = "Enter note title..."
+	noteTitleInput.CharLimit = 200
+	noteTitleInput.Width = 60
+
+	noteTypes := []list.Item{
+		noteTypeItem("current"), noteTypeItem("llm"), noteTypeItem("learn"),
+		noteTypeItem("daily"), noteTypeItem("issues"), noteTypeItem("architecture"),
+		noteTypeItem("todos"), noteTypeItem("blog"), noteTypeItem("prompts"),
+		noteTypeItem("quick"),
+	}
+	noteTypePicker := list.New(noteTypes, noteTypeDelegate{}, 40, 12)
+	noteTypePicker.Title = "Select Note Type"
+	noteTypePicker.SetShowHelp(false)
+	noteTypePicker.SetShowStatusBar(false)
+	noteTypePicker.SetShowPagination(false)
+	noteTypePicker.SetFilteringEnabled(false)
+
+	// Note rename setup
+	renameInput := textinput.New()
+	renameInput.Placeholder = "Enter new title..."
+	renameInput.CharLimit = 200
+	renameInput.Width = 60
 
 	// Column Visibility Setup - load from state
 	availableColumns := []string{"TYPE", "STATUS", "TAGS", "CREATED"}
@@ -178,7 +222,11 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		},
 		selected:          make(map[string]struct{}), // Initialize selection map
 		selectedGroups:    make(map[string]struct{}), // Initialize group selection map
+		cutPaths:          make(map[string]struct{}), // Initialize cut paths map
 		focusedWorkspace:  initialFocus,
+		noteTitleInput:    noteTitleInput,
+		noteTypePicker:    noteTypePicker,
+		renameInput:       renameInput,
 		columnVisibility:  columnVisibility,
 		columnSelectMode:  false,
 		columnList:        columnList,
@@ -216,6 +264,32 @@ type notesArchivedMsg struct {
 	err           error
 }
 
+// notesDeletedMsg is sent when notes have been deleted
+type notesDeletedMsg struct {
+	deletedPaths []string
+	err          error
+}
+
+// notesPastedMsg is sent after a paste operation
+type notesPastedMsg struct {
+	pastedCount int
+	newPaths    []string
+	err         error
+}
+
+// noteCreatedMsg is sent after a note is created
+type noteCreatedMsg struct {
+	note *models.Note
+	err  error
+}
+
+// noteRenamedMsg is sent after a note is renamed
+type noteRenamedMsg struct {
+	oldPath string
+	newPath string
+	err     error
+}
+
 // openInEditor opens a note in the configured editor
 func (m Model) openInEditor(path string) tea.Cmd {
 	editor := os.Getenv("EDITOR")
@@ -226,6 +300,35 @@ func (m Model) openInEditor(path string) tea.Cmd {
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return editorFinishedMsg{err: err}
 	})
+}
+
+// noteTypeItem implements the list.Item interface for the note type picker.
+type noteTypeItem string
+
+func (i noteTypeItem) FilterValue() string { return string(i) }
+func (i noteTypeItem) Title() string       { return string(i) }
+func (i noteTypeItem) Description() string { return "" }
+
+// noteTypeDelegate is a custom delegate with minimal spacing for the note type picker
+type noteTypeDelegate struct{}
+
+func (d noteTypeDelegate) Height() int                             { return 1 }
+func (d noteTypeDelegate) Spacing() int                            { return 0 }
+func (d noteTypeDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d noteTypeDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	i, ok := item.(noteTypeItem)
+	if !ok {
+		return
+	}
+
+	str := string(i)
+	if index == m.Index() {
+		str = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange).Render("│ " + str)
+	} else {
+		str = "  " + str
+	}
+
+	fmt.Fprint(w, str)
 }
 
 // columnSelectItem represents an item in the column visibility list
