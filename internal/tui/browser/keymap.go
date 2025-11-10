@@ -20,6 +20,8 @@ type KeyMap struct {
 	PageDown        key.Binding
 	GoToTop         key.Binding
 	GoToBottom      key.Binding
+	Fold            key.Binding
+	Unfold          key.Binding
 	FoldPrefix      key.Binding // z key for fold commands
 	ToggleArchives key.Binding
 	ToggleGlobal   key.Binding
@@ -61,6 +63,8 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.PageDown,
 		k.GoToTop,
 		k.GoToBottom,
+		k.Fold,
+		k.Unfold,
 		k.FoldPrefix,
 		k.ToggleArchives,
 		k.ToggleGlobal,
@@ -133,9 +137,17 @@ var keys = KeyMap{
 		key.WithKeys("G"),
 		key.WithHelp("G", "go to bottom"),
 	),
+	Fold: key.NewBinding(
+		key.WithKeys("h", "left"),
+		key.WithHelp("h/←", "close fold"),
+	),
+	Unfold: key.NewBinding(
+		key.WithKeys("l", "right"),
+		key.WithHelp("l/→", "open fold"),
+	),
 	FoldPrefix: key.NewBinding(
 		key.WithKeys("z"),
-		key.WithHelp("z", "fold commands (za/zo/zc/zM/zR)"),
+		key.WithHelp("z", "fold (zA/zO/zC/za/zo/zc/zM/zR)"),
 	),
 	ToggleArchives: key.NewBinding(
 		key.WithKeys("A"),

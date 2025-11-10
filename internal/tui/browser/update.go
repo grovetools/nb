@@ -354,6 +354,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = len(m.displayNodes) - 1
 				m.adjustScroll()
 			}
+		case key.Matches(msg, m.keys.Fold):
+			m.closeFold()
+		case key.Matches(msg, m.keys.Unfold):
+			m.openFold()
 		case key.Matches(msg, m.keys.FoldPrefix):
 			// Handle 'z' prefix for fold commands
 			m.lastKey = "z"
@@ -363,16 +367,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.toggleFold()
 				m.lastKey = ""
 			}
+		case msg.String() == "A":
+			// zA - toggle fold recursively
+			if m.lastKey == "z" {
+				m.toggleFoldRecursive(m.cursor)
+				m.lastKey = ""
+			}
 		case msg.String() == "o":
 			// zo - open fold
 			if m.lastKey == "z" {
 				m.openFold()
 				m.lastKey = ""
 			}
+		case msg.String() == "O":
+			// zO - open fold recursively
+			if m.lastKey == "z" {
+				m.openFoldRecursive(m.cursor)
+				m.lastKey = ""
+			}
 		case msg.String() == "c":
 			// zc - close fold
 			if m.lastKey == "z" {
 				m.closeFold()
+				m.lastKey = ""
+			}
+		case msg.String() == "C":
+			// zC - close fold recursively
+			if m.lastKey == "z" {
+				m.closeFoldRecursive(m.cursor)
 				m.lastKey = ""
 			}
 		case msg.String() == "M":
@@ -1754,6 +1776,95 @@ func (m *Model) closeAllFolds() {
 func (m *Model) openAllFolds() {
 	m.collapsedNodes = make(map[string]bool)
 	m.buildDisplayTree()
+}
+
+// closeFoldRecursive recursively closes the fold under the cursor and all nested folds within it
+func (m *Model) closeFoldRecursive(cursorIndex int) {
+	if cursorIndex >= len(m.displayNodes) {
+		return
+	}
+	node := m.displayNodes[cursorIndex]
+	if !node.isFoldable() {
+		return
+	}
+
+	startDepth := node.depth
+	m.collapsedNodes[node.nodeID()] = true
+
+	// Iterate through subsequent nodes to find and collapse all children
+	for i := cursorIndex + 1; i < len(m.displayNodes); i++ {
+		childNode := m.displayNodes[i]
+		if childNode.depth <= startDepth {
+			// We've exited the current node's subtree
+			break
+		}
+		if childNode.isFoldable() {
+			m.collapsedNodes[childNode.nodeID()] = true
+		}
+	}
+	m.buildDisplayTree()
+}
+
+// openFoldRecursive recursively opens the fold under the cursor and all nested folds within it
+func (m *Model) openFoldRecursive(cursorIndex int) {
+	if cursorIndex >= len(m.displayNodes) {
+		return
+	}
+	node := m.displayNodes[cursorIndex]
+	if !node.isFoldable() {
+		return
+	}
+
+	// Un-collapse the target node itself
+	delete(m.collapsedNodes, node.nodeID())
+
+	if node.isWorkspace {
+		// Un-collapse all descendant workspaces and their note groups
+		wsPath := node.workspace.Path
+		wsName := node.workspace.Name
+
+		for _, ws := range m.workspaces {
+			if strings.HasPrefix(ws.Path, wsPath) && ws.Path != wsPath {
+				delete(m.collapsedNodes, "ws:"+ws.Path)
+			}
+		}
+		for _, n := range m.allNotes {
+			if n.Workspace == wsName {
+				delete(m.collapsedNodes, "grp:"+n.Group)
+				if strings.HasPrefix(n.Group, "plans/") {
+					delete(m.collapsedNodes, "grp:plans")
+				}
+			}
+		}
+	} else if node.isGroup {
+		// Un-collapse child groups (e.g., 'plans' contains 'plans/sub-plan')
+		groupNamePrefix := node.groupName + "/"
+		for _, n := range m.allNotes {
+			if n.Workspace == node.workspaceName && strings.HasPrefix(n.Group, groupNamePrefix) {
+				delete(m.collapsedNodes, "grp:"+n.Group)
+			}
+		}
+	}
+
+	m.buildDisplayTree()
+}
+
+// toggleFoldRecursive recursively toggles the fold state under the cursor
+func (m *Model) toggleFoldRecursive(cursorIndex int) {
+	if cursorIndex >= len(m.displayNodes) {
+		return
+	}
+	node := m.displayNodes[cursorIndex]
+	if !node.isFoldable() {
+		return
+	}
+
+	// If the node is currently collapsed, open it recursively. Otherwise, close it recursively.
+	if m.collapsedNodes[node.nodeID()] {
+		m.openFoldRecursive(cursorIndex)
+	} else {
+		m.closeFoldRecursive(cursorIndex)
+	}
 }
 
 // collapseFocusedWorkspaceGroups collapses individual plans and child workspaces
