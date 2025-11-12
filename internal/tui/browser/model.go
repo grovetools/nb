@@ -341,13 +341,13 @@ func (m Model) openInTmuxCmd(path string) tea.Cmd {
 			if editor == "" {
 				editor = "nvim"
 			}
-			err := client.OpenFileInEditor(context.Background(), editor, path)
+			ctx := context.Background()
+			err := client.OpenFileInEditor(ctx, editor, path, "notebook", 1)
 			if err != nil {
 				return tmuxSplitFinishedMsg{err: fmt.Errorf("popup mode - failed to open in editor: %w", err)}
 			}
 			// Close the popup explicitly before quitting
-			closeCmd := exec.Command("tmux", "display-popup", "-C")
-			if err := closeCmd.Run(); err != nil {
+			if err := client.ClosePopup(ctx); err != nil {
 				// Log error but continue - the file was opened successfully
 				return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to close popup: %w", err)}
 			}
