@@ -722,10 +722,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // If focusedWorkspace is provided, returns path relative to that workspace
 // Otherwise returns absolute path shortened with ~
 func calculateRelativePath(note *models.Note, workspacePathMap map[string]string, focusedWorkspace *workspace.WorkspaceNode) string {
-	// If we have a focused workspace, calculate relative path from it
+	// If we have a focused workspace, calculate relative path from the note's workspace
 	if focusedWorkspace != nil {
 		if wsPath, ok := workspacePathMap[note.Workspace]; ok && wsPath != "" {
-			rel, err := filepath.Rel(focusedWorkspace.Path, note.Path)
+			rel, err := filepath.Rel(wsPath, note.Path)
 			if err == nil {
 				return rel
 			}
