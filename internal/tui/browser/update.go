@@ -718,20 +718,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // buildDisplayTree constructs the hierarchical list of nodes for rendering.
-// calculateRelativePath returns the path for a note
-// If focusedWorkspace is provided, returns path relative to that workspace
-// Otherwise returns absolute path shortened with ~
+// calculateRelativePath returns the absolute path for a note (shortened with ~ for home)
 func calculateRelativePath(note *models.Note, workspacePathMap map[string]string, focusedWorkspace *workspace.WorkspaceNode) string {
-	// If we have a focused workspace, calculate relative path from the note's workspace
-	if focusedWorkspace != nil {
-		if wsPath, ok := workspacePathMap[note.Workspace]; ok && wsPath != "" {
-			rel, err := filepath.Rel(wsPath, note.Path)
-			if err == nil {
-				return rel
-			}
-		}
-	}
-	// Otherwise use absolute path with ~ for home
+	// Always use absolute path with ~ for home
 	return shortenPath(note.Path)
 }
 
