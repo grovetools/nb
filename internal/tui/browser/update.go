@@ -21,6 +21,8 @@ import (
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
+	case quitPopupMsg:
+		return m, tea.Quit
 	case editFileAndQuitMsg:
 		// Write file path to temp file for Neovim to read
 		// Use session ID from environment if available, otherwise fall back to PID
@@ -661,9 +663,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 
-					// If in a tmux session, open in a split and quit.
+					// If in a tmux session, intelligently open based on context (popup vs normal)
 					if os.Getenv("TMUX") != "" {
-						return m, m.openInTmuxSplitCmd(noteToOpen.Path)
+						return m, m.openInTmuxCmd(noteToOpen.Path)
 					}
 
 					return m, m.openInEditor(noteToOpen.Path)

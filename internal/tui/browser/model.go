@@ -149,6 +149,9 @@ func (m Model) FileToEdit() string {
 	return m.fileToEdit
 }
 
+// quitPopupMsg signals that the TUI should exit, causing the tmux popup to close.
+type quitPopupMsg struct{}
+
 // New creates a new TUI model.
 func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	helpModel := help.NewBuilder().
@@ -315,6 +318,45 @@ func (m Model) openInEditor(path string) tea.Cmd {
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return editorFinishedMsg{err: err}
 	})
+}
+
+// openInTmuxCmd intelligently opens a file in tmux.
+// If in a popup, it opens in the main session and signals to quit.
+// If not in a popup, it opens in a split and stays open.
+func (m Model) openInTmuxCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		client, err := tmux.NewClient()
+		if err != nil {
+			return tmuxSplitFinishedMsg{err: fmt.Errorf("tmux client not found: %w", err)}
+		}
+
+		isPopup, err := client.IsPopup(context.Background())
+		if err != nil {
+			// Not in tmux or error, fall back to split behavior
+			return tmuxSplitFinishedMsg{err: fmt.Errorf("IsPopup error: %w", err)}
+		}
+
+		if isPopup {
+			editor := os.Getenv("EDITOR")
+			if editor == "" {
+				editor = "nvim"
+			}
+			err := client.OpenFileInEditor(context.Background(), editor, path)
+			if err != nil {
+				return tmuxSplitFinishedMsg{err: fmt.Errorf("popup mode - failed to open in editor: %w", err)}
+			}
+			// Close the popup explicitly before quitting
+			closeCmd := exec.Command("tmux", "display-popup", "-C")
+			if err := closeCmd.Run(); err != nil {
+				// Log error but continue - the file was opened successfully
+				return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to close popup: %w", err)}
+			}
+			return quitPopupMsg{}
+		}
+
+		// Not in a popup, use existing split behavior
+		return m.openInTmuxSplitCmd(path)()
+	}
 }
 
 // openInTmuxSplitCmd opens a note in a tmux split pane or reuses an existing split
