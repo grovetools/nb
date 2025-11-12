@@ -718,6 +718,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // buildDisplayTree constructs the hierarchical list of nodes for rendering.
+// calculateRelativePath returns the path for a note
+// If focusedWorkspace is provided, returns path relative to that workspace
+// Otherwise returns absolute path shortened with ~
+func calculateRelativePath(note *models.Note, workspacePathMap map[string]string, focusedWorkspace *workspace.WorkspaceNode) string {
+	// If we have a focused workspace, calculate relative path from it
+	if focusedWorkspace != nil {
+		if wsPath, ok := workspacePathMap[note.Workspace]; ok && wsPath != "" {
+			rel, err := filepath.Rel(focusedWorkspace.Path, note.Path)
+			if err == nil {
+				return rel
+			}
+		}
+	}
+	// Otherwise use absolute path with ~ for home
+	return shortenPath(note.Path)
+}
+
 func (m *Model) buildDisplayTree() {
 	var nodes []*displayNode
 	var workspacesToShow []*workspace.WorkspaceNode
@@ -809,6 +826,13 @@ func (m *Model) buildDisplayTree() {
 
 	// 2. Group notes by workspace path, then by group (directory)
 	notesByWorkspace := make(map[string]map[string][]*models.Note)
+
+	// Create a map of workspace names to their paths for relative path calculation
+	workspacePathMap := make(map[string]string)
+	for _, ws := range m.workspaces {
+		workspacePathMap[ws.Name] = ws.Path
+	}
+
 	for _, note := range m.allNotes {
 		if _, ok := notesByWorkspace[note.Workspace]; !ok {
 			notesByWorkspace[note.Workspace] = make(map[string][]*models.Note)
@@ -968,10 +992,11 @@ func (m *Model) buildDisplayTree() {
 						notePrefix.WriteString("├─ ")
 					}
 					nodes = append(nodes, &displayNode{
-						isNote: true,
-						note:   note,
-						prefix: notePrefix.String(),
-						depth:  ws.Depth + 2,
+						isNote:       true,
+						note:         note,
+						prefix:       notePrefix.String(),
+						depth:        ws.Depth + 2,
+						relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
 					})
 				}
 
@@ -1024,10 +1049,11 @@ func (m *Model) buildDisplayTree() {
 								archiveNotePrefix.WriteString("├─ ")
 							}
 							nodes = append(nodes, &displayNode{
-								isNote: true,
-								note:   note,
-								prefix: archiveNotePrefix.String(),
-								depth:  ws.Depth + 3,
+								isNote:       true,
+								note:         note,
+								prefix:       archiveNotePrefix.String(),
+								depth:        ws.Depth + 3,
+								relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
 							})
 						}
 					}
@@ -1118,10 +1144,11 @@ func (m *Model) buildDisplayTree() {
 									notePrefix.WriteString("├─ ")
 								}
 								nodes = append(nodes, &displayNode{
-									isNote: true,
-									note:   note,
-									prefix: notePrefix.String(),
-									depth:  ws.Depth + 3,
+									isNote:       true,
+									note:         note,
+									prefix:       notePrefix.String(),
+									depth:        ws.Depth + 3,
+									relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
 								})
 							}
 						}
@@ -1281,10 +1308,11 @@ func (m *Model) buildDisplayTree() {
 								notePrefix.WriteString("├─ ")
 							}
 							nodes = append(nodes, &displayNode{
-								isNote: true,
-								note:   note,
-								prefix: notePrefix.String(),
-								depth:  ws.Depth + 3,
+								isNote:       true,
+								note:         note,
+								prefix:       notePrefix.String(),
+								depth:        ws.Depth + 3,
+								relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
 							})
 						}
 
@@ -1333,10 +1361,11 @@ func (m *Model) buildDisplayTree() {
 										archiveNotePrefix.WriteString("├─ ")
 									}
 									nodes = append(nodes, &displayNode{
-										isNote: true,
-										note:   note,
-										prefix: archiveNotePrefix.String(),
-										depth:  ws.Depth + 4,
+										isNote:       true,
+										note:         note,
+										prefix:       archiveNotePrefix.String(),
+										depth:        ws.Depth + 4,
+										relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
 									})
 								}
 							}
@@ -1414,10 +1443,11 @@ func (m *Model) buildDisplayTree() {
 											notePrefix.WriteString("├─ ")
 										}
 										nodes = append(nodes, &displayNode{
-											isNote: true,
-											note:   note,
-											prefix: notePrefix.String(),
-											depth:  ws.Depth + 4,
+											isNote:       true,
+											note:         note,
+											prefix:       notePrefix.String(),
+											depth:        ws.Depth + 4,
+											relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
 										})
 									}
 								}

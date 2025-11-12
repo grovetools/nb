@@ -42,10 +42,11 @@ type displayNode struct {
 	note          *models.Note
 
 	// Pre-calculated for rendering
-	prefix     string
-	depth      int
-	jumpKey    rune
-	childCount int // For groups: number of notes/plans in the group
+	prefix       string
+	depth        int
+	jumpKey      rune
+	childCount   int    // For groups: number of notes/plans in the group
+	relativePath string // For notes, the path relative to their workspace
 }
 
 // nodeID returns a unique identifier for this node (for tracking collapsed state)
@@ -189,7 +190,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	renameInput.Width = 60
 
 	// Column Visibility Setup - load from state
-	availableColumns := []string{"TYPE", "STATUS", "TAGS", "CREATED"}
+	availableColumns := []string{"TYPE", "STATUS", "TAGS", "CREATED", "PATH"}
 
 	// Load saved state
 	state, err := loadState()
@@ -201,6 +202,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 				"STATUS":  true,
 				"TAGS":    true,
 				"CREATED": true,
+				"PATH":    true,
 			},
 		}
 	}
@@ -606,6 +608,7 @@ func loadState() (*tuiState, error) {
 					"STATUS":  true,
 					"TAGS":    true,
 					"CREATED": true,
+					"PATH":    true,
 				},
 			}, nil
 		}
