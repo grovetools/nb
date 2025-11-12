@@ -475,69 +475,103 @@ func (s *Service) ListNotes(ctx *WorkspaceContext, noteType models.NoteType) ([]
 
 // ListAllNotes lists all notes in the specified workspace context (all directories)
 func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
-	// Get the root path by getting any note type directory and going up one level
-	// This works because all note types share the same parent directory
-	samplePath, err := s.notebookLocator.GetNotesDir(ctx.NotebookContextWorkspace, "current")
+	// Get all content directories for this workspace
+	contentDirs, err := s.notebookLocator.GetAllContentDirs(ctx.NotebookContextWorkspace)
 	if err != nil {
-		return nil, fmt.Errorf("get notes root: %w", err)
+		return nil, fmt.Errorf("get content directories: %w", err)
 	}
-	// Go up one level to get the parent directory that contains all note types
-	rootPath := filepath.Dir(samplePath)
 
 	var notes []*models.Note
 	processedPaths := make(map[string]struct{})
 
-	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // Skip errors
+	// Walk each content directory
+	for _, contentDir := range contentDirs {
+		// Skip if directory doesn't exist
+		if _, err := os.Stat(contentDir.Path); err != nil {
+			continue
 		}
 
-		// De-duplication: check if we've already processed this canonical path
-		canonicalPath, err := pathutil.NormalizeForLookup(path)
-		if err != nil {
-			return nil // Skip if we cannot normalize the path
-		}
-		if _, seen := processedPaths[canonicalPath]; seen {
-			if info.IsDir() {
-				return filepath.SkipDir
+		err = filepath.Walk(contentDir.Path, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil // Skip errors
+			}
+
+			// De-duplication: check if we've already processed this canonical path
+			canonicalPath, err := pathutil.NormalizeForLookup(path)
+			if err != nil {
+				return nil // Skip if we cannot normalize the path
+			}
+			if _, seen := processedPaths[canonicalPath]; seen {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			processedPaths[canonicalPath] = struct{}{}
+
+			// Skip archive directories
+			if strings.Contains(path, "/.archive/") || strings.Contains(path, "/archive/") {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			if !info.IsDir() && strings.HasSuffix(path, ".md") {
+				note, err := ParseNote(path)
+				if err == nil {
+					note.Workspace = ctx.NotebookContextWorkspace.Name
+					note.Branch = ctx.Branch
+
+					// Set Group from directory path for grouping in UI
+					relPath, _ := filepath.Rel(contentDir.Path, path)
+					parts := strings.Split(filepath.ToSlash(relPath), "/")
+
+					switch contentDir.Type {
+					case "plans":
+						if len(parts) > 1 {
+							// This is inside a plan subdirectory: "plans/<planname>"
+							note.Group = "plans/" + parts[0]
+						} else {
+							// This is a top-level plan file (shouldn't happen but handle it)
+							note.Group = "plans"
+						}
+						// Set Type as plan
+						if note.Type == "" {
+							note.Type = "plan"
+						}
+
+					case "chats":
+						if len(parts) > 1 {
+							// This is inside a chat subdirectory: "chats/<chatname>"
+							note.Group = "chats/" + parts[0]
+						} else {
+							note.Group = "chats"
+						}
+						if note.Type == "" {
+							note.Type = "chat"
+						}
+
+					case "notes":
+						if len(parts) > 1 {
+							note.Group = strings.Join(parts[:len(parts)-1], "/")
+						} else if len(parts) == 1 {
+							note.Group = "quick"
+						}
+						// Set Type from directory if not already set from frontmatter (for backwards compatibility)
+						if note.Type == "" {
+							note.Type = models.NoteType(note.Group)
+						}
+					}
+
+					notes = append(notes, note)
+				}
 			}
 			return nil
-		}
-		processedPaths[canonicalPath] = struct{}{}
+		})
+	}
 
-		if strings.Contains(path, "/archive/") {
-			if info.IsDir() {
-				return filepath.SkipDir // Correctly skip entire archive directories
-			}
-			return nil // Skip archived files
-		}
-
-		if !info.IsDir() && strings.HasSuffix(path, ".md") {
-			note, err := ParseNote(path)
-			if err == nil {
-				note.Workspace = ctx.NotebookContextWorkspace.Name
-				note.Branch = ctx.Branch
-
-				// Set Group from directory path for grouping in UI
-				relPath, _ := filepath.Rel(rootPath, path)
-				parts := strings.Split(filepath.ToSlash(relPath), "/")
-				if len(parts) > 1 {
-					note.Group = strings.Join(parts[:len(parts)-1], "/")
-				} else if len(parts) == 1 {
-					note.Group = "quick"
-				}
-
-				// Set Type from directory if not already set from frontmatter (for backwards compatibility)
-				if note.Type == "" {
-					note.Type = models.NoteType(note.Group)
-				}
-
-				notes = append(notes, note)
-			}
-		}
-		return nil
-	})
-	return notes, err
+	return notes, nil
 }
 
 // ListAllGlobalNotes lists all notes in the global workspace (all directories)
