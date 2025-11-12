@@ -294,8 +294,13 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 
 	// Look up user-defined note type configuration from core config
 	var noteTypeConfig *coreconfig.NoteTypeConfig
-	if s.CoreConfig != nil && s.CoreConfig.Notebooks != nil {
-		if notebook, ok := s.CoreConfig.Notebooks["default"]; ok && notebook.Types != nil {
+	if s.CoreConfig != nil && s.CoreConfig.Notebooks != nil && s.CoreConfig.Notebooks.Definitions != nil {
+		// Try to get default notebook name from rules, otherwise fall back to "default"
+		defaultNotebookName := "default"
+		if s.CoreConfig.Notebooks.Rules != nil && s.CoreConfig.Notebooks.Rules.Default != "" {
+			defaultNotebookName = s.CoreConfig.Notebooks.Rules.Default
+		}
+		if notebook, ok := s.CoreConfig.Notebooks.Definitions[defaultNotebookName]; ok && notebook.Types != nil {
 			noteTypeConfig = notebook.Types[string(noteType)]
 		}
 	}

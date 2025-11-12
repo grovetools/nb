@@ -290,13 +290,16 @@ func (m Model) View() string {
 	// Header - breadcrumb style
 	// Get notebook title from config
 	notebookTitle := "Notebook Browser"
-	if m.service.CoreConfig != nil && m.service.CoreConfig.Notebooks != nil && len(m.service.CoreConfig.Notebooks) > 0 {
-		// Prefer "default" notebook if it exists, otherwise use the first one
-		if _, ok := m.service.CoreConfig.Notebooks["default"]; ok {
+	if m.service.CoreConfig != nil && m.service.CoreConfig.Notebooks != nil && m.service.CoreConfig.Notebooks.Definitions != nil && len(m.service.CoreConfig.Notebooks.Definitions) > 0 {
+		// Use the default notebook name from rules if available
+		if m.service.CoreConfig.Notebooks.Rules != nil && m.service.CoreConfig.Notebooks.Rules.Default != "" {
+			notebookTitle = m.service.CoreConfig.Notebooks.Rules.Default
+		} else if _, ok := m.service.CoreConfig.Notebooks.Definitions["default"]; ok {
+			// Fall back to "default" if it exists
 			notebookTitle = "default"
 		} else {
 			// Use the first notebook name
-			for name := range m.service.CoreConfig.Notebooks {
+			for name := range m.service.CoreConfig.Notebooks.Definitions {
 				notebookTitle = name
 				break
 			}
