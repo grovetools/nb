@@ -30,20 +30,15 @@ func NewNewCmd() *cobra.Command {
 Examples:
   nb new                     # Create note with timestamp only
   nb new "meeting notes"     # Create note with title
-  nb new -t llm "chat"       # Create LLM note
   nb new -t learn "golang"   # Create learning note
   nb new -t issues "bug report" # Create issues note
   nb new -t architecture "api design" # Create architecture note
   nb new -t todos "sprint tasks" # Create todos note
-  nb new -t blog "blog drafts" # Create blog post
-  nb new -t prompts "code review" # Create reusable prompt
   nb new -g "todo list"      # Create global note
   nb new -g -t daily         # Create global daily note
 
-  # Nested categories:
-  nb new -t architecture/decisions "use postgres"
-  nb new -t issues/bugs "login failed"
-  nb new -t todos/sprint "planning tasks"
+  # Custom types (defined in your grove.yml):
+  nb new -t projects/grove "new feature idea"
 
   # From stdin (auto-detected):
   echo "Quick thought" | nb new
@@ -133,7 +128,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&noteType, "type", "t", "current", "Note type (e.g. current, llm, learn, daily, issues, architecture, todos, blog, prompts, or nested like architecture/decisions)")
+	cmd.Flags().StringVarP(&noteType, "type", "t", "inbox", "Note type (defaults to 'inbox', others can be configured in grove.yml)")
 	cmd.Flags().StringVarP(&noteName, "name", "n", "", "Note name/title")
 	cmd.Flags().BoolVar(&noEdit, "no-edit", false, "Don't open editor after creating")
 	cmd.Flags().BoolVarP(&globalNote, "global", "g", false, "Create note in global workspace")

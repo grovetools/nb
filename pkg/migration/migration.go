@@ -274,7 +274,7 @@ func (sm *StructuralMigration) parseLegacyPath(fullPath, rootPath string) (works
 
 	noteType = strings.Join(noteTypeParts, "/")
 	if noteType == "" {
-		noteType = "current" // Default if note is at the root of a branch/global dir
+		noteType = "inbox" // Default if note is at the root of a branch/global dir
 	}
 
 	return workspace, branch, noteType, isArchived, nil

@@ -165,7 +165,7 @@ Examples:
 	}
 
 	cmd.Flags().BoolVar(&listAll, "all", false, "List all note types")
-	cmd.Flags().StringVarP(&listType, "type", "t", "current", "Note type to list")
+	cmd.Flags().StringVarP(&listType, "type", "t", "inbox", "Note type to list")
 	cmd.Flags().BoolVarP(&listGlobal, "global", "g", false, "List global notes only")
 	cmd.Flags().BoolVar(&listJSON, "json", false, "Output in JSON format")
 	cmd.Flags().BoolVarP(&listAllWorkspaces, "workspaces", "w", false, "List notes from all workspaces")
@@ -201,7 +201,7 @@ func printNotesTable(notes []*models.Note) {
 
 func getNoteTypeIcon(noteType models.NoteType) string {
 	switch noteType {
-	case "current":
+	case "current", "inbox":
 		return "📝"
 	case "llm":
 		return "🤖"
@@ -228,8 +228,8 @@ func getNoteTypeIcon(noteType models.NoteType) string {
 
 func getTypeAbbreviation(noteType models.NoteType) string {
 	switch noteType {
-	case "current":
-		return "cur"
+	case "current", "inbox":
+		return "ibx"
 	case "llm":
 		return "llm"
 	case "learn":

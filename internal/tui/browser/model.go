@@ -170,11 +170,15 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	noteTitleInput.CharLimit = 200
 	noteTitleInput.Width = 60
 
-	noteTypes := []list.Item{
-		noteTypeItem("current"), noteTypeItem("llm"), noteTypeItem("learn"),
-		noteTypeItem("daily"), noteTypeItem("issues"), noteTypeItem("architecture"),
-		noteTypeItem("todos"), noteTypeItem("blog"), noteTypeItem("prompts"),
-		noteTypeItem("quick"),
+	// Get note types dynamically from the service
+	configuredTypes, err := svc.ListNoteTypes()
+	if err != nil {
+		// Fallback on error
+		configuredTypes = []models.NoteType{"inbox", "quick", "learn"}
+	}
+	var noteTypes []list.Item
+	for _, t := range configuredTypes {
+		noteTypes = append(noteTypes, noteTypeItem(t))
 	}
 	noteTypePicker := list.New(noteTypes, noteTypeDelegate{}, 40, 12)
 	noteTypePicker.Title = "Select Note Type"

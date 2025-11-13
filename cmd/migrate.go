@@ -21,27 +21,30 @@ const (
 
 func NewMigrateCmd() *cobra.Command {
 	var (
-		migrateDryRun      bool
-		migrateForce       bool
-		migrateRecursive   bool
-		fixTitles          bool
-		fixDates           bool
-		fixTags            bool
-		fixIDs             bool
-		fixFilenames       bool
-		preserveTimestamps bool
-		migrateAll         bool
-		migrateGlobal      bool
-		migrateWorkspace   string
-		migrateBranch      string
-		migrateType        string
-		allWorkspaces      bool
-		migrateVerbose     bool
-		migrateShowReport  bool
-		migrateNoBackup    bool
-		migrateStructure   bool
-		migrateTarget      string
-		migrateYes         bool
+		migrateDryRun       bool
+		migrateForce        bool
+		migrateRecursive    bool
+		fixTitles           bool
+		fixDates            bool
+		fixTags             bool
+		fixIDs              bool
+		fixFilenames        bool
+		preserveTimestamps  bool
+		migrateAll          bool
+		migrateGlobal       bool
+		migrateWorkspace    string
+		migrateBranch       string
+		migrateType         string
+		allWorkspaces       bool
+		migrateVerbose      bool
+		migrateShowReport   bool
+		migrateNoBackup     bool
+		migrateStructure     bool
+		migrateTarget        string
+		migrateYes           bool
+		renameCurrentToInbox bool
+		ensureTypeInTags     bool
+		migrateNotebook      string
 	)
 
 	cmd := &cobra.Command{
@@ -67,7 +70,95 @@ Examples:
 
 			// Handle structural migration separately
 			if migrateStructure {
-				return runStructuralMigration(svc, migrateDryRun, migrateVerbose, migrateShowReport, migrateTarget, migrateYes)
+				return runStructuralMigration(svc, migrateDryRun, migrateVerbose, migrateShowReport, migrateTarget, migrateYes, migrateNotebook)
+			}
+
+			// Handle type migration
+			if renameCurrentToInbox {
+				// Determine which notebook to use
+				notebookName := migrateNotebook
+				if notebookName == "" && svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil && svc.CoreConfig.Notebooks.Rules != nil {
+					notebookName = svc.CoreConfig.Notebooks.Rules.Default
+				}
+				if notebookName == "" {
+					notebookName = "nb" // Final fallback
+				}
+
+				// Get the notebook root path
+				var notebookRoot string
+				if svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil && svc.CoreConfig.Notebooks.Definitions != nil {
+					if notebook, exists := svc.CoreConfig.Notebooks.Definitions[notebookName]; exists && notebook != nil {
+						if notebook.RootDir != "" {
+							expandedPath, err := pathutil.Expand(notebook.RootDir)
+							if err != nil {
+								return fmt.Errorf("failed to expand notebook root_dir '%s': %w", notebook.RootDir, err)
+							}
+							notebookRoot = expandedPath
+						}
+					}
+				}
+
+				// Fallback to default notebook path if not configured
+				if notebookRoot == "" {
+					notebookRoot = filepath.Join(os.Getenv("HOME"), "Documents", "nb")
+				}
+
+				report, err := migration.RenameCurrentToInbox(notebookRoot, migration.MigrationOptions{
+					DryRun:     migrateDryRun,
+					Verbose:    migrateVerbose,
+					ShowReport: migrateShowReport,
+				}, os.Stdout)
+				if err != nil {
+					return fmt.Errorf("failed to rename 'current' to 'inbox': %w", err)
+				}
+				if migrateShowReport {
+					printMigrationReport(report, migrateDryRun)
+				}
+				return nil
+			}
+
+			// Handle ensure-type-in-tags migration
+			if ensureTypeInTags {
+				// Determine which notebook to use
+				notebookName := migrateNotebook
+				if notebookName == "" && svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil && svc.CoreConfig.Notebooks.Rules != nil {
+					notebookName = svc.CoreConfig.Notebooks.Rules.Default
+				}
+				if notebookName == "" {
+					notebookName = "nb" // Final fallback
+				}
+
+				// Get the notebook root path
+				var notebookRoot string
+				if svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil && svc.CoreConfig.Notebooks.Definitions != nil {
+					if notebook, exists := svc.CoreConfig.Notebooks.Definitions[notebookName]; exists && notebook != nil {
+						if notebook.RootDir != "" {
+							expandedPath, err := pathutil.Expand(notebook.RootDir)
+							if err != nil {
+								return fmt.Errorf("failed to expand notebook root_dir '%s': %w", notebook.RootDir, err)
+							}
+							notebookRoot = expandedPath
+						}
+					}
+				}
+
+				// Fallback to default notebook path if not configured
+				if notebookRoot == "" {
+					notebookRoot = filepath.Join(os.Getenv("HOME"), "Documents", "nb")
+				}
+
+				report, err := migration.EnsureTypeInTags(notebookRoot, migration.MigrationOptions{
+					DryRun:     migrateDryRun,
+					Verbose:    migrateVerbose,
+					ShowReport: migrateShowReport,
+				}, os.Stdout)
+				if err != nil {
+					return fmt.Errorf("failed to ensure type in tags: %w", err)
+				}
+				if migrateShowReport {
+					printMigrationReport(report, migrateDryRun)
+				}
+				return nil
 			}
 
 			if migrateAll {
@@ -132,6 +223,9 @@ Examples:
 	}
 
 	cmd.Flags().BoolVar(&migrateStructure, "structure", false, "Migrate from old repos/{workspace}/{branch} structure to new notebooks structure")
+	cmd.Flags().BoolVar(&renameCurrentToInbox, "rename-current-to-inbox", false, "Rename 'current' note type directories to 'inbox' and update notes")
+	cmd.Flags().BoolVar(&ensureTypeInTags, "ensure-type-in-tags", false, "Ensure all notes have their type in the tags array")
+	cmd.Flags().StringVar(&migrateNotebook, "notebook", "", "Specify which notebook to migrate (default: uses default notebook from config)")
 	cmd.Flags().StringVar(&migrateTarget, "target", "", "Target directory for migration (default: uses notebook root_dir from config)")
 	cmd.Flags().BoolVarP(&migrateYes, "yes", "y", false, "Skip confirmation prompts")
 	cmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Show what would be changed without modifying")
@@ -190,20 +284,24 @@ func printMigrationReport(report *migration.MigrationReport, dryRun bool) {
 	}
 }
 
-func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bool, targetDir string, skipConfirm bool) error {
+func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bool, targetDir string, skipConfirm bool, notebookFlag string) error {
+	// Determine which notebook to use
+	notebookName := notebookFlag
+	if notebookName == "" && svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil && svc.CoreConfig.Notebooks.Rules != nil {
+		notebookName = svc.CoreConfig.Notebooks.Rules.Default
+	}
+	if notebookName == "" {
+		notebookName = "nb" // Final fallback
+	}
+
 	// Get the source path (where old files are)
 	var sourcePath string
-	if svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil &&
-		svc.CoreConfig.Notebooks.Rules != nil &&
-		svc.CoreConfig.Notebooks.Rules.Default != "" &&
-		svc.CoreConfig.Notebooks.Definitions != nil {
-
-		defaultNotebookName := svc.CoreConfig.Notebooks.Rules.Default
-		if notebook, exists := svc.CoreConfig.Notebooks.Definitions[defaultNotebookName]; exists && notebook != nil {
+	if svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil && svc.CoreConfig.Notebooks.Definitions != nil {
+		if notebook, exists := svc.CoreConfig.Notebooks.Definitions[notebookName]; exists && notebook != nil {
 			if notebook.RootDir != "" {
 				expandedPath, err := pathutil.Expand(notebook.RootDir)
 				if err != nil {
-					return fmt.Errorf("failed to expand source notebook root_dir '%s': %w", notebook.RootDir, err)
+					return fmt.Errorf("failed to expand notebook root_dir '%s': %w", notebook.RootDir, err)
 				}
 				sourcePath = expandedPath
 			}
@@ -213,18 +311,7 @@ func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bo
 	// Fallback to default source path if not configured
 	if sourcePath == "" {
 		sourcePath = filepath.Join(os.Getenv("HOME"), "Documents", "nb")
-		fmt.Printf("Warning: No default notebook configured, using fallback source path: %s\n", sourcePath)
-	}
-
-	// Get the notebook name from config
-	var notebookName string
-	if svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil &&
-		svc.CoreConfig.Notebooks.Rules != nil &&
-		svc.CoreConfig.Notebooks.Rules.Default != "" {
-		notebookName = svc.CoreConfig.Notebooks.Rules.Default
-	}
-	if notebookName == "" {
-		notebookName = "nb" // fallback
+		fmt.Printf("Warning: No notebook '%s' configured, using fallback source path: %s\n", notebookName, sourcePath)
 	}
 
 	// Get the target path (where to migrate to)

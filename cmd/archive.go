@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mattsolo1/grove-notebook/cmd/config"
-	"github.com/mattsolo1/grove-notebook/pkg/models"
 )
 
 func NewArchiveCmd() *cobra.Command {
@@ -81,16 +80,9 @@ Examples:
 				}
 			} else if olderThan > 0 {
 				// Find old notes to archive across all note types
-				noteTypes := []models.NoteType{
-					"current",
-					"llm",
-					"learn",
-					"daily",
-					"issues",
-					"architecture",
-					"todos",
-					"blog",
-					"prompts",
+				noteTypes, err := svc.ListNoteTypes()
+				if err != nil {
+					return fmt.Errorf("could not list note types: %w", err)
 				}
 
 				cutoff := time.Now().AddDate(0, 0, -olderThan)

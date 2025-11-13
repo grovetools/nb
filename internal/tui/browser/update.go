@@ -1778,9 +1778,9 @@ func (m *Model) applyGrepFilter() {
 			continue
 		}
 
-		// Get the notes directory for this workspace (we'll use "current" as a sample)
+		// Get the notes directory for this workspace (we'll use "inbox" as a sample)
 		// Then take the parent directory to get the workspace root
-		notesDir, err := locator.GetNotesDir(ws, "current")
+		notesDir, err := locator.GetNotesDir(ws, "inbox")
 		if err != nil || notesDir == "" {
 			continue
 		}
@@ -2198,7 +2198,7 @@ func (m *Model) collapseFocusedWorkspaceGroups() {
 	}
 
 	// Collapse only individual plans (plans/*) for this workspace
-	// This keeps "current", "issues", etc. expanded while showing plan names collapsed
+	// This keeps "inbox", "issues", etc. expanded while showing plan names collapsed
 	for _, note := range m.allNotes {
 		if note.Workspace == m.focusedWorkspace.Name {
 			// Only collapse individual plans (anything starting with "plans/")
@@ -2365,7 +2365,7 @@ func (m *Model) pasteNotesCmd() tea.Cmd {
 		node := m.displayNodes[m.cursor]
 		if node.isWorkspace {
 			destWorkspace = node.workspace
-			destGroup = "current" // Default group when pasting on a workspace
+			destGroup = "inbox" // Default group when pasting on a workspace
 		} else if node.isGroup {
 			destWorkspace, _ = m.findWorkspaceNodeByName(node.workspaceName)
 			destGroup = node.groupName
@@ -2378,7 +2378,7 @@ func (m *Model) pasteNotesCmd() tea.Cmd {
 	if destWorkspace == nil {
 		// Fallback to global if no context can be determined
 		destWorkspace, _ = m.findWorkspaceNodeByName("global")
-		destGroup = "current"
+		destGroup = "inbox"
 	}
 
 	mode := m.clipboardMode
@@ -2457,7 +2457,7 @@ func (m *Model) createNoteCmd() tea.Cmd {
 
 			if node.isWorkspace {
 				wsPath = node.workspace.Path
-				noteType = "current" // Default to current for workspace
+				noteType = "inbox" // Default to inbox for workspace
 			} else if node.isGroup {
 				// Find workspace by name to get its path
 				ws, found := m.findWorkspaceNodeByName(node.workspaceName)
@@ -2483,10 +2483,10 @@ func (m *Model) createNoteCmd() tea.Cmd {
 			// Default to focused workspace or global
 			if m.focusedWorkspace != nil {
 				wsCtx, _ = m.service.GetWorkspaceContext(m.focusedWorkspace.Path)
-				noteType = "current"
+				noteType = "inbox"
 			} else {
 				wsCtx, _ = m.service.GetWorkspaceContext("global")
-				noteType = "current"
+				noteType = "inbox"
 			}
 		}
 	} else if m.noteCreationMode == "inbox" {

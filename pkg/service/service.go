@@ -244,6 +244,36 @@ func (s *Service) GetNotebookLocator() *coreworkspace.NotebookLocator {
 	return s.notebookLocator
 }
 
+// ListNoteTypes returns a list of all configured note types.
+// It ensures 'inbox' is always included as the default.
+func (s *Service) ListNoteTypes() ([]models.NoteType, error) {
+	types := make(map[models.NoteType]bool)
+	types["inbox"] = true // Always include inbox
+
+	if s.CoreConfig != nil && s.CoreConfig.Notebooks != nil && s.CoreConfig.Notebooks.Definitions != nil {
+		// Get the default notebook name
+		defaultNotebookName := "default"
+		if s.CoreConfig.Notebooks.Rules != nil && s.CoreConfig.Notebooks.Rules.Default != "" {
+			defaultNotebookName = s.CoreConfig.Notebooks.Rules.Default
+		}
+
+		// Get types from the default notebook definition
+		if notebook, ok := s.CoreConfig.Notebooks.Definitions[defaultNotebookName]; ok && notebook != nil && notebook.Types != nil {
+			for typeName := range notebook.Types {
+				types[models.NoteType(typeName)] = true
+			}
+		}
+	}
+
+	// Convert map to slice
+	var result []models.NoteType
+	for t := range types {
+		result = append(result, t)
+	}
+
+	return result, nil
+}
+
 // CreateNote creates a new note in the specified workspace context
 func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, title string, options ...CreateOption) (*models.Note, error) {
 	opts := &createOptions{
@@ -360,14 +390,14 @@ func (s *Service) SearchNotes(ctx *WorkspaceContext, query string, options ...Se
 			if err != nil {
 				continue
 			}
-			sampleDir, err := s.notebookLocator.GetNotesDir(contextNode, "current")
+			sampleDir, err := s.notebookLocator.GetNotesDir(contextNode, "inbox")
 			if err == nil {
 				notesRoot := filepath.Dir(sampleDir)
 				uniqueDirs[notesRoot] = true
 			}
 		}
 	} else {
-		sampleDir, err := s.notebookLocator.GetNotesDir(ctx.NotebookContextWorkspace, "current")
+		sampleDir, err := s.notebookLocator.GetNotesDir(ctx.NotebookContextWorkspace, "inbox")
 		if err != nil {
 			return nil, fmt.Errorf("could not determine search directory for context: %w", err)
 		}
@@ -759,14 +789,20 @@ func (s *Service) findNotebookContextNode(currentNode *coreworkspace.WorkspaceNo
 // regardless of the current branch or worktree the user is in.
 func (s *Service) buildPathsMap(notebookContext *coreworkspace.WorkspaceNode) (map[string]string, error) {
 	paths := make(map[string]string)
-	types := []string{"current", "llm", "learn", "daily", "issues", "architecture", "todos", "quick", "archive", "prompts"}
 
-	for _, t := range types {
-		path, err := s.notebookLocator.GetNotesDir(notebookContext, t)
+	// Get configured note types
+	noteTypes, err := s.ListNoteTypes()
+	if err != nil {
+		// Fallback to a basic set if there's an error
+		noteTypes = []models.NoteType{"inbox", "quick", "learn"}
+	}
+
+	for _, t := range noteTypes {
+		path, err := s.notebookLocator.GetNotesDir(notebookContext, string(t))
 		if err != nil {
 			return nil, fmt.Errorf("get notes dir for type %s: %w", t, err)
 		}
-		paths[t] = path
+		paths[string(t)] = path
 	}
 	return paths, nil
 }
@@ -958,7 +994,7 @@ func (s *Service) ListAllNotesInWorkspace(ws *coreworkspace.WorkspaceNode) ([]*m
 
 	// Get the root path by getting any note type directory and going up two levels
 	// This works because the structure is: .../repos/{workspace}/main/{noteType}
-	samplePath, err := s.notebookLocator.GetNotesDir(ws, "current")
+	samplePath, err := s.notebookLocator.GetNotesDir(ws, "inbox")
 	if err != nil {
 		return nil, fmt.Errorf("get notes root: %w", err)
 	}
