@@ -182,7 +182,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMessage = fmt.Sprintf("Archived %d note(s)", len(msg.archivedPaths))
 		}
-		return m, nil
+
+		// Refresh notes to show the updated archive structure
+		if m.focusedWorkspace != nil {
+			return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+		}
+		return m, fetchAllNotesCmd(m.service)
 
 	case noteCreatedMsg:
 		m.isCreatingNote = false
@@ -904,6 +909,17 @@ func (m *Model) buildDisplayTree() {
 					}
 				}
 
+				// Check if this matches pattern "<parent>/.archive" (notes directly in .archive folder)
+				if strings.HasSuffix(name, "/.archive") {
+					parent := strings.TrimSuffix(name, "/.archive")
+					if archiveSubgroups[parent] == nil {
+						archiveSubgroups[parent] = make(map[string][]*models.Note)
+					}
+					// Use empty string as key to indicate notes directly in .archive
+					archiveSubgroups[parent][""] = notes
+					continue
+				}
+
 				// Handle plans grouping
 				if strings.HasPrefix(name, "plans/") {
 					planName := strings.TrimPrefix(name, "plans/")
@@ -997,6 +1013,12 @@ func (m *Model) buildDisplayTree() {
 					}
 					sort.Strings(archivedNames)
 
+					// Count total archived notes
+					totalArchivedNotes := 0
+					for _, notes := range archiveSubgroups[groupName] {
+						totalArchivedNotes += len(notes)
+					}
+
 					// Calculate .archive prefix (last child under this group)
 					var archivePrefix strings.Builder
 					archiveIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
@@ -1011,7 +1033,7 @@ func (m *Model) buildDisplayTree() {
 						workspaceName: ws.Name,
 						prefix:        archivePrefix.String(),
 						depth:         ws.Depth + 2,
-						childCount:    len(archiveSubgroups[groupName]),
+						childCount:    totalArchivedNotes,
 					}
 					nodes = append(nodes, archiveParentNode)
 
@@ -1030,6 +1052,31 @@ func (m *Model) buildDisplayTree() {
 								}
 								return archivedNotes[i].CreatedAt.After(archivedNotes[j].CreatedAt)
 							})
+
+							// If archivedName is empty, these are notes directly in .archive folder
+							if archivedName == "" {
+								// Add notes directly under .archive parent
+								for ni, note := range archivedNotes {
+									isLastNote := ni == len(archivedNotes)-1 && isLastArchived
+									var notePrefix strings.Builder
+									noteIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
+									noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+									notePrefix.WriteString(noteIndent)
+									if isLastNote {
+										notePrefix.WriteString("└─ ")
+									} else {
+										notePrefix.WriteString("├─ ")
+									}
+									nodes = append(nodes, &displayNode{
+										isNote:       true,
+										note:         note,
+										prefix:       notePrefix.String(),
+										depth:        ws.Depth + 3,
+										relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+									})
+								}
+								continue
+							}
 
 							// Calculate archived child prefix
 							var archivedPrefix strings.Builder
@@ -1061,7 +1108,7 @@ func (m *Model) buildDisplayTree() {
 									isLastArchivedNote := ni == len(archivedNotes)-1
 									var archivedNotePrefix strings.Builder
 									archivedNoteIndent := strings.ReplaceAll(archivedPrefix.String(), "├─", "│ ")
-									archivedNoteIndent = strings.ReplaceAll(archivedNoteIndent, "└─", "  ")
+									archivedNoteIndent = strings.ReplaceAll(archivedIndent, "└─", "  ")
 									archivedNotePrefix.WriteString(archivedNoteIndent)
 									if isLastArchivedNote {
 										archivedNotePrefix.WriteString("└─ ")
@@ -1185,6 +1232,12 @@ func (m *Model) buildDisplayTree() {
 						}
 						sort.Strings(archivedNames)
 
+						// Count total archived notes
+						totalArchivedNotes := 0
+						for _, notes := range archiveSubgroups["plans"] {
+							totalArchivedNotes += len(notes)
+						}
+
 						// Calculate .archive prefix (last child under plans)
 						var archivePrefix strings.Builder
 						archiveIndent := strings.ReplaceAll(plansPrefix.String(), "├─", "│ ")
@@ -1199,7 +1252,7 @@ func (m *Model) buildDisplayTree() {
 							workspaceName: ws.Name,
 							prefix:        archivePrefix.String(),
 							depth:         ws.Depth + 2,
-							childCount:    len(archiveSubgroups["plans"]),
+							childCount:    totalArchivedNotes,
 						}
 						nodes = append(nodes, archiveParentNode)
 
@@ -1218,6 +1271,31 @@ func (m *Model) buildDisplayTree() {
 									}
 									return archivedNotes[i].CreatedAt.After(archivedNotes[j].CreatedAt)
 								})
+
+								// If archivedName is empty, these are plans directly in .archive folder
+								if archivedName == "" {
+									// Add notes directly under .archive parent
+									for ni, note := range archivedNotes {
+										isLastNote := ni == len(archivedNotes)-1 && isLastArchived
+										var notePrefix strings.Builder
+										noteIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
+										noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+										notePrefix.WriteString(noteIndent)
+										if isLastNote {
+											notePrefix.WriteString("└─ ")
+										} else {
+											notePrefix.WriteString("├─ ")
+										}
+										nodes = append(nodes, &displayNode{
+											isNote:       true,
+											note:         note,
+											prefix:       notePrefix.String(),
+											depth:        ws.Depth + 3,
+											relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+										})
+									}
+									continue
+								}
 
 								// Calculate archived child prefix
 								var archivedPrefix strings.Builder
@@ -1534,6 +1612,12 @@ func (m *Model) buildDisplayTree() {
 								}
 								sort.Strings(archivedNames)
 
+								// Count total archived notes
+								totalArchivedNotes := 0
+								for _, notes := range archiveSubgroups["plans"] {
+									totalArchivedNotes += len(notes)
+								}
+
 								// Calculate .archive prefix (last child under plans)
 								var archivePrefix strings.Builder
 								archiveIndent := strings.ReplaceAll(plansPrefix.String(), "├─", "│ ")
@@ -1548,7 +1632,7 @@ func (m *Model) buildDisplayTree() {
 									workspaceName: ws.Name,
 									prefix:        archivePrefix.String(),
 									depth:         ws.Depth + 3,
-									childCount:    len(archiveSubgroups["plans"]),
+									childCount:    totalArchivedNotes,
 								}
 								nodes = append(nodes, archiveParentNode)
 
@@ -1567,6 +1651,31 @@ func (m *Model) buildDisplayTree() {
 											}
 											return archivedNotes[i].CreatedAt.After(archivedNotes[j].CreatedAt)
 										})
+
+										// If archivedName is empty, these are plans directly in .archive folder
+										if archivedName == "" {
+											// Add notes directly under .archive parent
+											for ni, note := range archivedNotes {
+												isLastNote := ni == len(archivedNotes)-1 && isLastArchived
+												var notePrefix strings.Builder
+												noteIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
+												noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+												notePrefix.WriteString(noteIndent)
+												if isLastNote {
+													notePrefix.WriteString("└─ ")
+												} else {
+													notePrefix.WriteString("├─ ")
+												}
+												nodes = append(nodes, &displayNode{
+													isNote:       true,
+													note:         note,
+													prefix:       notePrefix.String(),
+													depth:        ws.Depth + 4,
+													relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+												})
+											}
+											continue
+										}
 
 										// Calculate archived child prefix
 										var archivedPrefix strings.Builder

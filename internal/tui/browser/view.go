@@ -56,7 +56,12 @@ func (m *Model) getNodeRenderInfo(node *displayNode) nodeRenderInfo {
 	} else if node.isGroup {
 		info.name = node.groupName
 		info.isArchived = strings.Contains(node.groupName, "/.archive")
-		if node.isPlan() {
+
+		// For archive parent nodes (e.g., "current/.archive" or "plans/.archive"), display just ".archive"
+		if strings.HasSuffix(node.groupName, "/.archive") {
+			info.name = ".archive"
+		} else if node.isPlan() {
+			// Handle plan nodes (but not archive nodes that start with "plans/")
 			info.isPlan = true
 			info.name = strings.TrimPrefix(node.groupName, "plans/") // Display plan name without "plans/"
 			info.name = strings.TrimPrefix(info.name, ".archive/")   // Also remove ".archive/" prefix for archived plans

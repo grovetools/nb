@@ -601,32 +601,38 @@ func (s *Service) ListGlobalNotes(noteType models.NoteType) ([]*models.Note, err
 	return s.ListNotes(ctx, noteType)
 }
 
-// ArchiveNotes moves notes to the archive
+// ArchiveNotes moves notes to a .archive subdirectory within their current directory.
 func (s *Service) ArchiveNotes(ctx *WorkspaceContext, paths []string) error {
-	archivePath, err := s.getNotePathForContext(ctx, "archive")
-	if err != nil {
-		return fmt.Errorf("get archive path: %w", err)
-	}
-	if err := os.MkdirAll(archivePath, 0755); err != nil {
-		return fmt.Errorf("create archive directory: %w", err)
-	}
-
 	for _, path := range paths {
-		_, _, noteType := GetNoteMetadata(path)
-		if noteType == "" {
-			continue
+		// 1. Get the parent directory of the note file.
+		noteDir := filepath.Dir(path)
+		filename := filepath.Base(path)
+
+		// 2. Define the path for the archive subdirectory.
+		archiveDir := filepath.Join(noteDir, ".archive")
+
+		// 3. Ensure this .archive directory exists.
+		if err := os.MkdirAll(archiveDir, 0755); err != nil {
+			return fmt.Errorf("failed to create archive directory for %s: %w", path, err)
 		}
 
-		archiveSubdir := filepath.Join(archivePath, noteType)
-		if err := os.MkdirAll(archiveSubdir, 0755); err != nil {
-			return fmt.Errorf("create archive subdirectory: %w", err)
+		// 4. Define the destination path.
+		dest := filepath.Join(archiveDir, filename)
+
+		// 5. Add collision handling.
+		if _, err := os.Stat(dest); err == nil {
+			// File exists, append timestamp to prevent data loss.
+			ext := filepath.Ext(filename)
+			base := strings.TrimSuffix(filename, ext)
+			timestamp := time.Now().Format("20060102150405")
+			newFilename := fmt.Sprintf("%s-%s%s", base, timestamp, ext)
+			dest = filepath.Join(archiveDir, newFilename)
 		}
 
-		dest := filepath.Join(archiveSubdir, filepath.Base(path))
+		// 6. Move the note.
 		if err := os.Rename(path, dest); err != nil {
-			return fmt.Errorf("move %s to archive: %w", path, err)
+			return fmt.Errorf("failed to move %s to archive: %w", path, err)
 		}
-
 	}
 	return nil
 }
