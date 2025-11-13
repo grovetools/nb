@@ -339,6 +339,13 @@ func (m *Model) BuildDisplayTree() {
 					continue
 				}
 
+				// Skip double-nested archives (e.g., plans/.archive/foo/.archive/bar)
+				// Count occurrences of "/.archive" in the path
+				archiveCount := strings.Count(name, "/.archive")
+				if archiveCount > 1 {
+					continue
+				}
+
 				// Check if this matches pattern "<parent>/.archive/<child>"
 				if strings.Contains(name, "/.archive/") {
 					parts := strings.Split(name, "/.archive/")
