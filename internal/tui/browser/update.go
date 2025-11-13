@@ -44,12 +44,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case confirm.ConfirmedMsg:
 		// User confirmed the action in the dialog
 		// We need to know which action was confirmed. A simple way is to check the prompt.
-		if strings.Contains(m.confirmDialog.Prompt, "archive") {
-			m.statusMessage = ""
+		if strings.Contains(strings.ToLower(m.confirmDialog.Prompt), "archive") {
+			m.statusMessage = "Archiving..."
 			return m, m.archiveSelectedNotesCmd()
 		}
-		if strings.Contains(m.confirmDialog.Prompt, "delete") {
-			m.statusMessage = ""
+		if strings.Contains(strings.ToLower(m.confirmDialog.Prompt), "delete") {
+			m.statusMessage = "Deleting..."
 			return m, m.deleteSelectedNotesCmd()
 		}
 	case confirm.CancelledMsg:
@@ -321,13 +321,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			key.Matches(msg, m.keys.GoToTop) || key.Matches(msg, m.keys.GoToBottom) ||
 			key.Matches(msg, m.keys.Fold) || key.Matches(msg, m.keys.Unfold) ||
 			key.Matches(msg, m.keys.FoldPrefix) ||
-			msg.String() == "a" || msg.String() == "A" ||
+			msg.String() == "a" ||
 			msg.String() == "o" || msg.String() == "O" ||
 			msg.String() == "c" || msg.String() == "C" ||
 			msg.String() == "M" || msg.String() == "R" ||
+			(msg.String() == "A" && m.lastKey == "z") || // zA fold command
 			key.Matches(msg, m.keys.ToggleSelect) ||
 			key.Matches(msg, m.keys.SelectAll) ||
 			key.Matches(msg, m.keys.SelectNone) {
+			// Track 'z' for fold sequences
+			if key.Matches(msg, m.keys.FoldPrefix) {
+				m.lastKey = "z"
+			} else if msg.String() == "A" && m.lastKey == "z" {
+				m.lastKey = "" // Reset after zA sequence
+			}
 			m.views, cmd = m.views.Update(msg)
 			return m, cmd
 		}
@@ -886,9 +893,21 @@ func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
 	return func() tea.Msg {
 		// Group notes by workspace
 		notesByWorkspace := make(map[string][]*models.Note)
-		selected := m.views.GetSelected()
+		selectedNotes := m.views.GetSelected()
+		selectedGroups := m.views.GetSelectedGroups()
+
+		// Check if BOTH are empty
+		if len(selectedNotes) == 0 && len(selectedGroups) == 0 {
+			return notesArchivedMsg{
+				archivedPaths: nil,
+				archivedPlans: 0,
+				err:           fmt.Errorf("no notes or plans selected"),
+			}
+		}
+
+		// Populate notesByWorkspace from selected notes
 		for _, note := range m.allNotes {
-			if _, ok := selected[note.Path]; ok {
+			if _, ok := selectedNotes[note.Path]; ok {
 				notesByWorkspace[note.Workspace] = append(notesByWorkspace[note.Workspace], note)
 			}
 		}
@@ -899,8 +918,21 @@ func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
 
 		// Archive notes workspace by workspace
 		for workspaceName, notes := range notesByWorkspace {
-			// Get workspace context
-			wsCtx, err := m.service.GetWorkspaceContext(workspaceName)
+			// Get workspace context - need to resolve name to path
+			var wsCtx *service.WorkspaceContext
+			var err error
+			if workspaceName == "global" {
+				wsCtx, err = m.service.GetWorkspaceContext("global")
+			} else {
+				// Find the workspace node by name to get its path
+				wsNode, found := m.findWorkspaceNodeByName(workspaceName)
+				if !found {
+					archiveErr = fmt.Errorf("workspace not found: %s", workspaceName)
+					break
+				}
+				wsCtx, err = m.service.GetWorkspaceContext(wsNode.Path)
+			}
+
 			if err != nil {
 				archiveErr = fmt.Errorf("failed to get workspace context for %s: %w", workspaceName, err)
 				break
@@ -922,7 +954,6 @@ func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
 		}
 
 		// Archive selected plan groups
-		selectedGroups := m.views.GetSelectedGroups()
 		if archiveErr == nil && len(selectedGroups) > 0 {
 			// Group plans by workspace
 			plansByWorkspace := make(map[string][]string)
@@ -931,26 +962,35 @@ func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
 				if len(parts) == 2 {
 					workspaceName := parts[0]
 					groupName := parts[1]
-					plansByWorkspace[workspaceName] = append(plansByWorkspace[workspaceName], groupName)
+					// Only archive plan groups (those starting with "plans/")
+					if strings.HasPrefix(groupName, "plans/") {
+						plansByWorkspace[workspaceName] = append(plansByWorkspace[workspaceName], groupName)
+					}
 				}
 			}
 
 			// Archive plans workspace by workspace
+			if len(plansByWorkspace) == 0 && len(selectedGroups) > 0 {
+				// Groups were selected but none were plans
+				archiveErr = fmt.Errorf("selected groups are not plans (must start with 'plans/')")
+			}
+
 			for workspaceName, planNames := range plansByWorkspace {
-				// Find the workspace node by name
-				var wsNode *workspace.WorkspaceNode
-				for _, node := range m.service.GetWorkspaceProvider().All() {
-					if node.Name == workspaceName {
-						wsNode = node
+				// Get workspace context - need to resolve name to path
+				var wsCtx *service.WorkspaceContext
+				var err error
+				if workspaceName == "global" {
+					wsCtx, err = m.service.GetWorkspaceContext("global")
+				} else {
+					// Find the workspace node by name to get its path
+					wsNode, found := m.findWorkspaceNodeByName(workspaceName)
+					if !found {
+						archiveErr = fmt.Errorf("workspace not found: %s", workspaceName)
 						break
 					}
-				}
-				if wsNode == nil {
-					archiveErr = fmt.Errorf("workspace not found: %s", workspaceName)
-					break
+					wsCtx, err = m.service.GetWorkspaceContext(wsNode.Path)
 				}
 
-				wsCtx, err := m.service.GetWorkspaceContext(wsNode.Path)
 				if err != nil {
 					archiveErr = fmt.Errorf("failed to get workspace context for %s: %w", workspaceName, err)
 					break
