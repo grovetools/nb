@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/cmd/config"
 	"github.com/mattsolo1/grove-notebook/pkg/migration"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
@@ -39,6 +40,8 @@ func NewMigrateCmd() *cobra.Command {
 		migrateShowReport  bool
 		migrateNoBackup    bool
 		migrateStructure   bool
+		migrateTarget      string
+		migrateYes         bool
 	)
 
 	cmd := &cobra.Command{
@@ -64,7 +67,7 @@ Examples:
 
 			// Handle structural migration separately
 			if migrateStructure {
-				return runStructuralMigration(svc, migrateDryRun, migrateVerbose, migrateShowReport)
+				return runStructuralMigration(svc, migrateDryRun, migrateVerbose, migrateShowReport, migrateTarget, migrateYes)
 			}
 
 			if migrateAll {
@@ -129,6 +132,8 @@ Examples:
 	}
 
 	cmd.Flags().BoolVar(&migrateStructure, "structure", false, "Migrate from old repos/{workspace}/{branch} structure to new notebooks structure")
+	cmd.Flags().StringVar(&migrateTarget, "target", "", "Target directory for migration (default: uses notebook root_dir from config)")
+	cmd.Flags().BoolVarP(&migrateYes, "yes", "y", false, "Skip confirmation prompts")
 	cmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Show what would be changed without modifying")
 	cmd.Flags().BoolVar(&migrateForce, "force", false, "Overwrite existing frontmatter")
 	cmd.Flags().BoolVar(&migrateRecursive, "recursive", true, "Process directories recursively")
@@ -185,8 +190,88 @@ func printMigrationReport(report *migration.MigrationReport, dryRun bool) {
 	}
 }
 
-func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bool) error {
-	basePath := filepath.Join(os.Getenv("HOME"), "Documents", "nb")
+func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bool, targetDir string, skipConfirm bool) error {
+	// Get the source path (where old files are)
+	var sourcePath string
+	if svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil &&
+		svc.CoreConfig.Notebooks.Rules != nil &&
+		svc.CoreConfig.Notebooks.Rules.Default != "" &&
+		svc.CoreConfig.Notebooks.Definitions != nil {
+
+		defaultNotebookName := svc.CoreConfig.Notebooks.Rules.Default
+		if notebook, exists := svc.CoreConfig.Notebooks.Definitions[defaultNotebookName]; exists && notebook != nil {
+			if notebook.RootDir != "" {
+				expandedPath, err := pathutil.Expand(notebook.RootDir)
+				if err != nil {
+					return fmt.Errorf("failed to expand source notebook root_dir '%s': %w", notebook.RootDir, err)
+				}
+				sourcePath = expandedPath
+			}
+		}
+	}
+
+	// Fallback to default source path if not configured
+	if sourcePath == "" {
+		sourcePath = filepath.Join(os.Getenv("HOME"), "Documents", "nb")
+		fmt.Printf("Warning: No default notebook configured, using fallback source path: %s\n", sourcePath)
+	}
+
+	// Get the notebook name from config
+	var notebookName string
+	if svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil &&
+		svc.CoreConfig.Notebooks.Rules != nil &&
+		svc.CoreConfig.Notebooks.Rules.Default != "" {
+		notebookName = svc.CoreConfig.Notebooks.Rules.Default
+	}
+	if notebookName == "" {
+		notebookName = "nb" // fallback
+	}
+
+	// Get the target path (where to migrate to)
+	var targetPath string
+	if targetDir != "" {
+		// --target flag overrides config
+		// Append notebook name to create structure like ~/notebooks/nb/
+		expandedPath, err := pathutil.Expand(targetDir)
+		if err != nil {
+			return fmt.Errorf("failed to expand target path '%s': %w", targetDir, err)
+		}
+		targetPath = filepath.Join(expandedPath, notebookName)
+		if verbose {
+			fmt.Printf("Migrating from: %s\n", sourcePath)
+			fmt.Printf("Migrating to: %s\n", targetPath)
+		}
+	} else {
+		// If no --target, migrate within the same directory (source == target)
+		targetPath = sourcePath
+		if verbose {
+			fmt.Printf("Migrating within: %s\n", sourcePath)
+		}
+	}
+
+	// Get the global notebook root_dir from config
+	var globalRoot string
+	if svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil &&
+		svc.CoreConfig.Notebooks.Rules != nil &&
+		svc.CoreConfig.Notebooks.Rules.Global != nil {
+
+		if svc.CoreConfig.Notebooks.Rules.Global.RootDir != "" {
+			expandedPath, err := pathutil.Expand(svc.CoreConfig.Notebooks.Rules.Global.RootDir)
+			if err != nil {
+				return fmt.Errorf("failed to expand global notebook root_dir '%s': %w",
+					svc.CoreConfig.Notebooks.Rules.Global.RootDir, err)
+			}
+			globalRoot = expandedPath
+		}
+	}
+
+	// Fallback to default global path if not configured
+	if globalRoot == "" {
+		globalRoot = filepath.Join(os.Getenv("HOME"), ".grove", "notebooks", "global")
+		if verbose {
+			fmt.Printf("Using default global notebook path: %s\n", globalRoot)
+		}
+	}
 
 	options := migration.MigrationOptions{
 		DryRun:     dryRun,
@@ -198,18 +283,56 @@ func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bo
 	provider := svc.GetWorkspaceProvider()
 	locator := svc.GetNotebookLocator()
 
-	sm := migration.NewStructuralMigration(basePath, locator, provider, options, os.Stdout)
+	sm := migration.NewStructuralMigration(sourcePath, targetPath, globalRoot, locator, provider, options, os.Stdout)
 
-	if !dryRun {
-		fmt.Println("⚠️  WARNING: This will migrate notes from the old repos/ structure to the new notebooks/ structure.")
-		fmt.Println("   Files will be moved and the old structure will be removed.")
-		fmt.Print("\nContinue? [y/N] ")
+	// Check if user has old templates that will conflict
+	hasOldTemplates := false
+	if svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil &&
+		svc.CoreConfig.Notebooks.Definitions != nil {
+		if nb, exists := svc.CoreConfig.Notebooks.Definitions[notebookName]; exists && nb != nil {
+			if strings.Contains(nb.NotesPathTemplate, "repos/") ||
+				strings.Contains(nb.PlansPathTemplate, "repos/") ||
+				strings.Contains(nb.ChatsPathTemplate, "repos/") {
+				hasOldTemplates = true
+			}
+		}
+	}
+
+	if hasOldTemplates && !skipConfirm {
+		fmt.Println("⚠️  WARNING: Your grove.yml contains old path templates that will NOT work after migration!")
+		fmt.Println("\n   Current templates point to: repos/{workspace}/main/{noteType}")
+		fmt.Println("   After migration, files will be at: workspaces/{workspace}/{noteType}")
+		fmt.Println("\n   You MUST update your grove.yml after migration by removing these lines:")
+		fmt.Println("     - chats_path_template")
+		fmt.Println("     - notes_path_template")
+		fmt.Println("     - plans_path_template")
+		fmt.Println("\n   The new defaults will then apply automatically.")
+		fmt.Print("\nDo you understand and will update your config? [y/N] ")
+		var response string
+		_, _ = fmt.Scanln(&response)
+		if strings.ToLower(response) != "y" {
+			fmt.Println("Cancelled - please update your config first or acknowledge the required changes")
+			return nil
+		}
+	} else if hasOldTemplates && skipConfirm {
+		fmt.Println("⚠️  WARNING: Old path templates detected. Remember to update grove.yml after migration.")
+	}
+
+	if !dryRun && !skipConfirm {
+		fmt.Println("\n⚠️  WARNING: This will migrate notes from the old `repos/` and `global/`")
+		fmt.Println("   structures to the new `workspaces/` structure. This is a destructive")
+		fmt.Println("   operation. Files will be moved, and upon successful completion, the")
+		fmt.Println("   old `repos/` and `global/` directories will be REMOVED.")
+		fmt.Println("\n   It is strongly recommended to back up your notebook directory before proceeding.")
+		fmt.Print("\nContinue with structural migration? [y/N] ")
 		var response string
 		_, _ = fmt.Scanln(&response)
 		if strings.ToLower(response) != "y" {
 			fmt.Println("Cancelled")
 			return nil
 		}
+	} else if !dryRun && skipConfirm {
+		fmt.Println("⚠️  WARNING: Running structural migration (confirmations skipped with -y)")
 	}
 
 	if err := sm.MigrateStructure(); err != nil {
@@ -219,6 +342,21 @@ func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bo
 	report := sm.GetReport()
 	if showReport {
 		printMigrationReport(report, dryRun)
+	}
+
+	// Remind about config update if needed
+	if !dryRun && hasOldTemplates && report.MigratedFiles > 0 {
+		fmt.Println("\n" + strings.Repeat("=", 80))
+		fmt.Println("⚠️  IMPORTANT: Update your grove.yml config NOW!")
+		fmt.Println(strings.Repeat("=", 80))
+		fmt.Println("\nEdit ~/.config/grove/grove.yml and remove these lines from the 'nb' notebook:")
+		fmt.Println("  - chats_path_template: repos/{{ .Workspace.Name }}/main/current")
+		fmt.Println("  - notes_path_template: repos/{{ .Workspace.Name }}/main/{{ .NoteType }}")
+		fmt.Println("  - plans_path_template: repos/{{ .Workspace.Name }}/main/plans")
+		fmt.Println("\nAlso update the root_dir to your new location:")
+		fmt.Println("  root_dir: ~/notebooks/nb")
+		fmt.Println("\nWithout these changes, nb will not find your migrated notes!")
+		fmt.Println(strings.Repeat("=", 80))
 	}
 
 	return nil
