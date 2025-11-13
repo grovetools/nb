@@ -49,26 +49,31 @@ Examples:
 						continue
 					}
 
-					// Otherwise, search the entire workspace for the file
-					workspaceRoot := ctx.CurrentWorkspace.Path
+					// Search in all notebook directories from context.Paths
+					found := false
+					for _, notebookDir := range ctx.Paths {
+						_ = filepath.Walk(notebookDir, func(path string, info os.FileInfo, err error) error {
+							if err != nil {
+								return nil
+							}
 
-					_ = filepath.Walk(workspaceRoot, func(path string, info os.FileInfo, err error) error {
-						if err != nil {
+							// Skip archive directory
+							if strings.Contains(path, "/.archive/") {
+								return nil
+							}
+
+							if !info.IsDir() && filepath.Base(path) == arg {
+								filesToArchive = append(filesToArchive, path)
+								found = true
+							}
 							return nil
+						})
+						if found {
+							break
 						}
+					}
 
-						// Skip archive directory
-						if strings.Contains(path, "/archive/") {
-							return nil
-						}
-
-						if !info.IsDir() && filepath.Base(path) == arg {
-							filesToArchive = append(filesToArchive, path)
-						}
-						return nil
-					})
-
-					if len(filesToArchive) == 0 {
+					if !found {
 						return fmt.Errorf("file not found in workspace: %s", arg)
 					}
 				}
