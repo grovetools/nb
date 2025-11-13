@@ -692,8 +692,14 @@ func (s *Service) GetWorkspaceContext(startPath string) (*WorkspaceContext, erro
 
 	currentWorkspace, err := coreworkspace.GetProjectByPath(CWD)
 	if err != nil {
-		// Fallback to global context if not in a known workspace
-		return s.GetWorkspaceContext("global")
+		// Try to detect if we're in a notebooks workspace directory
+		// Pattern: <notebooks_root>/nb/workspaces/<workspace_name>/...
+		if ws := s.extractWorkspaceFromNotebooksPath(CWD); ws != nil {
+			currentWorkspace = ws
+		} else {
+			// Fallback to global context if not in a known workspace
+			return s.GetWorkspaceContext("global")
+		}
 	}
 
 	notebookContextWorkspace, err := s.findNotebookContextNode(currentWorkspace)
@@ -775,6 +781,69 @@ func (s *Service) findNotebookContextNode(currentNode *coreworkspace.WorkspaceNo
 		// the project is its own notebook context
 		return currentNode, nil
 	}
+}
+
+// extractWorkspaceFromNotebooksPath attempts to extract a workspace from a notebooks directory path.
+// Pattern: <notebooks_root>/workspaces/<workspace_name>/...
+// Returns nil if the path doesn't match the pattern or workspace not found.
+func (s *Service) extractWorkspaceFromNotebooksPath(path string) *coreworkspace.WorkspaceNode {
+	// Get the notebook root directory from config
+	if s.CoreConfig == nil || s.CoreConfig.Notebooks == nil || s.CoreConfig.Notebooks.Definitions == nil {
+		return nil
+	}
+
+	// Find the default notebook configuration
+	defaultNotebookName := "default"
+	if s.CoreConfig.Notebooks.Rules != nil && s.CoreConfig.Notebooks.Rules.Default != "" {
+		defaultNotebookName = s.CoreConfig.Notebooks.Rules.Default
+	}
+
+	notebook, ok := s.CoreConfig.Notebooks.Definitions[defaultNotebookName]
+	if !ok || notebook == nil || notebook.RootDir == "" {
+		return nil
+	}
+
+	notebooksRoot := notebook.RootDir
+
+	// Expand ~ in the notebooks root path
+	if strings.HasPrefix(notebooksRoot, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			notebooksRoot = filepath.Join(home, notebooksRoot[2:])
+		}
+	}
+
+	// Clean the paths for comparison
+	cleanPath := filepath.Clean(path)
+	cleanRoot := filepath.Clean(notebooksRoot)
+
+	// Check if path is under notebooks root
+	if !strings.HasPrefix(cleanPath, cleanRoot) {
+		return nil
+	}
+
+	// Extract the relative path from notebooks root
+	relPath, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil {
+		return nil
+	}
+
+	// Check if it matches the pattern: workspaces/<workspace_name>/...
+	parts := strings.Split(relPath, string(filepath.Separator))
+	if len(parts) < 2 || parts[0] != "workspaces" {
+		return nil
+	}
+
+	workspaceName := parts[1]
+
+	// Look up the workspace by name
+	for _, ws := range s.workspaceProvider.All() {
+		if ws.Name == workspaceName {
+			return ws
+		}
+	}
+
+	return nil
 }
 
 // buildPathsMap creates the map of note type paths for a given context using the NotebookLocator.
