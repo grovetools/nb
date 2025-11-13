@@ -44,8 +44,8 @@ func fetchFocusedNotesCmd(svc *service.Service, focusedWS *workspace.WorkspaceNo
 				continue
 			}
 
-			// Fetch notes for the workspace
-			notes, err := svc.ListAllNotes(wsCtx)
+			// Fetch notes for the workspace (including archived)
+			notes, err := svc.ListAllNotes(wsCtx, true)
 			if err == nil {
 				for _, note := range notes {
 					if !seenNotes[note.Path] {
@@ -56,8 +56,8 @@ func fetchFocusedNotesCmd(svc *service.Service, focusedWS *workspace.WorkspaceNo
 			}
 		}
 
-		// Also fetch global notes explicitly
-		globalNotes, err := svc.ListAllGlobalNotes()
+		// Also fetch global notes explicitly (including archived)
+		globalNotes, err := svc.ListAllGlobalNotes(true)
 		if err == nil {
 			for _, note := range globalNotes {
 				if !seenNotes[note.Path] {
@@ -98,16 +98,16 @@ func fetchWorkspacesCmd(provider *workspace.Provider) tea.Cmd {
 
 func fetchAllNotesCmd(svc *service.Service) tea.Cmd {
 	return func() tea.Msg {
-		// Fetch notes from all provider-known workspaces
-		notes, err := svc.ListNotesFromAllWorkspaces()
+		// Fetch notes from all provider-known workspaces (including archived)
+		notes, err := svc.ListNotesFromAllWorkspaces(true)
 		if err != nil {
 			// In a real app, we'd return an error message.
 			// For now, we return an empty list.
 			return notesLoadedMsg{notes: []*models.Note{}}
 		}
 
-		// Also fetch global notes explicitly and append them
-		globalNotes, err := svc.ListAllGlobalNotes()
+		// Also fetch global notes explicitly and append them (including archived)
+		globalNotes, err := svc.ListAllGlobalNotes(true)
 		if err == nil {
 			notes = append(notes, globalNotes...)
 		}

@@ -227,6 +227,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		viewMode:         treeView, // Default to tree view
 		filterInput:      ti,
 		sortAscending:    false, // Descending by default
+		showArchives:     true,  // Default to showing archives for debugging
 		jumpMap:          make(map[rune]int),
 		collapsedNodes: map[string]bool{
 			"ws:::global": true, // Start with global workspace collapsed

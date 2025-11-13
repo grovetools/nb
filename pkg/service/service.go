@@ -474,7 +474,7 @@ func (s *Service) ListNotes(ctx *WorkspaceContext, noteType models.NoteType) ([]
 }
 
 // ListAllNotes lists all notes in the specified workspace context (all directories)
-func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
+func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool) ([]*models.Note, error) {
 	// Get all content directories for this workspace
 	contentDirs, err := s.notebookLocator.GetAllContentDirs(ctx.NotebookContextWorkspace)
 	if err != nil {
@@ -509,12 +509,14 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
 			}
 			processedPaths[canonicalPath] = struct{}{}
 
-			// Skip archive directories
-			if strings.Contains(path, "/.archive/") || strings.Contains(path, "/archive/") {
-				if info.IsDir() {
-					return filepath.SkipDir
+			// Skip archive directories if not requested
+			if !includeArchived {
+				if strings.Contains(path, "/.archive/") || strings.Contains(path, "/archive/") {
+					if info.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
 				}
-				return nil
 			}
 
 			if !info.IsDir() && strings.HasSuffix(path, ".md") {
@@ -529,7 +531,11 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
 
 					switch contentDir.Type {
 					case "plans":
-						if len(parts) > 1 {
+						if len(parts) > 2 {
+							// This is inside a nested subdirectory: "plans/<dir>/<subdir>"
+							// Preserve the full path for archived plans like "plans/.archive/planname"
+							note.Group = "plans/" + filepath.Join(parts[0], parts[1])
+						} else if len(parts) > 1 {
 							// This is inside a plan subdirectory: "plans/<planname>"
 							note.Group = "plans/" + parts[0]
 						} else {
@@ -542,7 +548,10 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
 						}
 
 					case "chats":
-						if len(parts) > 1 {
+						if len(parts) > 2 {
+							// This is inside a nested subdirectory: "chats/<dir>/<subdir>"
+							note.Group = "chats/" + filepath.Join(parts[0], parts[1])
+						} else if len(parts) > 1 {
 							// This is inside a chat subdirectory: "chats/<chatname>"
 							note.Group = "chats/" + parts[0]
 						} else {
@@ -575,12 +584,12 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext) ([]*models.Note, error) {
 }
 
 // ListAllGlobalNotes lists all notes in the global workspace (all directories)
-func (s *Service) ListAllGlobalNotes() ([]*models.Note, error) {
+func (s *Service) ListAllGlobalNotes(includeArchived bool) ([]*models.Note, error) {
 	ctx, err := s.GetWorkspaceContext("global")
 	if err != nil {
 		return nil, fmt.Errorf("get global workspace context: %w", err)
 	}
-	return s.ListAllNotes(ctx)
+	return s.ListAllNotes(ctx, includeArchived)
 }
 
 // ListGlobalNotes lists notes in the global workspace

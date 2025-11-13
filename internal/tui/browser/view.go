@@ -55,10 +55,11 @@ func (m *Model) getNodeRenderInfo(node *displayNode) nodeRenderInfo {
 		info.name = node.workspace.Name
 	} else if node.isGroup {
 		info.name = node.groupName
-		info.isArchived = strings.Contains(node.groupName, "/.archive/") || node.groupName == ".archive"
+		info.isArchived = strings.Contains(node.groupName, "/.archive")
 		if node.isPlan() {
 			info.isPlan = true
 			info.name = strings.TrimPrefix(node.groupName, "plans/") // Display plan name without "plans/"
+			info.name = strings.TrimPrefix(info.name, ".archive/")   // Also remove ".archive/" prefix for archived plans
 			groupKey := m.getGroupKey(node)
 			if _, ok := m.selectedGroups[groupKey]; ok {
 				info.indicator = "■ " // Selected indicator

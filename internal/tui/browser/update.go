@@ -363,54 +363,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.FoldPrefix):
 			// Handle 'z' prefix for fold commands
 			m.lastKey = "z"
-		case msg.String() == "a":
+		case msg.String() == "a" && m.lastKey == "z":
 			// za - toggle fold
-			if m.lastKey == "z" {
-				m.toggleFold()
-				m.lastKey = ""
-			}
-		case msg.String() == "A":
+			m.toggleFold()
+			m.lastKey = ""
+		case msg.String() == "A" && m.lastKey == "z":
 			// zA - toggle fold recursively
-			if m.lastKey == "z" {
-				m.toggleFoldRecursive(m.cursor)
-				m.lastKey = ""
-			}
-		case msg.String() == "o":
+			m.toggleFoldRecursive(m.cursor)
+			m.lastKey = ""
+		case msg.String() == "o" && m.lastKey == "z":
 			// zo - open fold
-			if m.lastKey == "z" {
-				m.openFold()
-				m.lastKey = ""
-			}
-		case msg.String() == "O":
+			m.openFold()
+			m.lastKey = ""
+		case msg.String() == "O" && m.lastKey == "z":
 			// zO - open fold recursively
-			if m.lastKey == "z" {
-				m.openFoldRecursive(m.cursor)
-				m.lastKey = ""
-			}
-		case msg.String() == "c":
+			m.openFoldRecursive(m.cursor)
+			m.lastKey = ""
+		case msg.String() == "c" && m.lastKey == "z":
 			// zc - close fold
-			if m.lastKey == "z" {
-				m.closeFold()
-				m.lastKey = ""
-			}
-		case msg.String() == "C":
+			m.closeFold()
+			m.lastKey = ""
+		case msg.String() == "C" && m.lastKey == "z":
 			// zC - close fold recursively
-			if m.lastKey == "z" {
-				m.closeFoldRecursive(m.cursor)
-				m.lastKey = ""
-			}
-		case msg.String() == "M":
+			m.closeFoldRecursive(m.cursor)
+			m.lastKey = ""
+		case msg.String() == "M" && m.lastKey == "z":
 			// zM - close all folds
-			if m.lastKey == "z" {
-				m.closeAllFolds()
-				m.lastKey = ""
-			}
-		case msg.String() == "R":
+			m.closeAllFolds()
+			m.lastKey = ""
+		case msg.String() == "R" && m.lastKey == "z":
 			// zR - open all folds
-			if m.lastKey == "z" {
-				m.openAllFolds()
-				m.lastKey = ""
-			}
+			m.openAllFolds()
+			m.lastKey = ""
 		case key.Matches(msg, m.keys.FocusEcosystem):
 			if !m.ecosystemPickerMode {
 				m.ecosystemPickerMode = true
@@ -511,7 +495,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyFilterAndSort()
 		case key.Matches(msg, m.keys.ToggleArchives):
 			m.showArchives = !m.showArchives
-			m.buildDisplayTree()
+			m.statusMessage = fmt.Sprintf("Archives: %v (Found %d notes)", m.showArchives, len(m.allNotes))
+			m.applyFilterAndSort()
 		case key.Matches(msg, m.keys.ToggleGlobal):
 			m.hideGlobal = !m.hideGlobal
 			m.buildDisplayTree()
@@ -891,23 +876,36 @@ func (m *Model) buildDisplayTree() {
 		}
 
 		if noteGroups, ok := notesByWorkspace[ws.Name]; ok {
-			// Separate regular groups, plan groups, and archive groups
+			// Separate regular groups and archived subgroups
+			// archiveSubgroups maps "parent" -> "child" -> notes
+			// e.g., "plans" -> "test-plan" -> [notes in plans/.archive/test-plan]
 			var regularGroups []string
-			planGroups := make(map[string][]*models.Note) // plan name -> notes
-			archiveGroups := make(map[string][]string)    // parent -> archive path
+			planGroups := make(map[string][]*models.Note)
+			archiveSubgroups := make(map[string]map[string][]*models.Note)
 
 			for name, notes := range noteGroups {
-				if strings.HasSuffix(name, "/.archive") {
-					// This is an archive group - associate it with its parent
-					parent := strings.TrimSuffix(name, "/.archive")
-					archiveGroups[parent] = append(archiveGroups[parent], name)
-				} else if strings.Contains(name, "/.archive/") {
-					// This is an archived plan or similar - skip if archives are hidden
-					if m.showArchives {
-						regularGroups = append(regularGroups, name)
+				// Check if this is an archived group - skip if archives are hidden
+				isArchived := strings.Contains(name, "/.archive")
+				if isArchived && !m.showArchives {
+					continue
+				}
+
+				// Check if this matches pattern "<parent>/.archive/<child>"
+				if strings.Contains(name, "/.archive/") {
+					parts := strings.Split(name, "/.archive/")
+					if len(parts) == 2 {
+						parent := parts[0]
+						child := parts[1]
+						if archiveSubgroups[parent] == nil {
+							archiveSubgroups[parent] = make(map[string][]*models.Note)
+						}
+						archiveSubgroups[parent][child] = notes
+						continue
 					}
-				} else if strings.HasPrefix(name, "plans/") {
-					// Extract plan name (e.g., "plans/nb-tui" -> "nb-tui")
+				}
+
+				// Handle plans grouping
+				if strings.HasPrefix(name, "plans/") {
 					planName := strings.TrimPrefix(name, "plans/")
 					planGroups[planName] = notes
 				} else {
@@ -917,7 +915,7 @@ func (m *Model) buildDisplayTree() {
 			sort.Strings(regularGroups)
 
 			// Check if we have plans to add a "plans" parent group
-			hasPlans := len(planGroups) > 0
+			hasPlans := len(planGroups) > 0 || len(archiveSubgroups["plans"]) > 0
 			totalGroups := len(regularGroups)
 			if hasPlans {
 				totalGroups++
@@ -966,11 +964,12 @@ func (m *Model) buildDisplayTree() {
 					continue
 				}
 
-				// Add note nodes
-				hasArchive := len(archiveGroups[groupName]) > 0 && m.showArchives
+				// Check if this group has archived children
+				hasArchives := len(archiveSubgroups[groupName]) > 0 && m.showArchives
 
+				// Add note nodes
 				for j, note := range notesInGroup {
-					isLastNote := j == len(notesInGroup)-1 && !hasArchive
+					isLastNote := j == len(notesInGroup)-1 && !hasArchives
 					var notePrefix strings.Builder
 					noteIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
 					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
@@ -989,61 +988,95 @@ func (m *Model) buildDisplayTree() {
 					})
 				}
 
-				// Add archive subgroup if it exists and archives are visible
-				if hasArchive {
-					for _, archiveName := range archiveGroups[groupName] {
-						archiveNotes := noteGroups[archiveName]
+				// Add .archive subgroup if this group has archived children
+				if hasArchives {
+					// Sort archived child names
+					var archivedNames []string
+					for name := range archiveSubgroups[groupName] {
+						archivedNames = append(archivedNames, name)
+					}
+					sort.Strings(archivedNames)
 
-						// Sort archived notes
-						sort.SliceStable(archiveNotes, func(i, j int) bool {
-							if m.sortAscending {
-								return archiveNotes[i].CreatedAt.Before(archiveNotes[j].CreatedAt)
-							}
-							return archiveNotes[i].CreatedAt.After(archiveNotes[j].CreatedAt)
-						})
+					// Calculate .archive prefix (last child under this group)
+					var archivePrefix strings.Builder
+					archiveIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
+					archiveIndent = strings.ReplaceAll(archiveIndent, "└─", "  ")
+					archivePrefix.WriteString(archiveIndent)
+					archivePrefix.WriteString("└─ ")
 
-						// Calculate archive prefix
-						var archivePrefix strings.Builder
-						archiveIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
-						archiveIndent = strings.ReplaceAll(archiveIndent, "└─", "  ")
-						archivePrefix.WriteString(archiveIndent)
-						archivePrefix.WriteString("└─ ")
+					// Add .archive parent node
+					archiveParentNode := &displayNode{
+						isGroup:       true,
+						groupName:     groupName + "/.archive",
+						workspaceName: ws.Name,
+						prefix:        archivePrefix.String(),
+						depth:         ws.Depth + 2,
+						childCount:    len(archiveSubgroups[groupName]),
+					}
+					nodes = append(nodes, archiveParentNode)
 
-						archiveNode := &displayNode{
-							isGroup:       true,
-							groupName:     ".archive",
-							workspaceName: ws.Name,
-							prefix:        archivePrefix.String(),
-							depth:         ws.Depth + 2,
-							childCount:    len(archiveNotes),
-						}
-						nodes = append(nodes, archiveNode)
+					// Check if .archive parent is collapsed
+					archiveParentNodeID := archiveParentNode.nodeID()
+					if !m.collapsedNodes[archiveParentNodeID] || hasSearchFilter {
+						// Add individual archived children
+						for pi, archivedName := range archivedNames {
+							isLastArchived := pi == len(archivedNames)-1
+							archivedNotes := archiveSubgroups[groupName][archivedName]
 
-						// Skip archive notes if collapsed (unless searching)
-						archiveNodeID := archiveNode.nodeID()
-						if m.collapsedNodes[archiveNodeID] && !hasSearchFilter {
-							continue
-						}
-
-						// Add archive note nodes
-						for k, note := range archiveNotes {
-							isLastArchiveNote := k == len(archiveNotes)-1
-							var archiveNotePrefix strings.Builder
-							archiveNoteIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
-							archiveNoteIndent = strings.ReplaceAll(archiveNoteIndent, "└─", "  ")
-							archiveNotePrefix.WriteString(archiveNoteIndent)
-							if isLastArchiveNote {
-								archiveNotePrefix.WriteString("└─ ")
-							} else {
-								archiveNotePrefix.WriteString("├─ ")
-							}
-							nodes = append(nodes, &displayNode{
-								isNote:       true,
-								note:         note,
-								prefix:       archiveNotePrefix.String(),
-								depth:        ws.Depth + 3,
-								relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+							// Sort notes within the archived child
+							sort.SliceStable(archivedNotes, func(i, j int) bool {
+								if m.sortAscending {
+									return archivedNotes[i].CreatedAt.Before(archivedNotes[j].CreatedAt)
+								}
+								return archivedNotes[i].CreatedAt.After(archivedNotes[j].CreatedAt)
 							})
+
+							// Calculate archived child prefix
+							var archivedPrefix strings.Builder
+							archivedIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
+							archivedIndent = strings.ReplaceAll(archivedIndent, "└─", "  ")
+							archivedPrefix.WriteString(archivedIndent)
+							if isLastArchived {
+								archivedPrefix.WriteString("└─ ")
+							} else {
+								archivedPrefix.WriteString("├─ ")
+							}
+
+							// Add archived child node
+							archivedChildNode := &displayNode{
+								isGroup:       true,
+								groupName:     groupName + "/.archive/" + archivedName,
+								workspaceName: ws.Name,
+								prefix:        archivedPrefix.String(),
+								depth:         ws.Depth + 3,
+								childCount:    len(archivedNotes),
+							}
+							nodes = append(nodes, archivedChildNode)
+
+							// Check if archived child is collapsed
+							archivedChildNodeID := archivedChildNode.nodeID()
+							if !m.collapsedNodes[archivedChildNodeID] || hasSearchFilter {
+								// Add notes within the archived child
+								for ni, note := range archivedNotes {
+									isLastArchivedNote := ni == len(archivedNotes)-1
+									var archivedNotePrefix strings.Builder
+									archivedNoteIndent := strings.ReplaceAll(archivedPrefix.String(), "├─", "│ ")
+									archivedNoteIndent = strings.ReplaceAll(archivedNoteIndent, "└─", "  ")
+									archivedNotePrefix.WriteString(archivedNoteIndent)
+									if isLastArchivedNote {
+										archivedNotePrefix.WriteString("└─ ")
+									} else {
+										archivedNotePrefix.WriteString("├─ ")
+									}
+									nodes = append(nodes, &displayNode{
+										isNote:       true,
+										note:         note,
+										prefix:       archivedNotePrefix.String(),
+										depth:        ws.Depth + 4,
+										relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+									})
+								}
+							}
 						}
 					}
 				}
@@ -1142,6 +1175,99 @@ func (m *Model) buildDisplayTree() {
 							}
 						}
 					}
+
+					// Add .archive parent group if there are archived children
+					if len(archiveSubgroups["plans"]) > 0 && m.showArchives {
+						// Sort archived child names
+						var archivedNames []string
+						for name := range archiveSubgroups["plans"] {
+							archivedNames = append(archivedNames, name)
+						}
+						sort.Strings(archivedNames)
+
+						// Calculate .archive prefix (last child under plans)
+						var archivePrefix strings.Builder
+						archiveIndent := strings.ReplaceAll(plansPrefix.String(), "├─", "│ ")
+						archiveIndent = strings.ReplaceAll(archiveIndent, "└─", "  ")
+						archivePrefix.WriteString(archiveIndent)
+						archivePrefix.WriteString("└─ ")
+
+						// Add .archive parent node
+						archiveParentNode := &displayNode{
+							isGroup:       true,
+							groupName:     "plans/.archive",
+							workspaceName: ws.Name,
+							prefix:        archivePrefix.String(),
+							depth:         ws.Depth + 2,
+							childCount:    len(archiveSubgroups["plans"]),
+						}
+						nodes = append(nodes, archiveParentNode)
+
+						// Check if .archive parent is collapsed
+						archiveParentNodeID := archiveParentNode.nodeID()
+						if !m.collapsedNodes[archiveParentNodeID] || hasSearchFilter {
+							// Add individual archived children
+							for pi, archivedName := range archivedNames {
+								isLastArchived := pi == len(archivedNames)-1
+								archivedNotes := archiveSubgroups["plans"][archivedName]
+
+								// Sort notes within the archived child
+								sort.SliceStable(archivedNotes, func(i, j int) bool {
+									if m.sortAscending {
+										return archivedNotes[i].CreatedAt.Before(archivedNotes[j].CreatedAt)
+									}
+									return archivedNotes[i].CreatedAt.After(archivedNotes[j].CreatedAt)
+								})
+
+								// Calculate archived child prefix
+								var archivedPrefix strings.Builder
+								archivedIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
+								archivedIndent = strings.ReplaceAll(archivedIndent, "└─", "  ")
+								archivedPrefix.WriteString(archivedIndent)
+								if isLastArchived {
+									archivedPrefix.WriteString("└─ ")
+								} else {
+									archivedPrefix.WriteString("├─ ")
+								}
+
+								// Add archived child node
+								archivedNode := &displayNode{
+									isGroup:       true,
+									groupName:     "plans/.archive/" + archivedName,
+									workspaceName: ws.Name,
+									prefix:        archivedPrefix.String(),
+									depth:         ws.Depth + 3,
+									childCount:    len(archivedNotes),
+								}
+								nodes = append(nodes, archivedNode)
+
+								// Check if this archived child is collapsed
+								archivedNodeID := archivedNode.nodeID()
+								if !m.collapsedNodes[archivedNodeID] || hasSearchFilter {
+									// Add notes in this archived child
+									for ni, note := range archivedNotes {
+										isLastNote := ni == len(archivedNotes)-1
+										var notePrefix strings.Builder
+										noteIndent := strings.ReplaceAll(archivedPrefix.String(), "├─", "│ ")
+										noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+										notePrefix.WriteString(noteIndent)
+										if isLastNote {
+											notePrefix.WriteString("└─ ")
+										} else {
+											notePrefix.WriteString("├─ ")
+										}
+										nodes = append(nodes, &displayNode{
+											isNote:       true,
+											note:         note,
+											prefix:       notePrefix.String(),
+											depth:        ws.Depth + 4,
+											relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+										})
+									}
+								}
+							}
+						}
+					}
 				}
 			}
 		}
@@ -1218,20 +1344,34 @@ func (m *Model) buildDisplayTree() {
 
 				// Render notes for this ungrouped workspace
 				if noteGroups, ok := notesByWorkspace[ws.Name]; ok {
-					// Separate regular groups, plan groups, and archive groups
+					// Separate regular groups and archived subgroups
 					var regularGroups []string
 					planGroups := make(map[string][]*models.Note)
-					archiveGroups := make(map[string][]string)
+					archiveSubgroups := make(map[string]map[string][]*models.Note)
 
 					for name, notes := range noteGroups {
-						if strings.HasSuffix(name, "/.archive") {
-							parent := strings.TrimSuffix(name, "/.archive")
-							archiveGroups[parent] = append(archiveGroups[parent], name)
-						} else if strings.Contains(name, "/.archive/") {
-							if m.showArchives {
-								regularGroups = append(regularGroups, name)
+						// Check if this is an archived group - skip if archives are hidden
+						isArchived := strings.Contains(name, "/.archive")
+						if isArchived && !m.showArchives {
+							continue
+						}
+
+						// Check if this matches pattern "<parent>/.archive/<child>"
+						if strings.Contains(name, "/.archive/") {
+							parts := strings.Split(name, "/.archive/")
+							if len(parts) == 2 {
+								parent := parts[0]
+								child := parts[1]
+								if archiveSubgroups[parent] == nil {
+									archiveSubgroups[parent] = make(map[string][]*models.Note)
+								}
+								archiveSubgroups[parent][child] = notes
+								continue
 							}
-						} else if strings.HasPrefix(name, "plans/") {
+						}
+
+						// Handle plans grouping
+						if strings.HasPrefix(name, "plans/") {
 							planName := strings.TrimPrefix(name, "plans/")
 							planGroups[planName] = notes
 						} else {
@@ -1240,7 +1380,7 @@ func (m *Model) buildDisplayTree() {
 					}
 					sort.Strings(regularGroups)
 
-					hasPlans := len(planGroups) > 0
+					hasPlans := len(planGroups) > 0 || len(archiveSubgroups["plans"]) > 0
 
 					for i, groupName := range regularGroups {
 						isLastGroup := i == len(regularGroups)-1 && !hasPlans
@@ -1283,10 +1423,8 @@ func (m *Model) buildDisplayTree() {
 						}
 
 						// Add note nodes
-						hasArchive := len(archiveGroups[groupName]) > 0 && m.showArchives
-
 						for j, note := range notesInGroup {
-							isLastNote := j == len(notesInGroup)-1 && !hasArchive
+							isLastNote := j == len(notesInGroup)-1
 							var notePrefix strings.Builder
 							noteIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
 							noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
@@ -1303,61 +1441,6 @@ func (m *Model) buildDisplayTree() {
 								depth:        ws.Depth + 3,
 								relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
 							})
-						}
-
-						// Add archive subgroup if it exists
-						if hasArchive {
-							for _, archiveName := range archiveGroups[groupName] {
-								archiveNotes := noteGroups[archiveName]
-
-								// Sort archived notes
-								sort.SliceStable(archiveNotes, func(i, j int) bool {
-									if m.sortAscending {
-										return archiveNotes[i].CreatedAt.Before(archiveNotes[j].CreatedAt)
-									}
-									return archiveNotes[i].CreatedAt.After(archiveNotes[j].CreatedAt)
-								})
-
-								var archivePrefix strings.Builder
-								archiveIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
-								archiveIndent = strings.ReplaceAll(archiveIndent, "└─", "  ")
-								archivePrefix.WriteString(archiveIndent)
-								archivePrefix.WriteString("└─ ")
-
-								archiveNode := &displayNode{
-									isGroup:       true,
-									groupName:     ".archive",
-									workspaceName: ws.Name,
-									prefix:        archivePrefix.String(),
-									depth:         ws.Depth + 3,
-								}
-								nodes = append(nodes, archiveNode)
-
-								archiveNodeID := archiveNode.nodeID()
-								if m.collapsedNodes[archiveNodeID] && !hasSearchFilter {
-									continue
-								}
-
-								for k, note := range archiveNotes {
-									isLastArchiveNote := k == len(archiveNotes)-1
-									var archiveNotePrefix strings.Builder
-									archiveNoteIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
-									archiveNoteIndent = strings.ReplaceAll(archiveNoteIndent, "└─", "  ")
-									archiveNotePrefix.WriteString(archiveNoteIndent)
-									if isLastArchiveNote {
-										archiveNotePrefix.WriteString("└─ ")
-									} else {
-										archiveNotePrefix.WriteString("├─ ")
-									}
-									nodes = append(nodes, &displayNode{
-										isNote:       true,
-										note:         note,
-										prefix:       archiveNotePrefix.String(),
-										depth:        ws.Depth + 4,
-										relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
-									})
-								}
-							}
 						}
 					}
 
@@ -1438,6 +1521,99 @@ func (m *Model) buildDisplayTree() {
 											depth:        ws.Depth + 4,
 											relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
 										})
+									}
+								}
+							}
+
+							// Add .archive parent group if there are archived children
+							if len(archiveSubgroups["plans"]) > 0 && m.showArchives {
+								// Sort archived child names
+								var archivedNames []string
+								for name := range archiveSubgroups["plans"] {
+									archivedNames = append(archivedNames, name)
+								}
+								sort.Strings(archivedNames)
+
+								// Calculate .archive prefix (last child under plans)
+								var archivePrefix strings.Builder
+								archiveIndent := strings.ReplaceAll(plansPrefix.String(), "├─", "│ ")
+								archiveIndent = strings.ReplaceAll(archiveIndent, "└─", "  ")
+								archivePrefix.WriteString(archiveIndent)
+								archivePrefix.WriteString("└─ ")
+
+								// Add .archive parent node
+								archiveParentNode := &displayNode{
+									isGroup:       true,
+									groupName:     "plans/.archive",
+									workspaceName: ws.Name,
+									prefix:        archivePrefix.String(),
+									depth:         ws.Depth + 3,
+									childCount:    len(archiveSubgroups["plans"]),
+								}
+								nodes = append(nodes, archiveParentNode)
+
+								// Check if .archive parent is collapsed
+								archiveParentNodeID := archiveParentNode.nodeID()
+								if !m.collapsedNodes[archiveParentNodeID] || hasSearchFilter {
+									// Add individual archived children
+									for pi, archivedName := range archivedNames {
+										isLastArchived := pi == len(archivedNames)-1
+										archivedNotes := archiveSubgroups["plans"][archivedName]
+
+										// Sort notes within the archived child
+										sort.SliceStable(archivedNotes, func(i, j int) bool {
+											if m.sortAscending {
+												return archivedNotes[i].CreatedAt.Before(archivedNotes[j].CreatedAt)
+											}
+											return archivedNotes[i].CreatedAt.After(archivedNotes[j].CreatedAt)
+										})
+
+										// Calculate archived child prefix
+										var archivedPrefix strings.Builder
+										archivedIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
+										archivedIndent = strings.ReplaceAll(archivedIndent, "└─", "  ")
+										archivedPrefix.WriteString(archivedIndent)
+										if isLastArchived {
+											archivedPrefix.WriteString("└─ ")
+										} else {
+											archivedPrefix.WriteString("├─ ")
+										}
+
+										// Add archived child node
+										archivedChildNode := &displayNode{
+											isGroup:       true,
+											groupName:     "plans/.archive/" + archivedName,
+											workspaceName: ws.Name,
+											prefix:        archivedPrefix.String(),
+											depth:         ws.Depth + 4,
+											childCount:    len(archivedNotes),
+										}
+										nodes = append(nodes, archivedChildNode)
+
+										// Check if archived child is collapsed
+										archivedChildNodeID := archivedChildNode.nodeID()
+										if !m.collapsedNodes[archivedChildNodeID] || hasSearchFilter {
+											// Add notes within the archived child
+											for ni, note := range archivedNotes {
+												isLastNote := ni == len(archivedNotes)-1
+												var notePrefix strings.Builder
+												noteIndent := strings.ReplaceAll(archivedPrefix.String(), "├─", "│ ")
+												noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+												notePrefix.WriteString(noteIndent)
+												if isLastNote {
+													notePrefix.WriteString("└─ ")
+												} else {
+													notePrefix.WriteString("├─ ")
+												}
+												nodes = append(nodes, &displayNode{
+													isNote:       true,
+													note:         note,
+													prefix:       notePrefix.String(),
+													depth:        ws.Depth + 5,
+													relativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+												})
+											}
+										}
 									}
 								}
 							}

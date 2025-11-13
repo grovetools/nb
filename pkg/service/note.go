@@ -88,7 +88,7 @@ func ParseNote(path string) (*models.Note, error) {
 		Content:    contentStr,
 		WordCount:  countWords(contentStr),
 		HasTodos:   containsTodos(contentStr),
-		IsArchived: strings.Contains(path, "/archive/"),
+		IsArchived: strings.Contains(path, "/archive/") || strings.Contains(path, "/.archive/"),
 	}
 
 	// If frontmatter was successfully parsed, use its data
