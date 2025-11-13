@@ -285,6 +285,9 @@ func printMigrationReport(report *migration.MigrationReport, dryRun bool) {
 }
 
 func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bool, targetDir string, skipConfirm bool, notebookFlag string) error {
+	// If --target is used, it's a copy-only operation (non-destructive)
+	isCopyOnly := targetDir != ""
+
 	// Determine which notebook to use
 	notebookName := notebookFlag
 	if notebookName == "" && svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil && svc.CoreConfig.Notebooks.Rules != nil {
@@ -370,7 +373,7 @@ func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bo
 	provider := svc.GetWorkspaceProvider()
 	locator := svc.GetNotebookLocator()
 
-	sm := migration.NewStructuralMigration(sourcePath, targetPath, globalRoot, locator, provider, options, os.Stdout)
+	sm := migration.NewStructuralMigration(sourcePath, targetPath, globalRoot, locator, provider, options, isCopyOnly, os.Stdout)
 
 	// Check if user has old templates that will conflict
 	hasOldTemplates := false
@@ -405,7 +408,7 @@ func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bo
 		fmt.Println("⚠️  WARNING: Old path templates detected. Remember to update grove.yml after migration.")
 	}
 
-	if !dryRun && !skipConfirm {
+	if !isCopyOnly && !dryRun && !skipConfirm {
 		fmt.Println("\n⚠️  WARNING: This will migrate notes from the old `repos/` and `global/`")
 		fmt.Println("   structures to the new `workspaces/` structure. This is a destructive")
 		fmt.Println("   operation. Files will be moved, and upon successful completion, the")
@@ -418,7 +421,7 @@ func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bo
 			fmt.Println("Cancelled")
 			return nil
 		}
-	} else if !dryRun && skipConfirm {
+	} else if !isCopyOnly && !dryRun && skipConfirm {
 		fmt.Println("⚠️  WARNING: Running structural migration (confirmations skipped with -y)")
 	}
 

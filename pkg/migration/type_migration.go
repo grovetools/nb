@@ -5,7 +5,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // RenameCurrentToInbox scans a notebook for directories named "current"
@@ -69,6 +72,7 @@ func RenameCurrentToInbox(notebookRoot string, options MigrationOptions, output 
 }
 
 // migrateNoteTypeInFrontmatter updates the 'type' and 'tags' fields in a note's frontmatter.
+// IMPORTANT: This function preserves ALL frontmatter fields, only updating type and tags.
 func (m *Migrator) migrateNoteTypeInFrontmatter(filePath, oldType, newType string) error {
 	m.report.ProcessedFiles++
 
@@ -77,45 +81,11 @@ func (m *Migrator) migrateNoteTypeInFrontmatter(filePath, oldType, newType strin
 		return err
 	}
 
-	fm, body, err := ParseFrontmatter(string(content))
-	if err != nil || fm == nil {
+	// Use conservative update to preserve all fields
+	newContent, modified, err := m.conservativelyUpdateTypeAndTags(string(content), oldType, newType)
+	if err != nil {
 		m.report.SkippedFiles++
-		return nil // Skip files without valid frontmatter
-	}
-
-	modified := false
-	if fm.Type == oldType {
-		fm.Type = newType
-		modified = true
-	}
-
-	// Update tags: replace oldType with newType, and ensure newType is present
-	var newTags []string
-	tagModified := false
-	hasNewType := false
-
-	for _, tag := range fm.Tags {
-		if tag == oldType {
-			newTags = append(newTags, newType)
-			hasNewType = true
-			tagModified = true
-		} else {
-			if tag == newType {
-				hasNewType = true
-			}
-			newTags = append(newTags, tag)
-		}
-	}
-
-	// Ensure the new type is in tags (consistency with new note creation)
-	if !hasNewType && fm.Type == newType {
-		newTags = append(newTags, newType)
-		tagModified = true
-	}
-
-	if tagModified {
-		fm.Tags = newTags
-		modified = true
+		return nil // Skip files with parse errors
 	}
 
 	if !modified {
@@ -130,7 +100,6 @@ func (m *Migrator) migrateNoteTypeInFrontmatter(filePath, oldType, newType strin
 		return nil
 	}
 
-	newContent := BuildContentWithFrontmatter(fm, body)
 	if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
 		return err
 	}
@@ -138,6 +107,90 @@ func (m *Migrator) migrateNoteTypeInFrontmatter(filePath, oldType, newType strin
 	m.report.MigratedFiles++
 	m.report.IssuesFixed++
 	return nil
+}
+
+// conservativelyUpdateTypeAndTags updates only type and tags fields while preserving all others
+func (m *Migrator) conservativelyUpdateTypeAndTags(content, oldType, newType string) (string, bool, error) {
+	// Extract frontmatter using regex
+	frontmatterPattern := regexp.MustCompile(`(?s)^---\n(.*?)\n---\n(.*)`)
+	matches := frontmatterPattern.FindStringSubmatch(content)
+
+	if len(matches) != 3 {
+		// No frontmatter
+		return content, false, nil
+	}
+
+	frontmatterStr := matches[1]
+	bodyContent := matches[2]
+
+	// Parse into a map to preserve ALL fields
+	var fmMap map[string]interface{}
+	if err := yaml.Unmarshal([]byte(frontmatterStr), &fmMap); err != nil {
+		return content, false, err
+	}
+
+	modified := false
+
+	// Update type field if it matches oldType
+	if typeVal, exists := fmMap["type"]; exists {
+		if typeStr, ok := typeVal.(string); ok && typeStr == oldType {
+			fmMap["type"] = newType
+			modified = true
+		}
+	}
+
+	// Update tags array
+	if tagsVal, exists := fmMap["tags"]; exists {
+		if tagsSlice, ok := tagsVal.([]interface{}); ok {
+			newTags := []interface{}{}
+			hasNewType := false
+			tagModified := false
+
+			for _, tag := range tagsSlice {
+				if tagStr, ok := tag.(string); ok {
+					if tagStr == oldType {
+						newTags = append(newTags, newType)
+						hasNewType = true
+						tagModified = true
+					} else {
+						if tagStr == newType {
+							hasNewType = true
+						}
+						newTags = append(newTags, tag)
+					}
+				}
+			}
+
+			// Ensure newType is in tags if type field is newType
+			if !hasNewType {
+				if typeVal, exists := fmMap["type"]; exists {
+					if typeStr, ok := typeVal.(string); ok && typeStr == newType {
+						newTags = append(newTags, newType)
+						tagModified = true
+					}
+				}
+			}
+
+			if tagModified {
+				fmMap["tags"] = newTags
+				modified = true
+			}
+		}
+	}
+
+	if !modified {
+		return content, false, nil
+	}
+
+	// Marshal back to YAML, preserving all fields
+	updatedFM, err := yaml.Marshal(fmMap)
+	if err != nil {
+		return content, false, err
+	}
+
+	// Rebuild the content
+	newContent := "---\n" + string(updatedFM) + "---\n" + bodyContent
+	return newContent, true, nil
 }
 
 // EnsureTypeInTags scans all notes in a notebook and ensures their note type
@@ -197,8 +250,8 @@ func extractNoteTypeFromPath(path, notebookRoot string) string {
 
 	// Look for common structural markers
 	for i, part := range parts {
-		// Skip archive directories
-		if part == ".archive" || part == "archive" {
+		// Skip archive, plans, and chats directories - these are not note types
+		if part == ".archive" || part == "archive" || part == "plans" || part == "chats" {
 			return ""
 		}
 
@@ -246,6 +299,7 @@ func extractNoteTypeFromPath(path, notebookRoot string) string {
 }
 
 // ensureTypeInTags ensures a note's type is present in its tags array.
+// IMPORTANT: This function preserves ALL frontmatter fields, only updating tags.
 func (m *Migrator) ensureTypeInTags(filePath, noteType string) error {
 	m.report.ProcessedFiles++
 
@@ -254,22 +308,74 @@ func (m *Migrator) ensureTypeInTags(filePath, noteType string) error {
 		return err
 	}
 
-	fm, body, err := ParseFrontmatter(string(content))
-	if err != nil || fm == nil {
+	// Use conservative update to preserve all fields
+	newContent, modified, err := m.conservativelyAddTagsForType(string(content), noteType)
+	if err != nil {
 		m.report.SkippedFiles++
-		return nil // Skip files without valid frontmatter
+		return nil // Skip files with parse errors
+	}
+
+	if !modified {
+		m.report.SkippedFiles++
+		return nil
+	}
+
+	if m.options.DryRun {
+		fmt.Fprintf(m.output, "Would add type tags to: %s\n", filepath.Base(filePath))
+		m.report.MigratedFiles++
+		m.report.IssuesFixed++
+		return nil
+	}
+
+	if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
+		return err
+	}
+
+	m.report.MigratedFiles++
+	m.report.IssuesFixed++
+	return nil
+}
+
+// conservativelyAddTagsForType adds missing type tags while preserving all other fields
+func (m *Migrator) conservativelyAddTagsForType(content, noteType string) (string, bool, error) {
+	// Extract frontmatter using regex
+	frontmatterPattern := regexp.MustCompile(`(?s)^---\n(.*?)\n---\n(.*)`)
+	matches := frontmatterPattern.FindStringSubmatch(content)
+
+	if len(matches) != 3 {
+		// No frontmatter
+		return content, false, nil
+	}
+
+	frontmatterStr := matches[1]
+	bodyContent := matches[2]
+
+	// Parse into a map to preserve ALL fields
+	var fmMap map[string]interface{}
+	if err := yaml.Unmarshal([]byte(frontmatterStr), &fmMap); err != nil {
+		return content, false, err
 	}
 
 	// Extract all type components (e.g., "architecture/decisions" -> ["architecture", "decisions"])
 	typeParts := strings.Split(noteType, "/")
 
-	// Check which parts are missing
+	// Get existing tags
 	existingTags := make(map[string]bool)
-	for _, tag := range fm.Tags {
-		existingTags[tag] = true
+	var currentTags []interface{}
+
+	if tagsVal, exists := fmMap["tags"]; exists {
+		if tagsSlice, ok := tagsVal.([]interface{}); ok {
+			currentTags = tagsSlice
+			for _, tag := range tagsSlice {
+				if tagStr, ok := tag.(string); ok {
+					existingTags[tagStr] = true
+				}
+			}
+		}
 	}
 
-	missingParts := []string{}
+	// Find missing parts
+	var missingParts []string
 	for _, part := range typeParts {
 		if !existingTags[part] {
 			missingParts = append(missingParts, part)
@@ -278,28 +384,24 @@ func (m *Migrator) ensureTypeInTags(filePath, noteType string) error {
 
 	// If all parts are present, no modification needed
 	if len(missingParts) == 0 {
-		m.report.SkippedFiles++
-		return nil
+		return content, false, nil
 	}
 
-	if m.options.DryRun {
-		fmt.Fprintf(m.output, "Would add tags %v to: %s\n", missingParts, filepath.Base(filePath))
-		m.report.MigratedFiles++
-		m.report.IssuesFixed++
-		return nil
+	// Add missing tags
+	for _, part := range missingParts {
+		currentTags = append(currentTags, part)
+	}
+	fmMap["tags"] = currentTags
+
+	// Marshal back to YAML, preserving all fields
+	updatedFM, err := yaml.Marshal(fmMap)
+	if err != nil {
+		return content, false, err
 	}
 
-	// Add missing type parts to tags
-	fm.Tags = append(fm.Tags, missingParts...)
-
-	newContent := BuildContentWithFrontmatter(fm, body)
-	if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
-		return err
-	}
-
-	m.report.MigratedFiles++
-	m.report.IssuesFixed++
-	return nil
+	// Rebuild the content
+	newContent := "---\n" + string(updatedFM) + "---\n" + bodyContent
+	return newContent, true, nil
 }
 
 // Add merges another report's stats into this one.
