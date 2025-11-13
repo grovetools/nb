@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -19,85 +18,24 @@ import (
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-notebook/internal/tui/browser/components/confirm"
+	"github.com/mattsolo1/grove-notebook/internal/tui/browser/views"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
-type viewMode int
-
-const (
-	treeView viewMode = iota
-	tableView
-)
-
-// displayNode represents a single line in the hierarchical TUI view.
-type displayNode struct {
-	isWorkspace bool
-	isGroup     bool
-	isNote      bool
-	isSeparator bool
-
-	workspace     *workspace.WorkspaceNode
-	groupName     string
-	workspaceName string // For groups, tracks which workspace they belong to
-	note          *models.Note
-
-	// Pre-calculated for rendering
-	prefix       string
-	depth        int
-	jumpKey      rune
-	childCount   int    // For groups: number of notes/plans in the group
-	relativePath string // For notes, the path relative to their workspace
-}
-
-// nodeID returns a unique identifier for this node (for tracking collapsed state)
-func (n *displayNode) nodeID() string {
-	if n.isWorkspace {
-		return "ws:" + n.workspace.Path
-	} else if n.isGroup {
-		return "grp:" + n.groupName
-	}
-	return ""
-}
-
-// isFoldable returns true if this node can be collapsed/expanded
-func (n *displayNode) isFoldable() bool {
-	return n.isWorkspace || n.isGroup
-}
-
-// groupKey returns a unique key for this group (for selection tracking)
-func (n *displayNode) groupKey() string {
-	if n.isGroup {
-		return n.workspaceName + ":" + n.groupName
-	}
-	return ""
-}
-
-// isPlan returns true if this group represents a plan directory
-func (n *displayNode) isPlan() bool {
-	return n.isGroup && strings.HasPrefix(n.groupName, "plans/")
-}
-
 // Model is the main model for the notebook browser TUI
 type Model struct {
-	service        *service.Service
-	workspaces     []*workspace.WorkspaceNode
-	allNotes       []*models.Note
-	displayNodes   []*displayNode
-	cursor         int
-	scrollOffset   int
-	keys           KeyMap
-	help           help.Model
-	width          int
-	height         int
-	filterInput    textinput.Model
-	viewMode       viewMode
-	sortAscending  bool
-	jumpMap        map[rune]int
-	lastKey        string // For detecting 'gg' and 'z' sequences
-	collapsedNodes map[string]bool // Tracks collapsed workspaces and groups
-	showArchives   bool            // Whether to show .archive directories
-	hideGlobal     bool            // Whether to hide the global workspace node
+	service   *service.Service
+	workspaces []*workspace.WorkspaceNode
+	allNotes   []*models.Note
+	keys       KeyMap
+	help       help.Model
+	width      int
+	height     int
+	filterInput textinput.Model
+	lastKey     string // For detecting 'gg' and 'z' sequences
+	showArchives bool  // Whether to show .archive directories
+	hideGlobal   bool  // Whether to hide the global workspace node
 
 	// Focus mode state
 	ecosystemPickerMode bool
@@ -105,15 +43,12 @@ type Model struct {
 	focusChanged        bool // Tracks if focus just changed (to reset collapse state)
 
 	// Selection and archiving state
-	selected       map[string]struct{} // Tracks selected note paths
-	selectedGroups map[string]struct{} // Tracks selected groups (workspace:groupName)
-	statusMessage  string
-	confirmDialog  confirm.Model
+	statusMessage string
+	confirmDialog confirm.Model
 
 	// Clipboard state
-	clipboard     []string            // Paths of notes to be cut/copied
-	clipboardMode string              // "cut" or "copy"
-	cutPaths      map[string]struct{} // For visual indication of cut items
+	clipboard     []string // Paths of notes to be cut/copied
+	clipboardMode string   // "cut" or "copy"
 
 	// Note creation state
 	isCreatingNote     bool   // True when in the note creation flow
@@ -143,6 +78,9 @@ type Model struct {
 	// Tmux split state
 	tmuxSplitPaneID string // ID of the tmux pane created for editing
 	tmuxTUIPaneID   string // ID of the pane running the TUI
+
+	// View component
+	views views.Model
 }
 
 // FileToEdit returns the file path that should be edited (for Neovim integration)
@@ -226,21 +164,29 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	columnList.SetShowStatusBar(false)
 	columnList.SetShowPagination(false)
 
+	// Initialize views with KeyMap converted to views.KeyMap
+	viewsKeys := views.KeyMap{
+		Up:           keys.Up,
+		Down:         keys.Down,
+		PageUp:       keys.PageUp,
+		PageDown:     keys.PageDown,
+		GoToTop:      keys.GoToTop,
+		GoToBottom:   keys.GoToBottom,
+		Fold:         keys.Fold,
+		Unfold:       keys.Unfold,
+		FoldPrefix:   keys.FoldPrefix,
+		ToggleSelect: keys.ToggleSelect,
+		SelectAll:    keys.SelectAll,
+		SelectNone:   keys.SelectNone,
+	}
+	viewsModel := views.New(viewsKeys, columnVisibility)
+
 	return Model{
-		service:          svc,
-		keys:             keys,
-		help:             helpModel,
-		viewMode:         treeView, // Default to tree view
-		filterInput:      ti,
-		sortAscending:    false, // Descending by default
-		showArchives:     false, // Default to hiding archives
-		jumpMap:          make(map[rune]int),
-		collapsedNodes: map[string]bool{
-			"ws:::global": true, // Start with global workspace collapsed
-		},
-		selected:          make(map[string]struct{}), // Initialize selection map
-		selectedGroups:    make(map[string]struct{}), // Initialize group selection map
-		cutPaths:          make(map[string]struct{}), // Initialize cut paths map
+		service:           svc,
+		keys:              keys,
+		help:              helpModel,
+		filterInput:       ti,
+		showArchives:      false, // Default to hiding archives
 		focusedWorkspace:  initialFocus,
 		focusChanged:      initialFocus != nil, // Trigger initial collapse state setup
 		noteTitleInput:    noteTitleInput,
@@ -251,6 +197,8 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		columnList:        columnList,
 		availableColumns:  availableColumns,
 		confirmDialog:     confirmDialog,
+		clipboard:         []string{},
+		views:             viewsModel,
 	}
 }
 
@@ -445,7 +393,7 @@ func (m Model) openInTmuxSplitCmdImpl(path string, switchBack bool) tea.Cmd {
 
 		// Calculate optimal TUI width based on view mode
 		var tuiWidth int
-		if m.viewMode == tableView {
+		if m.views.GetViewMode() == views.TableView {
 			// Table view needs more space for columns: 40% with min 70, max 120
 			tuiWidth = currentWidth * 40 / 100
 			if tuiWidth < 70 {
