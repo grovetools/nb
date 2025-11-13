@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mattsolo1/grove-core/util/pathutil"
-	"github.com/mattsolo1/grove-notebook/cmd/config"
 	"github.com/mattsolo1/grove-notebook/pkg/migration"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
@@ -19,7 +18,7 @@ const (
 	untitledStr = "untitled"
 )
 
-func NewMigrateCmd() *cobra.Command {
+func NewMigrateCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
 		migrateDryRun       bool
 		migrateForce        bool
@@ -60,25 +59,19 @@ Examples:
   nb migrate --global --all               # Migrate all global notes
   nb migrate --workspace myproject --all  # Migrate entire workspace`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Initialize config and service
-			config.InitConfig()
-			svc, err := config.InitService()
-			if err != nil {
-				return err
-			}
-			defer svc.Close()
+			s := *svc
 
 			// Handle structural migration separately
 			if migrateStructure {
-				return runStructuralMigration(svc, migrateDryRun, migrateVerbose, migrateShowReport, migrateTarget, migrateYes, migrateNotebook)
+				return runStructuralMigration(s, migrateDryRun, migrateVerbose, migrateShowReport, migrateTarget, migrateYes, migrateNotebook)
 			}
 
 			// Handle type migration
 			if renameCurrentToInbox {
 				// Determine which notebook to use
 				notebookName := migrateNotebook
-				if notebookName == "" && svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil && svc.CoreConfig.Notebooks.Rules != nil {
-					notebookName = svc.CoreConfig.Notebooks.Rules.Default
+				if notebookName == "" && s.CoreConfig != nil && s.CoreConfig.Notebooks != nil && s.CoreConfig.Notebooks.Rules != nil {
+					notebookName = s.CoreConfig.Notebooks.Rules.Default
 				}
 				if notebookName == "" {
 					notebookName = "nb" // Final fallback
@@ -86,8 +79,8 @@ Examples:
 
 				// Get the notebook root path
 				var notebookRoot string
-				if svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil && svc.CoreConfig.Notebooks.Definitions != nil {
-					if notebook, exists := svc.CoreConfig.Notebooks.Definitions[notebookName]; exists && notebook != nil {
+				if s.CoreConfig != nil && s.CoreConfig.Notebooks != nil && s.CoreConfig.Notebooks.Definitions != nil {
+					if notebook, exists := s.CoreConfig.Notebooks.Definitions[notebookName]; exists && notebook != nil {
 						if notebook.RootDir != "" {
 							expandedPath, err := pathutil.Expand(notebook.RootDir)
 							if err != nil {
@@ -121,8 +114,8 @@ Examples:
 			if ensureTypeInTags {
 				// Determine which notebook to use
 				notebookName := migrateNotebook
-				if notebookName == "" && svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil && svc.CoreConfig.Notebooks.Rules != nil {
-					notebookName = svc.CoreConfig.Notebooks.Rules.Default
+				if notebookName == "" && s.CoreConfig != nil && s.CoreConfig.Notebooks != nil && s.CoreConfig.Notebooks.Rules != nil {
+					notebookName = s.CoreConfig.Notebooks.Rules.Default
 				}
 				if notebookName == "" {
 					notebookName = "nb" // Final fallback
@@ -130,8 +123,8 @@ Examples:
 
 				// Get the notebook root path
 				var notebookRoot string
-				if svc.CoreConfig != nil && svc.CoreConfig.Notebooks != nil && svc.CoreConfig.Notebooks.Definitions != nil {
-					if notebook, exists := svc.CoreConfig.Notebooks.Definitions[notebookName]; exists && notebook != nil {
+				if s.CoreConfig != nil && s.CoreConfig.Notebooks != nil && s.CoreConfig.Notebooks.Definitions != nil {
+					if notebook, exists := s.CoreConfig.Notebooks.Definitions[notebookName]; exists && notebook != nil {
 						if notebook.RootDir != "" {
 							expandedPath, err := pathutil.Expand(notebook.RootDir)
 							if err != nil {
@@ -194,7 +187,7 @@ Examples:
 			case migrateWorkspace != "":
 				scope.Workspace = migrateWorkspace
 			default:
-				context, err := svc.GetWorkspaceContext("")
+				context, err := s.GetWorkspaceContext(*workspaceOverride)
 				if err != nil {
 					return fmt.Errorf("get context: %w", err)
 				}
@@ -246,9 +239,6 @@ Examples:
 	cmd.Flags().BoolVar(&migrateVerbose, "verbose", false, "Show detailed output")
 	cmd.Flags().BoolVar(&migrateShowReport, "report", true, "Show migration report")
 	cmd.Flags().BoolVar(&migrateNoBackup, "no-backup", false, "Don't create backup files")
-
-	// Add global flags
-	config.AddGlobalFlags(cmd)
 
 	return cmd
 }

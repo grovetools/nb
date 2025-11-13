@@ -9,10 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mattsolo1/grove-notebook/cmd/config"
+	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
-func NewArchiveCmd() *cobra.Command {
+func NewArchiveCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
 		olderThan    int
 		dryRun       bool
@@ -29,16 +29,10 @@ Examples:
   nb archive --older-than 30       # Archive notes older than 30 days
   nb archive --dry-run             # Show what would be archived`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Initialize config and service
-			config.InitConfig()
-			svc, err := config.InitService()
-			if err != nil {
-				return err
-			}
-			defer svc.Close()
+			s := *svc
 
 			// Get workspace context
-			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
+			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}
@@ -80,7 +74,7 @@ Examples:
 				}
 			} else if olderThan > 0 {
 				// Find old notes to archive across all note types
-				noteTypes, err := svc.ListNoteTypes()
+				noteTypes, err := s.ListNoteTypes()
 				if err != nil {
 					return fmt.Errorf("could not list note types: %w", err)
 				}
@@ -88,7 +82,7 @@ Examples:
 				cutoff := time.Now().AddDate(0, 0, -olderThan)
 
 				for _, noteType := range noteTypes {
-					notes, err := svc.ListNotes(ctx, noteType)
+					notes, err := s.ListNotes(ctx, noteType)
 					if err != nil {
 						continue // Skip if directory doesn't exist
 					}
@@ -133,7 +127,7 @@ Examples:
 			}
 
 			// Archive the files
-			if err := svc.ArchiveNotes(ctx, filesToArchive); err != nil {
+			if err := s.ArchiveNotes(ctx, filesToArchive); err != nil {
 				return err
 			}
 
@@ -145,9 +139,6 @@ Examples:
 	cmd.Flags().IntVar(&olderThan, "older-than", 0, "Archive notes older than N days")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be archived without doing it")
 	cmd.Flags().BoolVar(&forceArchive, "force", false, "Skip confirmation prompt")
-
-	// Add global flags
-	config.AddGlobalFlags(cmd)
 
 	return cmd
 }

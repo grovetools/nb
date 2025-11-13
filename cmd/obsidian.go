@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mattsolo1/grove-notebook/cmd/config"
+	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
-func NewObsidianCmd() *cobra.Command {
+func NewObsidianCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "obsidian",
 		Short: "Manage Obsidian integration",
@@ -44,9 +44,6 @@ Examples:
   nb obsidian install-dev                       # Link to default vault
   nb obsidian install-dev --vault ~/my-vault    # Link to custom vault`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Initialize config (no service needed for this command)
-			config.InitConfig()
-
 			// Determine vault path
 			vault := vaultPath
 			if vault == "" {
@@ -140,9 +137,6 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&vaultPath, "vault", "", "Path to Obsidian vault (defaults to ~/Documents/nb)")
-
-	// Add global flags
-	config.AddGlobalFlags(cmd)
 
 	return cmd
 }

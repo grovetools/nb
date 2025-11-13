@@ -10,6 +10,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/fs"
 	coreworkspace "github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
 	"gopkg.in/yaml.v3"
 )
 
@@ -323,11 +324,11 @@ func (sm *StructuralMigration) conservativelyUpdateFrontmatter(content string, f
 		modified = true
 	}
 	if _, exists := fmMap["created"]; !exists {
-		fmMap["created"] = FormatTimestamp(stat.ModTime())
+		fmMap["created"] = frontmatter.FormatTimestamp(stat.ModTime())
 		modified = true
 	}
 	if _, exists := fmMap["modified"]; !exists {
-		fmMap["modified"] = FormatTimestamp(stat.ModTime())
+		fmMap["modified"] = frontmatter.FormatTimestamp(stat.ModTime())
 		modified = true
 	}
 

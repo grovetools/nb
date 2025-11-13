@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
 )
 
 type Migrator struct {
@@ -79,9 +81,9 @@ func (m *Migrator) applyFixes(filePath string, issues []MigrationIssue) (string,
 		return filePath, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	fm, bodyContent, _ := ParseFrontmatter(string(content))
+	fm, bodyContent, _ := frontmatter.Parse(string(content))
 	if fm == nil {
-		fm = &Frontmatter{
+		fm = &frontmatter.Frontmatter{
 			Aliases: []string{},
 			Tags:    []string{},
 		}
@@ -107,9 +109,9 @@ func (m *Migrator) applyFixes(filePath string, issues []MigrationIssue) (string,
 				fm.Title = expected
 			}
 		case "missing_created":
-			fm.Created = FormatTimestamp(stat.ModTime())
+			fm.Created = frontmatter.FormatTimestamp(stat.ModTime())
 		case "missing_modified":
-			fm.Modified = FormatTimestamp(stat.ModTime())
+			fm.Modified = frontmatter.FormatTimestamp(stat.ModTime())
 		case "missing_tags":
 			if expected, ok := issue.Expected.([]string); ok {
 				existingTags := make(map[string]bool)
@@ -125,7 +127,7 @@ func (m *Migrator) applyFixes(filePath string, issues []MigrationIssue) (string,
 		}
 	}
 
-	newContent := BuildContentWithFrontmatter(fm, bodyContent)
+	newContent := frontmatter.BuildContent(fm, bodyContent)
 
 	newPath := filePath
 	for _, issue := range issues {

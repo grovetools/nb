@@ -216,14 +216,7 @@ type Config struct {
 }
 
 // New creates a new note service
-func New(config *Config, provider *coreworkspace.Provider) (*Service, error) {
-	// Load core config and initialize NotebookLocator
-	coreCfg, err := coreconfig.LoadDefault()
-	if err != nil {
-		// Proceed with empty config if none exists (Local Mode)
-		coreCfg = &coreconfig.Config{}
-	}
-
+func New(config *Config, provider *coreworkspace.Provider, coreCfg *coreconfig.Config) (*Service, error) {
 	notebookLocator := coreworkspace.NewNotebookLocator(coreCfg)
 
 	return &Service{

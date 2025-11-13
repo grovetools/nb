@@ -8,12 +8,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mattsolo1/grove-notebook/cmd/config"
 	"github.com/mattsolo1/grove-notebook/pkg/migration"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
-func NewMoveCmd() *cobra.Command {
+func NewMoveCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
 		moveTargetWorkspace string
 		moveTargetBranch    string
@@ -63,13 +62,7 @@ Examples:
   nb move note.md learn --copy`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Initialize config and service
-			config.InitConfig()
-			svc, err := config.InitService()
-			if err != nil {
-				return err
-			}
-			defer svc.Close()
+			s := *svc
 
 			sourcePath := args[0]
 
@@ -92,7 +85,7 @@ Examples:
 
 				if !isNoteType {
 					// Treat as a full path
-					return moveToPath(svc, sourcePath, dest, moveDryRun, moveCopy)
+					return moveToPath(s, sourcePath, dest, moveDryRun, moveCopy)
 				}
 			}
 
@@ -112,7 +105,7 @@ Examples:
 				return fmt.Errorf("destination note type must be specified (e.g., 'current', 'learn', etc.)")
 			}
 
-			return moveNote(svc, sourcePath, destType, destWorkspace, destBranch,
+			return moveNote(s, *workspaceOverride, sourcePath, destType, destWorkspace, destBranch,
 				moveApplyMigrate, moveDryRun, moveForce, moveCopy)
 		},
 	}
@@ -125,13 +118,10 @@ Examples:
 	cmd.Flags().BoolVar(&moveForce, "force", false, "Overwrite existing files at destination")
 	cmd.Flags().BoolVar(&moveCopy, "copy", false, "Copy instead of move (preserve original file)")
 
-	// Add global flags
-	config.AddGlobalFlags(cmd)
-
 	return cmd
 }
 
-func moveNote(svc *service.Service, sourcePath, destType, destWorkspace, destBranch string,
+func moveNote(svc *service.Service, workspaceOverride, sourcePath, destType, destWorkspace, destBranch string,
 	applyMigrate, dryRun, force, copy bool) error {
 	// Make source path absolute
 	absSource, err := filepath.Abs(sourcePath)
@@ -150,7 +140,7 @@ func moveNote(svc *service.Service, sourcePath, destType, destWorkspace, destBra
 
 	// Get current context if destination workspace/branch not specified
 	if destWorkspace == "" {
-		ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
+		ctx, err := svc.GetWorkspaceContext(workspaceOverride)
 		if err != nil {
 			return fmt.Errorf("could not determine destination workspace context: %w", err)
 		}

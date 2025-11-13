@@ -6,10 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mattsolo1/grove-notebook/cmd/config"
+	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
-func NewContextCmd() *cobra.Command {
+func NewContextCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
 		contextJSON bool
 		contextPath string
@@ -22,15 +22,9 @@ func NewContextCmd() *cobra.Command {
 
 This is useful for integration with other tools like Neovim.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Initialize config and service
-			config.InitConfig()
-			svc, err := config.InitService()
-			if err != nil {
-				return err
-			}
-			defer svc.Close()
+			s := *svc
 
-			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
+			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
 				return err
 			}
@@ -86,9 +80,6 @@ This is useful for integration with other tools like Neovim.`,
 
 	cmd.Flags().BoolVar(&contextJSON, "json", false, "Output as JSON")
 	cmd.Flags().StringVar(&contextPath, "path", "", "Get specific path (current, llm, learn)")
-
-	// Add global flags
-	config.AddGlobalFlags(cmd)
 
 	return cmd
 }

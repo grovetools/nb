@@ -6,12 +6,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mattsolo1/grove-notebook/cmd/config"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
-func NewSearchCmd() *cobra.Command {
+func NewSearchCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
 		searchAll   bool
 		searchType  string
@@ -29,16 +28,10 @@ Examples:
   nb search "api" -t llm         # Search only LLM notes`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Initialize config and service
-			config.InitConfig()
-			svc, err := config.InitService()
-			if err != nil {
-				return err
-			}
-			defer svc.Close()
+			s := *svc
 
 			// Get workspace context
-			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
+			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}
@@ -54,7 +47,7 @@ Examples:
 			}
 			opts = append(opts, service.WithLimit(searchLimit))
 
-			results, err := svc.SearchNotes(ctx, query, opts...)
+			results, err := s.SearchNotes(ctx, query, opts...)
 			if err != nil {
 				return err
 			}
@@ -86,9 +79,6 @@ Examples:
 	cmd.Flags().BoolVar(&searchAll, "all", false, "Search all workspaces")
 	cmd.Flags().StringVarP(&searchType, "type", "t", "", "Filter by note type")
 	cmd.Flags().IntVar(&searchLimit, "limit", 50, "Maximum results")
-
-	// Add global flags
-	config.AddGlobalFlags(cmd)
 
 	return cmd
 }

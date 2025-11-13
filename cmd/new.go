@@ -8,12 +8,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mattsolo1/grove-notebook/cmd/config"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
-func NewNewCmd() *cobra.Command {
+func NewNewCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
 		noteType   string
 		noteName   string
@@ -48,16 +47,10 @@ Examples:
   echo "content" | nb new --stdin "title"
   nb new --stdin "manual" < file.txt`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Initialize config and service
-			config.InitConfig()
-			svc, err := config.InitService()
-			if err != nil {
-				return err
-			}
-			defer svc.Close()
+			s := *svc // Dereference the pointer to get the service instance
 
 			// Get workspace context, potentially overridden by the -W flag
-			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
+			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}
@@ -98,7 +91,7 @@ Examples:
 			}
 
 			// Create the note
-			note, err := svc.CreateNote(ctx, models.NoteType(actualNoteType), title, opts...)
+			note, err := s.CreateNote(ctx, models.NoteType(actualNoteType), title, opts...)
 			if err != nil {
 				return err
 			}
@@ -118,7 +111,7 @@ Examples:
 
 				// Append stdin content
 				newContent := string(existingContent) + "\n" + string(content)
-				if err := svc.UpdateNoteContent(note.Path, newContent); err != nil {
+				if err := s.UpdateNoteContent(note.Path, newContent); err != nil {
 					return fmt.Errorf("update note content: %w", err)
 				}
 			}
@@ -133,9 +126,6 @@ Examples:
 	cmd.Flags().BoolVar(&noEdit, "no-edit", false, "Don't open editor after creating")
 	cmd.Flags().BoolVarP(&globalNote, "global", "g", false, "Create note in global workspace")
 	cmd.Flags().BoolVar(&fromStdin, "stdin", false, "Read content from stdin (auto-detected when piped)")
-
-	// Add global flags
-	config.AddGlobalFlags(cmd)
 
 	return cmd
 }

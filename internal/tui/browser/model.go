@@ -18,6 +18,7 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/mattsolo1/grove-notebook/internal/tui/browser/components/confirm"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
@@ -104,11 +105,10 @@ type Model struct {
 	focusChanged        bool // Tracks if focus just changed (to reset collapse state)
 
 	// Selection and archiving state
-	selected          map[string]struct{} // Tracks selected note paths
-	selectedGroups    map[string]struct{} // Tracks selected groups (workspace:groupName)
-	statusMessage     string
-	confirmingArchive bool
-	confirmingDelete  bool
+	selected       map[string]struct{} // Tracks selected note paths
+	selectedGroups map[string]struct{} // Tracks selected groups (workspace:groupName)
+	statusMessage  string
+	confirmDialog  confirm.Model
 
 	// Clipboard state
 	clipboard     []string            // Paths of notes to be cut/copied
@@ -163,6 +163,8 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	ti := textinput.New()
 	ti.Placeholder = "Search notes..."
 	ti.CharLimit = 100
+
+	confirmDialog := confirm.New()
 
 	// Note creation setup
 	noteTitleInput := textinput.New()
@@ -248,6 +250,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		columnSelectMode:  false,
 		columnList:        columnList,
 		availableColumns:  availableColumns,
+		confirmDialog:     confirmDialog,
 	}
 }
 

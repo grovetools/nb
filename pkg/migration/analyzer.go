@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -34,7 +35,7 @@ func (a *Analyzer) AnalyzeNote(filePath string) ([]MigrationIssue, error) {
 
 	issues := []MigrationIssue{}
 
-	fm, bodyContent, err := ParseFrontmatter(string(content))
+	fm, bodyContent, err := frontmatter.Parse(string(content))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
 	}
@@ -46,7 +47,7 @@ func (a *Analyzer) AnalyzeNote(filePath string) ([]MigrationIssue, error) {
 			Field:       "frontmatter",
 		})
 
-		fm = &Frontmatter{}
+		fm = &frontmatter.Frontmatter{}
 	}
 
 	filename := filepath.Base(filePath)
@@ -79,7 +80,7 @@ func (a *Analyzer) AnalyzeNote(filePath string) ([]MigrationIssue, error) {
 			Description: "Created timestamp is missing",
 			Field:       "created",
 			Current:     "",
-			Expected:    FormatTimestamp(time.Now()),
+			Expected:    frontmatter.FormatTimestamp(time.Now()),
 		})
 	}
 
@@ -89,7 +90,7 @@ func (a *Analyzer) AnalyzeNote(filePath string) ([]MigrationIssue, error) {
 			Description: "Modified timestamp is missing",
 			Field:       "modified",
 			Current:     "",
-			Expected:    FormatTimestamp(time.Now()),
+			Expected:    frontmatter.FormatTimestamp(time.Now()),
 		})
 	}
 
@@ -118,7 +119,7 @@ func (a *Analyzer) AnalyzeNote(filePath string) ([]MigrationIssue, error) {
 	return issues, nil
 }
 
-func (a *Analyzer) extractBestTitle(fm *Frontmatter, bodyContent, filenameStem string) string {
+func (a *Analyzer) extractBestTitle(fm *frontmatter.Frontmatter, bodyContent, filenameStem string) string {
 	if fm.Title != "" {
 		return fm.Title
 	}
@@ -151,7 +152,7 @@ func (a *Analyzer) extractBestTitle(fm *Frontmatter, bodyContent, filenameStem s
 	return strings.Join(words, " ")
 }
 
-func (a *Analyzer) generateStandardFilename(fm *Frontmatter, bodyContent, filenameStem string) string {
+func (a *Analyzer) generateStandardFilename(fm *frontmatter.Frontmatter, bodyContent, filenameStem string) string {
 	dateStr := ""
 	if fm.ID != "" && idPattern.MatchString(fm.ID) {
 		parts := strings.Split(fm.ID, "-")

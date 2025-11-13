@@ -7,11 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mattsolo1/grove-notebook/cmd/config"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
-func NewQuickCmd() *cobra.Command {
+func NewQuickCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "quick [content]",
 		Short: "Create a quick note without opening editor",
@@ -22,16 +21,10 @@ Examples:
   nb quick "Meeting at 3pm with team"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Initialize config and service
-			config.InitConfig()
-			svc, err := config.InitService()
-			if err != nil {
-				return err
-			}
-			defer svc.Close()
+			s := *svc
 
 			// Get workspace context
-			ctx, err := svc.GetWorkspaceContext("")
+			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}
@@ -42,7 +35,7 @@ Examples:
 			title := time.Now().Format("2006-01-02-150405") + "-quick"
 
 			// Create the note without opening editor in the quick directory
-			note, err := svc.CreateNote(ctx, "quick", title, service.WithoutEditor())
+			note, err := s.CreateNote(ctx, "quick", title, service.WithoutEditor())
 			if err != nil {
 				return err
 			}
@@ -57,7 +50,7 @@ Examples:
 			newContent := string(existingContent) + content + "\n"
 
 			// Write the updated content
-			if err := svc.UpdateNoteContent(note.Path, newContent); err != nil {
+			if err := s.UpdateNoteContent(note.Path, newContent); err != nil {
 				return fmt.Errorf("update note content: %w", err)
 			}
 
@@ -65,9 +58,6 @@ Examples:
 			return nil
 		},
 	}
-
-	// Add global flags
-	config.AddGlobalFlags(cmd)
 
 	return cmd
 }

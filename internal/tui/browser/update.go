@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/util/pathutil"
+	"github.com/mattsolo1/grove-notebook/internal/tui/browser/components/confirm"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
@@ -21,6 +22,21 @@ import (
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
+	case confirm.ConfirmedMsg:
+		// User confirmed the action in the dialog
+		// We need to know which action was confirmed. A simple way is to check the prompt.
+		if strings.Contains(m.confirmDialog.Prompt, "archive") {
+			m.statusMessage = ""
+			return m, m.archiveSelectedNotesCmd()
+		}
+		if strings.Contains(m.confirmDialog.Prompt, "delete") {
+			m.statusMessage = ""
+			return m, m.deleteSelectedNotesCmd()
+		}
+	case confirm.CancelledMsg:
+		// User cancelled, just clear the status message
+		m.statusMessage = ""
+		return m, nil
 	case quitPopupMsg:
 		return m, tea.Quit
 	case editFileAndQuitMsg:
@@ -226,6 +242,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle active components first
+		if m.confirmDialog.Active {
+			m.confirmDialog, cmd = m.confirmDialog.Update(msg)
+			return m, cmd
+		}
+
 		// Handle note creation mode
 		if m.isCreatingNote {
 			return m.updateNoteCreation(msg)
@@ -256,36 +278,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.columnList, cmd = m.columnList.Update(msg)
 				return m, cmd
 			}
-		}
-
-		// Handle archive confirmation mode
-		if m.confirmingArchive {
-			switch msg.String() {
-			case "y", "Y":
-				m.confirmingArchive = false
-				m.statusMessage = ""
-				return m, m.archiveSelectedNotesCmd()
-			case "n", "N", "esc":
-				m.confirmingArchive = false
-				m.statusMessage = ""
-				return m, nil
-			}
-			return m, nil
-		}
-
-		// Handle delete confirmation mode
-		if m.confirmingDelete {
-			switch msg.String() {
-			case "y", "Y":
-				m.confirmingDelete = false
-				m.statusMessage = ""
-				return m, m.deleteSelectedNotesCmd()
-			case "n", "N", "esc":
-				m.confirmingDelete = false
-				m.statusMessage = ""
-				return m, nil
-			}
-			return m, nil
 		}
 
 		// Handle filtering mode
@@ -540,8 +532,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.lastKey == "d" { // This is the second 'd'
 				pathsToDelete := m.getTargetedNotePaths()
 				if len(pathsToDelete) > 0 {
-					m.confirmingDelete = true
-					m.statusMessage = fmt.Sprintf("Permanently delete %d note(s)? This cannot be undone. (y/N)", len(pathsToDelete))
+					prompt := fmt.Sprintf("Permanently delete %d note(s)? This cannot be undone.", len(pathsToDelete))
+					m.confirmDialog.Activate(prompt)
 				}
 				m.lastKey = "" // Reset sequence
 			} else {
@@ -610,16 +602,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.Archive):
 			// Archive selected notes and/or plan groups
-			totalSelected := len(m.selected) + len(m.selectedGroups)
-			if totalSelected > 0 {
-				m.confirmingArchive = true
-				if len(m.selected) > 0 && len(m.selectedGroups) > 0 {
-					m.statusMessage = fmt.Sprintf("Archive %d notes and %d plans? (y/N)", len(m.selected), len(m.selectedGroups))
-				} else if len(m.selectedGroups) > 0 {
-					m.statusMessage = fmt.Sprintf("Archive %d plans? (y/N)", len(m.selectedGroups))
+			totalNotes := len(m.selected)
+			totalPlans := len(m.selectedGroups)
+			if totalNotes > 0 || totalPlans > 0 {
+				var prompt string
+				if totalNotes > 0 && totalPlans > 0 {
+					prompt = fmt.Sprintf("Archive %d notes and %d plans?", totalNotes, totalPlans)
+				} else if totalPlans > 0 {
+					prompt = fmt.Sprintf("Archive %d plans?", totalPlans)
 				} else {
-					m.statusMessage = fmt.Sprintf("Archive %d notes? (y/N)", len(m.selected))
+					prompt = fmt.Sprintf("Archive %d notes?", totalNotes)
 				}
+				m.confirmDialog.Activate(prompt)
 			}
 		case key.Matches(msg, m.keys.Confirm):
 			if m.ecosystemPickerMode {

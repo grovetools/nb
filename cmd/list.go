@@ -8,11 +8,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mattsolo1/grove-notebook/cmd/config"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
+	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
-func NewListCmd() *cobra.Command {
+func NewListCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
 		listAll           bool
 		listType          string
@@ -33,16 +33,10 @@ Examples:
   nb list llm          # List LLM notes
   nb list learn        # List learning notes`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Initialize config and service
-			config.InitConfig()
-			svc, err := config.InitService()
-			if err != nil {
-				return err
-			}
-			defer svc.Close()
+			s := *svc
 
 			// Get workspace context, potentially overridden
-			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
+			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}
@@ -53,7 +47,7 @@ Examples:
 					return fmt.Errorf("--all-branches can only be used from a main project directory, not a worktree")
 				}
 
-				repoNotes, err := svc.ListAllNotesInWorkspace(ctx.NotebookContextWorkspace)
+				repoNotes, err := s.ListAllNotesInWorkspace(ctx.NotebookContextWorkspace)
 				if err != nil {
 					return err
 				}
@@ -77,7 +71,7 @@ Examples:
 
 			// Handle --workspaces flag first (list from all workspaces)
 			if listAllWorkspaces {
-				allNotes, err := svc.ListNotesFromAllWorkspaces(false)
+				allNotes, err := s.ListNotesFromAllWorkspaces(false)
 				if err != nil {
 					return err
 				}
@@ -106,9 +100,9 @@ Examples:
 				var err error
 
 				if listGlobal {
-					allNotes, err = svc.ListAllGlobalNotes(false)
+					allNotes, err = s.ListAllGlobalNotes(false)
 				} else {
-					allNotes, err = svc.ListAllNotes(ctx, false)
+					allNotes, err = s.ListAllNotes(ctx, false)
 				}
 
 				if err != nil {
@@ -139,7 +133,7 @@ Examples:
 				noteType = args[0]
 			}
 
-			notes, err := svc.ListNotes(ctx, models.NoteType(noteType))
+			notes, err := s.ListNotes(ctx, models.NoteType(noteType))
 			if err != nil {
 				return err
 			}
@@ -170,9 +164,6 @@ Examples:
 	cmd.Flags().BoolVar(&listJSON, "json", false, "Output in JSON format")
 	cmd.Flags().BoolVarP(&listAllWorkspaces, "workspaces", "w", false, "List notes from all workspaces")
 	cmd.Flags().BoolVar(&listAllBranches, "all-branches", false, "List notes from all branches in the current repository")
-
-	// Add global flags
-	config.AddGlobalFlags(cmd)
 
 	return cmd
 }

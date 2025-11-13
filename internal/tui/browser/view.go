@@ -214,6 +214,12 @@ func (m Model) View() string {
 		return m.help.View()
 	}
 
+	// If a component is active, render it as an overlay
+	if m.confirmDialog.Active {
+		dialog := m.confirmDialog.View()
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+	}
+
 	// Render note creation UI if active
 	if m.isCreatingNote {
 		// Get context information

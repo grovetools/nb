@@ -7,13 +7,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-notebook/cmd/config"
 	"github.com/mattsolo1/grove-notebook/internal/tui/browser"
+	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/spf13/cobra"
 )
 
 // NewTuiCmd creates the `nb tui` command.
-func NewTuiCmd() *cobra.Command {
+func NewTuiCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Launch an interactive TUI for browsing notes across workspaces",
@@ -25,16 +25,10 @@ This view provides a workspace-centric way to explore your entire notebook.`,
 				return fmt.Errorf("TUI mode requires an interactive terminal")
 			}
 
-			// Initialize config and service
-			config.InitConfig()
-			svc, err := config.InitService()
-			if err != nil {
-				return err
-			}
-			defer svc.Close()
+			s := *svc
 
 			// Get current workspace context to determine initial focus
-			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
+			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
 				return fmt.Errorf("failed to get workspace context: %w", err)
 			}
@@ -45,7 +39,7 @@ This view provides a workspace-centric way to explore your entire notebook.`,
 			}
 
 			// Create and run TUI with initial focus
-			model := browser.New(svc, initialFocus)
+			model := browser.New(s, initialFocus)
 			p := tea.NewProgram(model, tea.WithAltScreen())
 
 			if _, err := p.Run(); err != nil {
@@ -55,6 +49,5 @@ This view provides a workspace-centric way to explore your entire notebook.`,
 			return nil
 		},
 	}
-	config.AddGlobalFlags(cmd)
 	return cmd
 }

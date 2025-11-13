@@ -6,10 +6,10 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-	"github.com/mattsolo1/grove-notebook/cmd/config"
+	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
-func NewWorkspaceCmd() *cobra.Command {
+func NewWorkspaceCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workspace",
 		Short: "Manage workspaces (deprecated)",
@@ -19,27 +19,21 @@ func NewWorkspaceCmd() *cobra.Command {
 	// Most subcommands are removed as workspace management is now centralized in grove-core and 'grove ws' command.
 	// We keep 'current' for debugging purposes, but point users to 'nb context'.
 	cmd.AddCommand(
-		newWorkspaceCurrentCmd(),
+		newWorkspaceCurrentCmd(svc, workspaceOverride),
 	)
 
 	return cmd
 }
 
-func newWorkspaceCurrentCmd() *cobra.Command {
+func newWorkspaceCurrentCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "current",
 		Short: "Show current workspace (use 'nb context' instead)",
 		Long: "This command is deprecated. Please use 'nb context' for more detailed information.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Initialize config and service
-			config.InitConfig()
-			svc, err := config.InitService()
-			if err != nil {
-				return err
-			}
-			defer svc.Close()
+			s := *svc
 
-			ctx, err := svc.GetWorkspaceContext(config.WorkspaceOverride)
+			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
 				return err
 			}
@@ -56,9 +50,6 @@ func newWorkspaceCurrentCmd() *cobra.Command {
 			return w.Flush()
 		},
 	}
-
-	// Add global flags
-	config.AddGlobalFlags(cmd)
 
 	return cmd
 }
