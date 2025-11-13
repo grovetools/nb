@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/internal/tui/browser"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/spf13/cobra"
@@ -35,7 +36,24 @@ This view provides a workspace-centric way to explore your entire notebook.`,
 
 			var initialFocus *workspace.WorkspaceNode
 			if ctx.NotebookContextWorkspace.Name != "global" {
-				initialFocus = ctx.NotebookContextWorkspace
+				rawInitialFocus := ctx.NotebookContextWorkspace
+				// The workspace from GetWorkspaceContext might be a "raw" discovery.
+				// We need to find the canonical instance from the provider to ensure
+				// all metadata (like its Kind) is fully resolved.
+				provider := s.GetWorkspaceProvider()
+				foundInProvider := false
+				for _, ws := range provider.All() {
+					isSame, _ := pathutil.ComparePaths(ws.Path, rawInitialFocus.Path)
+					if isSame {
+						initialFocus = ws
+						foundInProvider = true
+						break
+					}
+				}
+				if !foundInProvider {
+					// Fallback if not found, though this is unlikely.
+					initialFocus = rawInitialFocus
+				}
 			}
 
 			// Create and run TUI with initial focus
