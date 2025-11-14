@@ -239,6 +239,7 @@ func (m Model) View() string {
 		footer,
 	)
 
-	// Add top margin to prevent border cutoff
-	return "\n" + fullView
+	// Apply global left padding and top margin
+	styledView := lipgloss.NewStyle().PaddingLeft(2).Render(fullView)
+	return "\n" + styledView
 }
