@@ -184,7 +184,6 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		Unfold:       keys.Unfold,
 		FoldPrefix:   keys.FoldPrefix,
 		ToggleSelect: keys.ToggleSelect,
-		SelectAll:    keys.SelectAll,
 		SelectNone:   keys.SelectNone,
 	}
 	viewsModel := views.New(viewsKeys, columnVisibility)

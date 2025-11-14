@@ -122,13 +122,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					}
 				}
 			}
-		case key.Matches(msg, m.keys.SelectAll):
-			// Select all visible notes
-			for _, node := range m.displayNodes {
-				if node.IsNote {
-					m.selected[node.Note.Path] = struct{}{}
-				}
-			}
 		case key.Matches(msg, m.keys.SelectNone):
 			// Clear all selections
 			m.selected = make(map[string]struct{})

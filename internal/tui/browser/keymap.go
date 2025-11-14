@@ -26,7 +26,6 @@ type KeyMap struct {
 	ToggleArchives key.Binding
 	ToggleGlobal   key.Binding
 	ToggleSelect   key.Binding
-	SelectAll      key.Binding
 	SelectNone     key.Binding
 	Archive        key.Binding
 	Preview        key.Binding
@@ -72,7 +71,6 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.ToggleGlobal,
 	}, []key.Binding{
 		k.ToggleSelect,
-		k.SelectAll,
 		k.SelectNone,
 		k.Archive,
 		k.Preview,
@@ -164,10 +162,6 @@ var keys = KeyMap{
 	ToggleSelect: key.NewBinding(
 		key.WithKeys(" "),
 		key.WithHelp("space", "toggle select"),
-	),
-	SelectAll: key.NewBinding(
-		key.WithKeys("a"),
-		key.WithHelp("a", "select all (visible)"),
 	),
 	SelectNone: key.NewBinding(
 		key.WithKeys("N"),

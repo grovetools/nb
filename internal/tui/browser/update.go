@@ -391,7 +391,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Try delegating to views for navigation, folding, and selection
 		// Views.Update handles: Up, Down, PageUp, PageDown, GoToTop, GoToBottom,
 		// Fold (h), Unfold (l), FoldPrefix (z), all z* fold commands,
-		// ToggleSelect (space), SelectAll (a), SelectNone (N)
+		// ToggleSelect (space), SelectNone (N)
 		if key.Matches(msg, m.keys.Up) || key.Matches(msg, m.keys.Down) ||
 			key.Matches(msg, m.keys.PageUp) || key.Matches(msg, m.keys.PageDown) ||
 			key.Matches(msg, m.keys.GoToTop) || key.Matches(msg, m.keys.GoToBottom) ||
@@ -403,7 +403,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.String() == "M" || msg.String() == "R" ||
 			(msg.String() == "A" && m.lastKey == "z") || // zA fold command
 			key.Matches(msg, m.keys.ToggleSelect) ||
-			key.Matches(msg, m.keys.SelectAll) ||
 			key.Matches(msg, m.keys.SelectNone) {
 			// Track 'z' for fold sequences
 			if key.Matches(msg, m.keys.FoldPrefix) {

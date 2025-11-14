@@ -14,6 +14,5 @@ type KeyMap struct {
 	Unfold       key.Binding
 	FoldPrefix   key.Binding
 	ToggleSelect key.Binding
-	SelectAll    key.Binding
 	SelectNone   key.Binding
 }
