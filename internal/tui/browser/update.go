@@ -570,8 +570,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				planName := sanitizeForFilename(node.Note.Title)
 				notePath := node.Note.Path
 
+				// Show status message to user
+				m.statusMessage = fmt.Sprintf("Promoting '%s' to plan '%s'...", node.Note.Title, planName)
+
 				// Construct the flow plan init command
-				// This command will take over the terminal, so we'll quit the TUI.
 				cmd := exec.Command("flow", "plan", "init", planName,
 					"--recipe", "chat",
 					"--worktree",
@@ -580,15 +582,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					"--open-session",
 				)
 
-				// Return a command to execute the process, then quit the TUI.
-				return m, tea.Batch(
-					tea.ExecProcess(cmd, func(err error) tea.Msg {
-						// This message is sent when the command finishes.
-						// We don't need to do anything with it since we are quitting.
-						return nil
-					}),
-					tea.Quit,
-				)
+				// Execute the command - this will take over the terminal and open a tmux session
+				// When complete, we'll quit the TUI
+				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+					if err != nil {
+						// If there was an error, show it before quitting
+						fmt.Fprintf(os.Stderr, "\nError promoting note to plan: %v\n", err)
+					} else {
+						// Success message
+						fmt.Fprintf(os.Stderr, "\nSuccessfully promoted note to plan '%s'\n", planName)
+					}
+					return tea.Quit()
+				})
 			}
 		case key.Matches(msg, m.keys.Archive):
 			// Archive selected notes and/or plan groups
