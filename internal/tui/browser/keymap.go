@@ -30,6 +30,7 @@ type KeyMap struct {
 	SelectNone     key.Binding
 	Archive        key.Binding
 	Preview        key.Binding
+	TogglePreview  key.Binding
 	Grep           key.Binding
 	ToggleColumns  key.Binding
 	Cut              key.Binding
@@ -75,6 +76,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.SelectNone,
 		k.Archive,
 		k.Preview,
+		k.TogglePreview,
 		k.ToggleColumns,
 	}, []key.Binding{
 		k.CreatePlan,
@@ -178,6 +180,10 @@ var keys = KeyMap{
 	Preview: key.NewBinding(
 		key.WithKeys("tab"),
 		key.WithHelp("tab", "toggle preview focus"),
+	),
+	TogglePreview: key.NewBinding(
+		key.WithKeys("v"),
+		key.WithHelp("v", "toggle preview pane"),
 	),
 	Grep: key.NewBinding(
 		key.WithKeys("*"),

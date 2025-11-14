@@ -21,6 +21,8 @@ type nodeRenderInfo struct {
 	indicator   string // "■", note icon, or plan status icon
 	name        string
 	count       string // "(d)"
+	suffix      string
+	linkColor   lipgloss.TerminalColor   // Color for linked pairs
 	isArchived  bool
 	isPlan      bool
 	isWorkspace bool
@@ -153,7 +155,7 @@ func (m *Model) renderTableView() string {
 			createdCol = node.Note.CreatedAt.Format("2006-01-02 15:04")
 			pathCol = node.RelativePath
 		} else if info.isPlan {
-			statusCol = m.getPlanStatus(node.WorkspaceName, node.GroupName)
+			statusCol = m.GetPlanStatus(node.WorkspaceName, node.GroupName)
 		}
 
 		// --- Build Name Column using new helpers ---
@@ -241,7 +243,7 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 			if _, ok := m.selectedGroups[groupKey]; ok {
 				info.indicator = "■ " // Selected indicator
 			} else {
-				planStatus := m.getPlanStatus(node.WorkspaceName, node.GroupName)
+				planStatus := m.GetPlanStatus(node.WorkspaceName, node.GroupName)
 				info.indicator = getPlanStatusIcon(planStatus) + " "
 			}
 		}
@@ -259,7 +261,57 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		}
 	}
 
+	// Add link suffix if the node is linked
+	if node.LinkedNode != nil {
+		// Assign matching color for the linked pair
+		info.linkColor = m.getLinkPairColor(node)
+
+		if node.IsNote {
+			// Note -> Plan: [plan: → plan-name]
+			planName := strings.TrimPrefix(node.LinkedNode.GroupName, "plans/")
+			italicStyle := lipgloss.NewStyle().Italic(true)
+			prefix := italicStyle.Render("plan:")
+			info.suffix = fmt.Sprintf(" [%s → %s]", prefix, planName)
+		} else if node.IsPlan() {
+			// Plan -> Note: [note: ← Note Title]
+			italicStyle := lipgloss.NewStyle().Italic(true)
+			prefix := italicStyle.Render("note:")
+			info.suffix = fmt.Sprintf(" [%s ← %s]", prefix, node.LinkedNode.Note.Title)
+		}
+	}
+
 	return info
+}
+
+// getLinkPairColor returns a consistent color for a linked pair based on the plan name
+func (m *Model) getLinkPairColor(node *DisplayNode) lipgloss.TerminalColor {
+	// Define a palette of colors for linked pairs
+	colors := []lipgloss.TerminalColor{
+		theme.DefaultTheme.Colors.Cyan,
+		theme.DefaultTheme.Colors.Pink,
+		theme.DefaultTheme.Colors.Yellow,
+		theme.DefaultTheme.Colors.Green,
+		theme.DefaultTheme.Colors.Blue,
+		theme.DefaultTheme.Colors.Violet,
+	}
+
+	// Get the plan name to use as the key for color assignment
+	var planName string
+	if node.IsNote && node.LinkedNode != nil {
+		planName = node.LinkedNode.GroupName
+	} else if node.IsPlan() && node.LinkedNode != nil {
+		planName = node.GroupName
+	} else {
+		return colors[0] // Default fallback
+	}
+
+	// Simple hash function to map plan name to color index
+	hash := 0
+	for _, ch := range planName {
+		hash += int(ch)
+	}
+
+	return colors[hash%len(colors)]
 }
 
 // styleNodeContent applies styling to the main content (name/title) of a node.
@@ -278,9 +330,19 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 	var baseStyle lipgloss.Style
 	hasStyle := false
 
-	if isSelected {
-		baseStyle = lipgloss.NewStyle().Underline(true)
+	// Check for linked nodes first (applies to both notes and plans)
+	if info.suffix != "" && info.linkColor != nil {
+		baseStyle = lipgloss.NewStyle().Foreground(info.linkColor)
 		hasStyle = true
+	}
+
+	if isSelected {
+		if hasStyle {
+			baseStyle = baseStyle.Copy().Underline(true)
+		} else {
+			baseStyle = lipgloss.NewStyle().Underline(true)
+			hasStyle = true
+		}
 	} else if info.note != nil {
 		if _, isCut := m.cutPaths[info.note.Path]; isCut {
 			baseStyle = lipgloss.NewStyle().Faint(true).Strikethrough(true)
@@ -307,6 +369,9 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 		hasStyle = true
 	}
 
+	// Prepare suffix styling
+	suffix := theme.DefaultTheme.Muted.Render(info.suffix)
+
 	// If there's a search match, build the string with highlighted portion
 	if hasMatch {
 		pre := info.name[:matchStart]
@@ -317,17 +382,17 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 
 		// Render each part separately and concatenate
 		if hasStyle {
-			return content + baseStyle.Render(pre) + highlightStyle.Render(match) + baseStyle.Render(post)
+			return content + baseStyle.Render(pre) + highlightStyle.Render(match) + baseStyle.Render(post) + suffix
 		}
-		return content + pre + highlightStyle.Render(match) + post
+		return content + pre + highlightStyle.Render(match) + post + suffix
 	}
 
 	// No search match - render normally
 	content += info.name
 	if hasStyle {
-		return baseStyle.Render(content)
+		return baseStyle.Render(content) + suffix
 	}
-	return content
+	return content + suffix
 }
 
 // getSearchHighlightIndices returns the start and end indices of the search match, or -1, -1 if no match
@@ -385,7 +450,7 @@ func (m *Model) calculateTableColumnWidths() [6]int {
 				maxName = nameLen
 			}
 			if node.IsPlan() {
-				status := m.getPlanStatus(node.WorkspaceName, node.GroupName)
+				status := m.GetPlanStatus(node.WorkspaceName, node.GroupName)
 				if len(status) > maxStatus {
 					maxStatus = len(status)
 				}
@@ -544,7 +609,7 @@ func getNoteIcon(noteType string) string {
 }
 
 // getPlanStatus reads the plan status from the .grove-plan.yml file
-func (m *Model) getPlanStatus(workspaceName, planGroup string) string {
+func (m *Model) GetPlanStatus(workspaceName, planGroup string) string {
 	// Find workspace to get the node
 	var wsNode *workspace.WorkspaceNode
 	for _, ws := range m.workspaces {

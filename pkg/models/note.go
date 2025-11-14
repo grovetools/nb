@@ -19,6 +19,7 @@ type Note struct {
 	WordCount  int       `json:"word_count"`
 	HasTodos   bool      `json:"has_todos"`
 	IsArchived bool      `json:"is_archived"`
+	PlanRef    string    `json:"plan_ref,omitempty"`
 
 	// Frontmatter fields
 	ID         string   `json:"id"`

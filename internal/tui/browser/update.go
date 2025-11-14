@@ -11,9 +11,12 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/internal/tui/browser/components/confirm"
+	"github.com/mattsolo1/grove-notebook/internal/tui/browser/views"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
@@ -73,7 +76,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.previewContent = fmt.Sprintf("Error loading file:\n%v", msg.err)
 			m.statusMessage = fmt.Sprintf("Error loading %s", filepath.Base(msg.path))
 		} else {
-			m.previewContent = msg.content
+			// Check for a linked item to enhance the preview
+			var infoBox string
+			node := m.views.GetCurrentNode()
+			if node != nil && node.LinkedNode != nil {
+				style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).BorderForeground(theme.DefaultTheme.Colors.MutedText)
+				var title, body string
+				if node.IsNote {
+					title = "🔗 Linked Plan"
+					planStatus := m.views.GetPlanStatus(node.LinkedNode.WorkspaceName, node.LinkedNode.GroupName)
+					planName := strings.TrimPrefix(node.LinkedNode.GroupName, "plans/")
+					body = fmt.Sprintf("%s\nStatus: %s", planName, planStatus)
+				} else if node.IsPlan() {
+					title = "🔗 Linked Note"
+					body = node.LinkedNode.Note.Title
+				}
+				infoBox = style.Render(fmt.Sprintf("%s\n%s", title, body)) + "\n\n"
+			}
+			m.previewContent = infoBox + msg.content
 			m.statusMessage = fmt.Sprintf("Previewing %s", filepath.Base(msg.path))
 		}
 		m.previewFile = msg.path
@@ -166,6 +186,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusChanged = false
 		}
 		m.updateViewsState()
+		m.findAndApplyLinks() // Detect and apply links between visible nodes
 		return m, m.updatePreviewContent()
 
 	case notesDeletedMsg:
@@ -649,6 +670,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.Preview): // Tab
 			m.previewFocused = !m.previewFocused
+			return m, nil
+		case key.Matches(msg, m.keys.TogglePreview): // v - toggle preview visibility
+			m.previewVisible = !m.previewVisible
+			if !m.previewVisible {
+				m.previewFocused = false // Can't focus a hidden preview
+				// Clear preview-related status message
+				if strings.Contains(m.statusMessage, "Previewing") || strings.Contains(m.statusMessage, "Loading") {
+					m.statusMessage = ""
+				}
+			}
 			return m, nil
 		case key.Matches(msg, m.keys.Back):
 			if m.ecosystemPickerMode {
@@ -1193,4 +1224,35 @@ func (m *Model) setCollapseStateForFocus() {
 // applyGrepFilter applies the grep-based content filter to the display nodes
 func (m *Model) applyGrepFilter() {
 	m.views.ApplyGrepFilter()
+}
+
+// findAndApplyLinks iterates through the visible display nodes to find and link notes with their corresponding plans.
+func (m *Model) findAndApplyLinks() {
+	notesWithPlanRef := make(map[string]*views.DisplayNode)
+	planNodes := make(map[string]*views.DisplayNode)
+	displayNodes := m.views.GetDisplayNodes()
+
+	// First pass: collect all notes with plan references and all plan nodes.
+	for _, node := range displayNodes {
+		// Reset any previous links
+		node.LinkedNode = nil
+		if node.IsNote && node.Note.PlanRef != "" {
+			// Key by workspace + plan_ref for uniqueness
+			key := fmt.Sprintf("%s:%s", node.Note.Workspace, node.Note.PlanRef)
+			notesWithPlanRef[key] = node
+		} else if node.IsPlan() {
+			// Key by workspace + group_name
+			key := fmt.Sprintf("%s:%s", node.WorkspaceName, node.GroupName)
+			planNodes[key] = node
+		}
+	}
+
+	// Second pass: connect the notes and plans.
+	for key, noteNode := range notesWithPlanRef {
+		if planNode, ok := planNodes[key]; ok {
+			// Found a match, create the bidirectional link.
+			noteNode.LinkedNode = planNode
+			planNode.LinkedNode = noteNode
+		}
+	}
 }

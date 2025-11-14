@@ -86,6 +86,7 @@ type Model struct {
 	// Preview Pane
 	preview        viewport.Model
 	previewFocused bool
+	previewVisible bool   // Whether the preview pane is shown
 	previewContent string
 	previewFile    string // Path of the file currently in preview
 }
@@ -214,6 +215,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		views:             viewsModel,
 		preview:           preview,
 		previewFocused:    false,
+		previewVisible:    false, // Preview hidden by default
 	}
 }
 
