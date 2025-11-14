@@ -346,7 +346,7 @@ func (m Model) openInTmuxCmd(path string) tea.Cmd {
 				editor = "nvim"
 			}
 			ctx := context.Background()
-			err := client.OpenFileInEditor(ctx, editor, path, "notebook", 2)
+			err := client.OpenInEditorWindow(ctx, editor, path, "notebook", 2, false)
 			if err != nil {
 				return tmuxSplitFinishedMsg{err: fmt.Errorf("popup mode - failed to open in editor: %w", err)}
 			}

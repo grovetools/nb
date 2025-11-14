@@ -74,6 +74,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewVersionCmd())
 	rootCmd.AddCommand(cmd.NewTuiCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewInternalCmd())
+	rootCmd.AddCommand(cmd.NewTmuxCmd(&svc, &workspaceOverride))
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
