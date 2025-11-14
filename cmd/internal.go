@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
 	"github.com/spf13/cobra"
 )
 
@@ -16,6 +17,7 @@ func NewInternalCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newUpdateNoteCmd())
+	cmd.AddCommand(newUpdateFrontmatterCmd())
 
 	return cmd
 }
@@ -59,6 +61,82 @@ func newUpdateNoteCmd() *cobra.Command {
 	cmd.Flags().StringVar(&appendContent, "append-content", "", "The content to append to the note")
 	_ = cmd.MarkFlagRequired("path")
 	_ = cmd.MarkFlagRequired("append-content")
+
+	return cmd
+}
+
+// newUpdateFrontmatterCmd creates the 'internal update-frontmatter' command.
+func newUpdateFrontmatterCmd() *cobra.Command {
+	var (
+		notePath  string
+		fieldName string
+		fieldValue string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "update-frontmatter",
+		Short: "Updates a frontmatter field in a specific note file",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if notePath == "" {
+				return fmt.Errorf("--path is required")
+			}
+			if fieldName == "" {
+				return fmt.Errorf("--field is required")
+			}
+			if fieldValue == "" {
+				return fmt.Errorf("--value is required")
+			}
+
+			// Read the note file
+			content, err := os.ReadFile(notePath)
+			if err != nil {
+				return fmt.Errorf("failed to read note file: %w", err)
+			}
+
+			// Parse frontmatter
+			fm, body, err := frontmatter.Parse(string(content))
+			if err != nil {
+				return fmt.Errorf("failed to parse frontmatter: %w", err)
+			}
+			if fm == nil {
+				return fmt.Errorf("note has no frontmatter")
+			}
+
+			// Update the specified field
+			switch fieldName {
+			case "plan_ref":
+				fm.PlanRef = fieldValue
+			case "title":
+				fm.Title = fieldValue
+			case "repository":
+				fm.Repository = fieldValue
+			case "branch":
+				fm.Branch = fieldValue
+			case "worktree":
+				fm.Worktree = fieldValue
+			default:
+				return fmt.Errorf("unsupported field: %s", fieldName)
+			}
+
+			// Rebuild content with updated frontmatter
+			newContent := frontmatter.BuildContent(fm, body)
+
+			// Write back to file
+			if err := os.WriteFile(notePath, []byte(newContent), 0644); err != nil {
+				return fmt.Errorf("failed to write note file: %w", err)
+			}
+
+			fmt.Printf("✓ Updated %s in %s\n", fieldName, notePath)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&notePath, "path", "", "The absolute path to the note file to update")
+	cmd.Flags().StringVar(&fieldName, "field", "", "The frontmatter field to update (e.g., plan_ref)")
+	cmd.Flags().StringVar(&fieldValue, "value", "", "The value to set for the field")
+	_ = cmd.MarkFlagRequired("path")
+	_ = cmd.MarkFlagRequired("field")
+	_ = cmd.MarkFlagRequired("value")
 
 	return cmd
 }

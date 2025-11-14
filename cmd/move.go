@@ -71,7 +71,7 @@ Examples:
 
 			if len(args) == 2 {
 				// Check if second arg is a note type
-				validTypes := []string{"current", "llm", "learn", "quick", "people", "places", "projects", "archive"}
+				validTypes := []string{"current", "llm", "learn", "quick", "people", "places", "projects", "archive", "inbox", "issues", "in_progress", "review", "completed"}
 				dest := args[1]
 
 				isNoteType := false

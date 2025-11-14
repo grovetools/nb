@@ -24,6 +24,7 @@ type Frontmatter struct {
 	Created    string   `yaml:"created"`
 	Modified   string   `yaml:"modified"`
 	Started    string   `yaml:"started,omitempty"` // For LLM notes
+	PlanRef    string   `yaml:"plan_ref,omitempty"` // Reference to associated plan
 
 	// Blog-specific fields
 	Description string `yaml:"description,omitempty"`
@@ -93,6 +94,9 @@ func Build(fm *Frontmatter) string {
 	// Special fields
 	if fm.Started != "" {
 		sb.WriteString(fmt.Sprintf("started: %s\n", fm.Started))
+	}
+	if fm.PlanRef != "" {
+		sb.WriteString(fmt.Sprintf("plan_ref: %s\n", fm.PlanRef))
 	}
 
 	// Blog-specific fields
