@@ -40,6 +40,7 @@ type KeyMap struct {
 	CreateNoteInbox  key.Binding
 	CreateNoteGlobal key.Binding
 	Rename           key.Binding
+	CreatePlan       key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -76,6 +77,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.Preview,
 		k.ToggleColumns,
 	}, []key.Binding{
+		k.CreatePlan,
 		k.CreateNote,
 		k.CreateNoteInbox,
 		k.CreateNoteGlobal,
@@ -175,7 +177,7 @@ var keys = KeyMap{
 	),
 	Preview: key.NewBinding(
 		key.WithKeys("tab"),
-		key.WithHelp("tab", "preview note"),
+		key.WithHelp("tab", "toggle preview focus"),
 	),
 	Grep: key.NewBinding(
 		key.WithKeys("*"),
@@ -200,6 +202,10 @@ var keys = KeyMap{
 	Rename: key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("r", "rename note"),
+	),
+	CreatePlan: key.NewBinding(
+		key.WithKeys("P"),
+		key.WithHelp("P", "promote note to plan"),
 	),
 	Delete: key.NewBinding(
 		key.WithKeys("d"),

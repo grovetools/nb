@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
@@ -81,6 +82,12 @@ type Model struct {
 
 	// View component
 	views views.Model
+
+	// Preview Pane
+	preview        viewport.Model
+	previewFocused bool
+	previewContent string
+	previewFile    string // Path of the file currently in preview
 }
 
 // FileToEdit returns the file path that should be edited (for Neovim integration)
@@ -181,6 +188,12 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	}
 	viewsModel := views.New(viewsKeys, columnVisibility)
 
+	// Initialize preview viewport
+	preview := viewport.New(80, 20) // Initial size, will be updated on WindowSizeMsg
+	preview.Style = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultTheme.Colors.MutedText)
+
 	return Model{
 		service:           svc,
 		keys:              keys,
@@ -199,6 +212,8 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		confirmDialog:     confirmDialog,
 		clipboard:         []string{},
 		views:             viewsModel,
+		preview:           preview,
+		previewFocused:    false,
 	}
 }
 
@@ -213,7 +228,37 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		fetchWorkspacesCmd(m.service.GetWorkspaceProvider()),
 		notesCmd,
+		m.updatePreviewContent(),
 	)
+}
+
+// updatePreviewContent checks if the preview needs to be updated and returns a command to load the file.
+func (m *Model) updatePreviewContent() tea.Cmd {
+	node := m.views.GetCurrentNode()
+	if node != nil && node.IsNote {
+		// If the file in preview is already the selected one, do nothing.
+		if m.previewFile == node.Note.Path {
+			return nil
+		}
+		// Otherwise, load the new file.
+		m.statusMessage = fmt.Sprintf("Loading %s...", filepath.Base(node.Note.Path))
+		return loadFileContentCmd(node.Note.Path)
+	}
+
+	// If not on a note, clear the preview.
+	if m.previewFile != "" {
+		m.previewFile = ""
+		m.previewContent = ""
+		m.preview.SetContent("Select a note to preview its content.")
+	}
+	return nil
+}
+
+// fileContentReadyMsg is sent when a file's content has been read from disk.
+type fileContentReadyMsg struct {
+	path    string
+	content string
+	err     error
 }
 
 // editorFinishedMsg is sent when the editor closes

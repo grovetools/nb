@@ -73,6 +73,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewObsidianCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewVersionCmd())
 	rootCmd.AddCommand(cmd.NewTuiCmd(&svc, &workspaceOverride))
+	rootCmd.AddCommand(cmd.NewInternalCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

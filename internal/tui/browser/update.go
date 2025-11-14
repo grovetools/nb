@@ -3,6 +3,7 @@ package browser
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -38,6 +39,17 @@ func (m *Model) updateViewsState() {
 	}
 }
 
+// loadFileContentCmd is a command that reads a file and returns its content.
+func loadFileContentCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fileContentReadyMsg{path: path, err: err}
+		}
+		return fileContentReadyMsg{path: path, content: string(content)}
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
@@ -55,6 +67,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case confirm.CancelledMsg:
 		// User cancelled, just clear the status message
 		m.statusMessage = ""
+		return m, nil
+	case fileContentReadyMsg:
+		if msg.err != nil {
+			m.previewContent = fmt.Sprintf("Error loading file:\n%v", msg.err)
+			m.statusMessage = fmt.Sprintf("Error loading %s", filepath.Base(msg.path))
+		} else {
+			m.previewContent = msg.content
+			m.statusMessage = fmt.Sprintf("Previewing %s", filepath.Base(msg.path))
+		}
+		m.previewFile = msg.path
+		m.preview.SetContent(m.previewContent)
+		m.preview.GotoTop() // Reset scroll on new file
 		return m, nil
 	case quitPopupMsg:
 		return m, tea.Quit
@@ -113,8 +137,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetSize(msg.Width, msg.Height)
-		m.views.SetSize(msg.Width, msg.Height)
-		m.columnList.SetSize(40, 8) // Set a reasonable size for the column picker
+
+		// Calculate pane sizes
+		// header(1) + search(1) + blank(1) + view + blank(1) + status(1) + footer(1) + top_margin(1)
+		const mainContentHeight = 7
+		availableHeight := m.height - mainContentHeight
+
+		browserWidth := m.width / 2
+		previewWidth := m.width - browserWidth
+
+		m.views.SetSize(browserWidth, availableHeight)
+		m.preview.Width = previewWidth
+		m.preview.Height = availableHeight
+
+		m.columnList.SetSize(40, 8)
 		return m, nil
 
 	case workspacesLoadedMsg:
@@ -130,7 +166,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusChanged = false
 		}
 		m.updateViewsState()
-		return m, nil
+		return m, m.updatePreviewContent()
 
 	case notesDeletedMsg:
 		if msg.err != nil {
@@ -257,6 +293,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// If preview is focused, it gets priority for key events.
+		if m.previewFocused {
+			switch {
+			case key.Matches(msg, m.keys.Preview): // Tab still switches focus back
+				m.previewFocused = false
+				return m, nil
+			case key.Matches(msg, m.keys.Quit): // Allow quitting from preview
+				return m, tea.Quit
+			case key.Matches(msg, m.keys.Back): // Esc to switch focus back
+				m.previewFocused = false
+				return m, nil
+			default:
+				// Pass all other keys to the viewport for scrolling
+				var cmd tea.Cmd
+				m.preview, cmd = m.preview.Update(msg)
+				return m, cmd
+			}
+		}
+
 		// Handle note creation mode
 		if m.isCreatingNote {
 			return m.updateNoteCreation(msg)
@@ -336,7 +391,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastKey = "" // Reset after zA sequence
 			}
 			m.views, cmd = m.views.Update(msg)
-			return m, cmd
+			// After any view update that could change the cursor, update the preview.
+			return m, tea.Batch(cmd, m.updatePreviewContent())
 		}
 
 		switch {
@@ -507,6 +563,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.renameInput.Focus()
 				return m, textinput.Blink
 			}
+		case key.Matches(msg, m.keys.CreatePlan):
+			node := m.views.GetCurrentNode()
+			if node != nil && node.IsNote {
+				// Sanitize the note title for the plan name
+				planName := sanitizeForFilename(node.Note.Title)
+				notePath := node.Note.Path
+
+				// Construct the flow plan init command
+				// This command will take over the terminal, so we'll quit the TUI.
+				cmd := exec.Command("flow", "plan", "init", planName,
+					"--recipe", "chat",
+					"--worktree",
+					"--extract-all-from", notePath,
+					"--note-ref", notePath,
+					"--open-session",
+				)
+
+				// Return a command to execute the process, then quit the TUI.
+				return m, tea.Batch(
+					tea.ExecProcess(cmd, func(err error) tea.Msg {
+						// This message is sent when the command finishes.
+						// We don't need to do anything with it since we are quitting.
+						return nil
+					}),
+					tea.Quit,
+				)
+			}
 		case key.Matches(msg, m.keys.Archive):
 			// Archive selected notes and/or plan groups
 			noteCount, selectedNotes, selectedPlans := m.views.GetCounts()
@@ -559,26 +642,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.openInEditor(noteToOpen.Path)
 				}
 			}
-		case key.Matches(msg, m.keys.Preview):
-			if !m.ecosystemPickerMode {
-				var noteToPreview *models.Note
-				node := m.views.GetCurrentNode()
-				if node != nil && node.IsNote {
-					noteToPreview = node.Note
-				}
-				if noteToPreview != nil {
-					if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
-						return m, func() tea.Msg {
-							return previewFileMsg{filePath: noteToPreview.Path}
-						}
-					}
-
-					// If in a tmux session, preview in split without switching focus
-					if os.Getenv("TMUX") != "" {
-						return m, m.previewInTmuxSplitCmd(noteToPreview.Path)
-					}
-				}
-			}
+		case key.Matches(msg, m.keys.Preview): // Tab
+			m.previewFocused = !m.previewFocused
+			return m, nil
 		case key.Matches(msg, m.keys.Back):
 			if m.ecosystemPickerMode {
 				m.ecosystemPickerMode = false
