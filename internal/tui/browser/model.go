@@ -203,8 +203,8 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	tagPicker := list.New([]list.Item{}, tagDelegate{}, 40, 20)
 	tagPicker.Title = "Select Tag"
 	tagPicker.SetShowHelp(false)
-	tagPicker.SetFilteringEnabled(true)
-	tagPicker.SetShowStatusBar(true) // Need status bar for filter to work
+	tagPicker.SetFilteringEnabled(false)
+	tagPicker.SetShowStatusBar(false)
 	tagPicker.SetShowPagination(false)
 
 	// Initialize views with KeyMap converted to views.KeyMap

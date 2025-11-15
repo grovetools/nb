@@ -68,7 +68,7 @@ func (m Model) View() string {
 			Faint(true).
 			Width(lipgloss.Width(dialogBox)).
 			Align(lipgloss.Center).
-			Render("\n\nPress / to search • Enter to select • Esc to cancel")
+			Render("\n\nEnter to select • Esc to cancel")
 
 		overlay := lipgloss.JoinVertical(lipgloss.Left, dialogBox, helpText)
 
