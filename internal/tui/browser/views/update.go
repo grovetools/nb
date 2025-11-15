@@ -333,6 +333,7 @@ func (m *Model) BuildDisplayTree() {
 			// e.g., "plans" -> "test-plan" -> [notes in plans/.archive/test-plan]
 			var regularGroups []string
 			planGroups := make(map[string][]*models.Note)
+			holdPlanGroups := make(map[string][]*models.Note)
 			archiveSubgroups := make(map[string]map[string][]*models.Note)
 
 			for name, notes := range noteGroups {
@@ -377,7 +378,19 @@ func (m *Model) BuildDisplayTree() {
 				// Handle plans grouping
 				if strings.HasPrefix(name, "plans/") {
 					planName := strings.TrimPrefix(name, "plans/")
-					planGroups[planName] = notes
+					// Check plan status to separate on-hold plans
+					planStatus := m.GetPlanStatus(ws.Name, name)
+					if planStatus == "hold" {
+						if !m.showOnHold {
+							// Skip on-hold plans unless showOnHold is true
+							continue
+						}
+						// Add to hold plans group
+						holdPlanGroups[planName] = notes
+					} else {
+						// Add to regular plans group
+						planGroups[planName] = notes
+					}
 				} else {
 					regularGroups = append(regularGroups, name)
 				}
@@ -421,8 +434,12 @@ func (m *Model) BuildDisplayTree() {
 
 			// Check if we have plans to add a "plans" parent group
 			hasPlans := len(planGroups) > 0 || len(archiveSubgroups["plans"]) > 0
+			hasHoldPlans := len(holdPlanGroups) > 0
 			totalGroups := len(regularGroups)
 			if hasPlans {
+				totalGroups++
+			}
+			if hasHoldPlans {
 				totalGroups++
 			}
 			if hasCompleted {
@@ -430,7 +447,7 @@ func (m *Model) BuildDisplayTree() {
 			}
 
 			for i, groupName := range regularGroups {
-				isLastGroup := i == len(regularGroups)-1 && !hasPlans && !hasCompleted
+				isLastGroup := i == len(regularGroups)-1 && !hasPlans && !hasHoldPlans && !hasCompleted
 				notesInGroup := noteGroups[groupName]
 
 				// Sort notes within the group
@@ -504,7 +521,13 @@ func (m *Model) BuildDisplayTree() {
 
 			// Add "plans" parent group if there are any plans
 			if hasPlans {
-				m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, hasSearchFilter, workspacePathMap, hasCompleted)
+				hasGroupsAfter := hasHoldPlans || hasCompleted
+				m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, hasSearchFilter, workspacePathMap, hasGroupsAfter)
+			}
+
+			// Add ".hold" parent group if there are any on-hold plans
+			if hasHoldPlans {
+				m.addHoldPlansGroup(&nodes, ws, holdPlanGroups, hasSearchFilter, workspacePathMap, hasCompleted)
 			}
 
 			// Add "completed" group if it exists (after plans)
@@ -778,7 +801,7 @@ func (m *Model) addArchiveSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspac
 	}
 }
 
-func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, planGroups map[string][]*models.Note, archiveSubgroups map[string]map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasCompleted bool) {
+func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, planGroups map[string][]*models.Note, archiveSubgroups map[string]map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasGroupsAfter bool) {
 	// Calculate plans parent prefix
 	var plansPrefix strings.Builder
 	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
@@ -787,10 +810,10 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 	if ws.Depth > 0 || ws.TreePrefix != "" {
 		plansPrefix.WriteString("  ")
 	}
-	if hasCompleted {
-		plansPrefix.WriteString("├─ ") // Not last if completed exists
+	if hasGroupsAfter {
+		plansPrefix.WriteString("├─ ") // Not last if other groups exist after
 	} else {
-		plansPrefix.WriteString("└─ ") // Plans is last if no completed
+		plansPrefix.WriteString("└─ ") // Plans is last if no other groups
 	}
 
 	// Add "plans" parent node
@@ -998,6 +1021,105 @@ func (m *Model) addPlansArchiveGroup(nodes *[]*DisplayNode, ws *workspace.Worksp
 						Note:         note,
 						Prefix:       notePrefix.String(),
 						Depth:        ws.Depth + 4,
+						RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+					})
+				}
+			}
+		}
+	}
+}
+
+func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, holdPlanGroups map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasCompleted bool) {
+	// Calculate .hold parent prefix
+	var holdPrefix strings.Builder
+	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
+	indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+	holdPrefix.WriteString(indentPrefix)
+	if ws.Depth > 0 || ws.TreePrefix != "" {
+		holdPrefix.WriteString("  ")
+	}
+	if hasCompleted {
+		holdPrefix.WriteString("├─ ") // Not last if completed exists
+	} else {
+		holdPrefix.WriteString("└─ ") // .hold is last if no completed
+	}
+
+	// Add ".hold" parent node
+	holdParentNode := &DisplayNode{
+		IsGroup:       true,
+		GroupName:     ".hold",
+		WorkspaceName: ws.Name,
+		Prefix:        holdPrefix.String(),
+		Depth:         ws.Depth + 1,
+		ChildCount:    len(holdPlanGroups), // Count of hold plans, not notes
+	}
+	*nodes = append(*nodes, holdParentNode)
+
+	// Check if .hold parent is collapsed (unless searching)
+	holdParentNodeID := holdParentNode.NodeID()
+	if !m.collapsedNodes[holdParentNodeID] || hasSearchFilter {
+		// Sort plan names
+		var planNames []string
+		for planName := range holdPlanGroups {
+			planNames = append(planNames, planName)
+		}
+		sort.Strings(planNames)
+
+		// Add individual hold plan nodes
+		for pi, planName := range planNames {
+			isLastPlan := pi == len(planNames)-1
+			planNotes := holdPlanGroups[planName]
+
+			// Sort notes within the plan
+			sort.SliceStable(planNotes, func(i, j int) bool {
+				if m.sortAscending {
+					return planNotes[i].CreatedAt.Before(planNotes[j].CreatedAt)
+				}
+				return planNotes[i].CreatedAt.After(planNotes[j].CreatedAt)
+			})
+
+			// Calculate plan prefix
+			var planPrefix strings.Builder
+			planIndent := strings.ReplaceAll(holdPrefix.String(), "├─", "│ ")
+			planIndent = strings.ReplaceAll(planIndent, "└─", "  ")
+			planPrefix.WriteString(planIndent)
+			if isLastPlan {
+				planPrefix.WriteString("└─ ")
+			} else {
+				planPrefix.WriteString("├─ ")
+			}
+
+			// Add plan node with full path for consistency
+			planNode := &DisplayNode{
+				IsGroup:       true,
+				GroupName:     "plans/" + planName, // Keep full path for consistency
+				WorkspaceName: ws.Name,
+				Prefix:        planPrefix.String(),
+				Depth:         ws.Depth + 2,
+				ChildCount:    len(planNotes),
+			}
+			*nodes = append(*nodes, planNode)
+
+			// Check if this plan is collapsed (unless searching)
+			planNodeID := planNode.NodeID()
+			if !m.collapsedNodes[planNodeID] || hasSearchFilter {
+				// Add notes in this plan
+				for ni, note := range planNotes {
+					isLastNote := ni == len(planNotes)-1
+					var notePrefix strings.Builder
+					noteIndent := strings.ReplaceAll(planPrefix.String(), "├─", "│ ")
+					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+					notePrefix.WriteString(noteIndent)
+					if isLastNote {
+						notePrefix.WriteString("└─ ")
+					} else {
+						notePrefix.WriteString("├─ ")
+					}
+					*nodes = append(*nodes, &DisplayNode{
+						IsNote:       true,
+						Note:         note,
+						Prefix:       notePrefix.String(),
+						Depth:        ws.Depth + 3,
 						RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
 					})
 				}

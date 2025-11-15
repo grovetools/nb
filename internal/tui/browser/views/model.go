@@ -91,6 +91,7 @@ type Model struct {
 	ecosystemPickerMode bool
 	hideGlobal          bool
 	showArchives        bool
+	showOnHold          bool
 	filterValue         string
 	isGrepping          bool
 	isFilteringByTag    bool
@@ -129,7 +130,7 @@ func (m *Model) SetParentState(
 	isGrepping bool,
 	isFilteringByTag bool,
 	selectedTag string,
-	ecoPickerMode, hideGlobal, showArchives, recentNotesMode bool,
+	ecoPickerMode, hideGlobal, showArchives, showOnHold, recentNotesMode bool,
 ) {
 	m.service = service
 	m.allNotes = allNotes
@@ -142,6 +143,7 @@ func (m *Model) SetParentState(
 	m.ecosystemPickerMode = ecoPickerMode
 	m.hideGlobal = hideGlobal
 	m.showArchives = showArchives
+	m.showOnHold = showOnHold
 	m.recentNotesMode = recentNotesMode
 }
 

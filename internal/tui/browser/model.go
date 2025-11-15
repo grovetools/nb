@@ -40,6 +40,7 @@ type Model struct {
 	lastKey     string // For detecting 'gg' and 'z' sequences
 	showArchives bool  // Whether to show .archive directories
 	hideGlobal   bool  // Whether to hide the global workspace node
+	showOnHold   bool  // Whether to show on-hold plans
 	spinner      spinner.Model
 	loadingCount int
 	recentNotesMode bool  // Whether to show only recent notes

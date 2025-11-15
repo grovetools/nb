@@ -36,6 +36,7 @@ func (m *Model) updateViewsState() {
 		m.ecosystemPickerMode,
 		m.hideGlobal,
 		m.showArchives,
+		m.showOnHold,
 		m.recentNotesMode,
 	)
 	m.views.BuildDisplayTree()
@@ -624,6 +625,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.ToggleArchives):
 			m.showArchives = !m.showArchives
 			m.statusMessage = fmt.Sprintf("Archives: %v (Found %d notes)", m.showArchives, len(m.allNotes))
+			m.updateViewsState()
+		case key.Matches(msg, m.keys.ToggleHold):
+			m.showOnHold = !m.showOnHold
+			m.statusMessage = fmt.Sprintf("On-hold plans: %v", m.showOnHold)
 			m.updateViewsState()
 		case key.Matches(msg, m.keys.ToggleGlobal):
 			m.hideGlobal = !m.hideGlobal
