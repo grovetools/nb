@@ -372,7 +372,42 @@ func (m *Model) BuildDisplayTree() {
 					regularGroups = append(regularGroups, name)
 				}
 			}
-			sort.Strings(regularGroups)
+			// Custom sort for regular groups
+			groupOrder := map[string]int{
+				"inbox":       1,
+				"issues":      2,
+				"in_progress": 3,
+				"review":      4,
+			}
+
+			// Extract completed group to render it after plans
+			var completedGroup string
+			var hasCompleted bool
+			var filteredRegularGroups []string
+			for _, name := range regularGroups {
+				if name == "completed" {
+					completedGroup = name
+					hasCompleted = true
+				} else {
+					filteredRegularGroups = append(filteredRegularGroups, name)
+				}
+			}
+			regularGroups = filteredRegularGroups
+
+			sort.Slice(regularGroups, func(i, j int) bool {
+				orderA, okA := groupOrder[regularGroups[i]]
+				if !okA {
+					orderA = 99 // Put unknown groups at the end
+				}
+				orderB, okB := groupOrder[regularGroups[j]]
+				if !okB {
+					orderB = 99
+				}
+				if orderA == orderB {
+					return regularGroups[i] < regularGroups[j] // Alphabetical fallback
+				}
+				return orderA < orderB
+			})
 
 			// Check if we have plans to add a "plans" parent group
 			hasPlans := len(planGroups) > 0 || len(archiveSubgroups["plans"]) > 0
@@ -380,9 +415,12 @@ func (m *Model) BuildDisplayTree() {
 			if hasPlans {
 				totalGroups++
 			}
+			if hasCompleted {
+				totalGroups++
+			}
 
 			for i, groupName := range regularGroups {
-				isLastGroup := i == len(regularGroups)-1 && !hasPlans
+				isLastGroup := i == len(regularGroups)-1 && !hasPlans && !hasCompleted
 				notesInGroup := noteGroups[groupName]
 
 				// Sort notes within the group
@@ -456,7 +494,12 @@ func (m *Model) BuildDisplayTree() {
 
 			// Add "plans" parent group if there are any plans
 			if hasPlans {
-				m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, hasSearchFilter, workspacePathMap)
+				m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, hasSearchFilter, workspacePathMap, hasCompleted)
+			}
+
+			// Add "completed" group if it exists (after plans)
+			if hasCompleted {
+				m.addCompletedGroup(&nodes, ws, noteGroups[completedGroup], archiveSubgroups, hasSearchFilter, workspacePathMap)
 			}
 		}
 
@@ -618,7 +661,7 @@ func (m *Model) addArchiveSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspac
 	}
 }
 
-func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, planGroups map[string][]*models.Note, archiveSubgroups map[string]map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string) {
+func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, planGroups map[string][]*models.Note, archiveSubgroups map[string]map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasCompleted bool) {
 	// Calculate plans parent prefix
 	var plansPrefix strings.Builder
 	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
@@ -627,7 +670,11 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 	if ws.Depth > 0 || ws.TreePrefix != "" {
 		plansPrefix.WriteString("  ")
 	}
-	plansPrefix.WriteString("└─ ") // Plans is always last
+	if hasCompleted {
+		plansPrefix.WriteString("├─ ") // Not last if completed exists
+	} else {
+		plansPrefix.WriteString("└─ ") // Plans is last if no completed
+	}
 
 	// Add "plans" parent node
 	plansParentNode := &DisplayNode{
@@ -838,6 +885,70 @@ func (m *Model) addPlansArchiveGroup(nodes *[]*DisplayNode, ws *workspace.Worksp
 					})
 				}
 			}
+		}
+	}
+}
+
+func (m *Model) addCompletedGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, completedNotes []*models.Note, archiveSubgroups map[string]map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string) {
+	// Calculate completed group prefix (always last)
+	var completedPrefix strings.Builder
+	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
+	indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+	completedPrefix.WriteString(indentPrefix)
+	if ws.Depth > 0 || ws.TreePrefix != "" {
+		completedPrefix.WriteString("  ")
+	}
+	completedPrefix.WriteString("└─ ") // Completed is always last
+
+	// Sort notes within the completed group
+	sort.SliceStable(completedNotes, func(i, j int) bool {
+		if m.sortAscending {
+			return completedNotes[i].CreatedAt.Before(completedNotes[j].CreatedAt)
+		}
+		return completedNotes[i].CreatedAt.After(completedNotes[j].CreatedAt)
+	})
+
+	// Add completed group node
+	completedGroupNode := &DisplayNode{
+		IsGroup:       true,
+		GroupName:     "completed",
+		WorkspaceName: ws.Name,
+		Prefix:        completedPrefix.String(),
+		Depth:         ws.Depth + 1,
+		ChildCount:    len(completedNotes),
+	}
+	*nodes = append(*nodes, completedGroupNode)
+
+	// Check if completed group is collapsed (unless searching)
+	completedGroupNodeID := completedGroupNode.NodeID()
+	if !m.collapsedNodes[completedGroupNodeID] || hasSearchFilter {
+		// Check if this group has archived children
+		hasArchives := len(archiveSubgroups["completed"]) > 0 && m.showArchives
+
+		// Add note nodes
+		for j, note := range completedNotes {
+			isLastNote := j == len(completedNotes)-1 && !hasArchives
+			var notePrefix strings.Builder
+			noteIndent := strings.ReplaceAll(completedPrefix.String(), "├─", "│ ")
+			noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+			notePrefix.WriteString(noteIndent)
+			if isLastNote {
+				notePrefix.WriteString("└─ ")
+			} else {
+				notePrefix.WriteString("├─ ")
+			}
+			*nodes = append(*nodes, &DisplayNode{
+				IsNote:       true,
+				Note:         note,
+				Prefix:       notePrefix.String(),
+				Depth:        ws.Depth + 2,
+				RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+			})
+		}
+
+		// Add .archive subgroup if this group has archived children
+		if hasArchives {
+			m.addArchiveSubgroup(nodes, ws, completedPrefix.String(), archiveSubgroups["completed"], hasSearchFilter, workspacePathMap)
 		}
 	}
 }

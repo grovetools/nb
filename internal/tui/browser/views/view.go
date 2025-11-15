@@ -20,11 +20,11 @@ type nodeRenderInfo struct {
 	fold        string // "▶ ", "▼ ", or ""
 	indicator   string // "■", note icon, or plan status icon
 	name        string
-	count       string // "(d)"
-	suffix      string
-	linkColor   lipgloss.TerminalColor   // Color for linked pairs
-	isArchived  bool
+	count      string // "(d)"
+	suffix     string
+	isArchived bool
 	isPlan      bool
+	isGroup     bool
 	isWorkspace bool
 	isSeparator bool
 	workspace   *workspace.WorkspaceNode // a reference to the workspace node if applicable
@@ -228,6 +228,7 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		info.workspace = node.Workspace
 		info.name = node.Workspace.Name
 	} else if node.IsGroup {
+		info.isGroup = true
 		info.name = node.GroupName
 		info.isArchived = strings.Contains(node.GroupName, "/.archive")
 
@@ -263,9 +264,6 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 
 	// Add link suffix if the node is linked
 	if node.LinkedNode != nil {
-		// Assign matching color for the linked pair
-		info.linkColor = m.getLinkPairColor(node)
-
 		if node.IsNote {
 			// Note -> Plan: [plan: → plan-name]
 			planName := strings.TrimPrefix(node.LinkedNode.GroupName, "plans/")
@@ -283,116 +281,93 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 	return info
 }
 
-// getLinkPairColor returns a consistent color for a linked pair based on the plan name
-func (m *Model) getLinkPairColor(node *DisplayNode) lipgloss.TerminalColor {
-	// Define a palette of colors for linked pairs
-	colors := []lipgloss.TerminalColor{
-		theme.DefaultTheme.Colors.Cyan,
-		theme.DefaultTheme.Colors.Pink,
-		theme.DefaultTheme.Colors.Yellow,
-		theme.DefaultTheme.Colors.Green,
-		theme.DefaultTheme.Colors.Blue,
-		theme.DefaultTheme.Colors.Violet,
-	}
-
-	// Get the plan name to use as the key for color assignment
-	var planName string
-	if node.IsNote && node.LinkedNode != nil {
-		planName = node.LinkedNode.GroupName
-	} else if node.IsPlan() && node.LinkedNode != nil {
-		planName = node.GroupName
-	} else {
-		return colors[0] // Default fallback
-	}
-
-	// Simple hash function to map plan name to color index
-	hash := 0
-	for _, ch := range planName {
-		hash += int(ch)
-	}
-
-	return colors[hash%len(colors)]
-}
-
 // styleNodeContent applies styling to the main content (name/title) of a node.
 func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
-	// Build base content
+	// Build base content string
 	content := info.indicator
 	if info.indicator != "" && !strings.HasSuffix(info.indicator, " ") {
 		content += " "
 	}
 
-	// Get search match indices before building content
+	// Get search match indices before applying styles to the name
 	matchStart, matchEnd := m.getSearchHighlightIndices(info.name)
 	hasMatch := matchStart != -1
 
-	// Determine the base style for the node type
-	var baseStyle lipgloss.Style
-	hasStyle := false
+	// --- Hierarchical Styling ---
+	// 1. Start with a base style
+	style := lipgloss.NewStyle()
 
-	// Check for linked nodes first (applies to both notes and plans)
-	if info.suffix != "" && info.linkColor != nil {
-		baseStyle = lipgloss.NewStyle().Foreground(info.linkColor)
-		hasStyle = true
+	// 2. Apply type-specific base styling
+	if info.isWorkspace {
+		ws := info.workspace
+		style = style.Bold(true)
+		if ws.Name == "global" {
+			style = style.Foreground(theme.DefaultTheme.Colors.Green)
+		} else if ws.IsEcosystem() {
+			style = style.Foreground(theme.DefaultTheme.Colors.Cyan)
+		} else {
+			style = style.Foreground(theme.DefaultTheme.Colors.Violet)
+		}
+	} else if info.isPlan {
+		// Individual plans are blue
+		style = style.Foreground(theme.DefaultTheme.Colors.Blue)
+	} else if info.isGroup && info.name == "plans" {
+		// Plans heading is bold blue
+		style = style.Bold(true).Foreground(theme.DefaultTheme.Colors.Blue)
 	}
 
-	if isSelected {
-		if hasStyle {
-			baseStyle = baseStyle.Copy().Underline(true)
-		} else {
-			baseStyle = lipgloss.NewStyle().Underline(true)
-			hasStyle = true
-		}
-	} else if info.note != nil {
+	// 3. Apply special group colors
+	if info.isGroup && info.name == "in_progress" {
+		// In progress heading is bold yellow
+		style = style.Bold(true).Foreground(theme.DefaultTheme.Colors.Yellow)
+	} else if info.note != nil && info.note.Group == "in_progress" {
+		// Notes in the in_progress group should also be yellow
+		style = style.Foreground(theme.DefaultTheme.Colors.Yellow)
+	} else if info.isGroup && info.name == "completed" {
+		style = style.Foreground(theme.DefaultTheme.Colors.Green)
+	} else if info.note != nil && info.note.Group == "completed" {
+		// Notes in the completed group should also be green
+		style = style.Foreground(theme.DefaultTheme.Colors.Green)
+	} else if info.isGroup && info.name == "review" {
+		// Review heading is bold magenta
+		style = style.Bold(true).Foreground(theme.DefaultTheme.Colors.Pink)
+	} else if info.note != nil && info.note.Group == "review" {
+		// Notes in the review group should also be pink (magenta)
+		style = style.Foreground(theme.DefaultTheme.Colors.Pink)
+	}
+
+	// 4. Apply state modifiers
+	if info.note != nil {
 		if _, isCut := m.cutPaths[info.note.Path]; isCut {
-			baseStyle = lipgloss.NewStyle().Faint(true).Strikethrough(true)
-			hasStyle = true
+			style = style.Faint(true).Strikethrough(true)
 		} else if info.isArchived {
-			baseStyle = lipgloss.NewStyle().Faint(true)
-			hasStyle = true
+			style = style.Faint(true)
 		}
 	} else if info.isArchived {
-		baseStyle = lipgloss.NewStyle().Faint(true)
-		hasStyle = true
-	} else if info.isWorkspace {
-		ws := info.workspace
-		if ws.Name == "global" {
-			baseStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Green)
-		} else if ws.IsEcosystem() {
-			baseStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Cyan)
-		} else {
-			baseStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.DefaultTheme.Colors.Violet)
-		}
-		hasStyle = true
-	} else if info.isPlan {
-		baseStyle = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Yellow)
-		hasStyle = true
+		style = style.Faint(true)
 	}
 
+	// 5. Apply selection modifier (final visual state)
+	if isSelected {
+		style = style.Underline(true)
+	}
+
+	// --- Render Content ---
 	// Prepare suffix styling
 	suffix := theme.DefaultTheme.Muted.Render(info.suffix)
 
-	// If there's a search match, build the string with highlighted portion
+	var styledName string
 	if hasMatch {
 		pre := info.name[:matchStart]
 		match := info.name[matchStart:matchEnd]
 		post := info.name[matchEnd:]
-
 		highlightStyle := theme.DefaultTheme.Highlight.Copy().Reverse(true)
-
-		// Render each part separately and concatenate
-		if hasStyle {
-			return content + baseStyle.Render(pre) + highlightStyle.Render(match) + baseStyle.Render(post) + suffix
-		}
-		return content + pre + highlightStyle.Render(match) + post + suffix
+		styledName = style.Render(pre) + highlightStyle.Render(match) + style.Render(post)
+	} else {
+		styledName = style.Render(info.name)
 	}
 
-	// No search match - render normally
-	content += info.name
-	if hasStyle {
-		return baseStyle.Render(content) + suffix
-	}
-	return content + suffix
+	return content + styledName + suffix
 }
 
 // getSearchHighlightIndices returns the start and end indices of the search match, or -1, -1 if no match

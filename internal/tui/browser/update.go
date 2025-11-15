@@ -446,7 +446,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastKey = "" // Reset after zA sequence
 			}
 			m.views, cmd = m.views.Update(msg)
-			// After any view update that could change the cursor, update the preview.
+			// After any view update that could change the cursor, reapply links and update the preview.
+			m.findAndApplyLinks()
 			return m, tea.Batch(cmd, m.updatePreviewContent())
 		}
 
