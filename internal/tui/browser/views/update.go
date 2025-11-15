@@ -1058,7 +1058,7 @@ func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 	// Check if .hold parent is collapsed (unless searching)
 	holdParentNodeID := holdParentNode.NodeID()
 	if !m.collapsedNodes[holdParentNodeID] || hasSearchFilter {
-		// Sort plan names
+		// Sort hold plan names
 		var planNames []string
 		for planName := range holdPlanGroups {
 			planNames = append(planNames, planName)
@@ -1089,7 +1089,7 @@ func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 				planPrefix.WriteString("├─ ")
 			}
 
-			// Add plan node with full path for consistency
+			// Add hold plan node
 			planNode := &DisplayNode{
 				IsGroup:       true,
 				GroupName:     "plans/" + planName, // Keep full path for consistency
@@ -1103,7 +1103,7 @@ func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 			// Check if this plan is collapsed (unless searching)
 			planNodeID := planNode.NodeID()
 			if !m.collapsedNodes[planNodeID] || hasSearchFilter {
-				// Add notes in this plan
+				// Add notes in this hold plan
 				for ni, note := range planNotes {
 					isLastNote := ni == len(planNotes)-1
 					var notePrefix strings.Builder
