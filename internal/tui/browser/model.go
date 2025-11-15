@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
@@ -37,6 +38,8 @@ type Model struct {
 	lastKey     string // For detecting 'gg' and 'z' sequences
 	showArchives bool  // Whether to show .archive directories
 	hideGlobal   bool  // Whether to hide the global workspace node
+	spinner      spinner.Model
+	loadingCount int
 
 	// Focus mode state
 	ecosystemPickerMode bool
@@ -111,6 +114,10 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	ti.CharLimit = 100
 
 	confirmDialog := confirm.New()
+
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange)
 
 	// Note creation setup
 	noteTitleInput := textinput.New()
@@ -199,6 +206,8 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		keys:              keys,
 		help:              helpModel,
 		filterInput:       ti,
+		spinner:           s,
+		loadingCount:      2, // For initial workspaces + notes load
 		showArchives:      false, // Default to hiding archives
 		focusedWorkspace:  initialFocus,
 		focusChanged:      initialFocus != nil, // Trigger initial collapse state setup
@@ -230,6 +239,7 @@ func (m Model) Init() tea.Cmd {
 		fetchWorkspacesCmd(m.service.GetWorkspaceProvider()),
 		notesCmd,
 		m.updatePreviewContent(),
+		m.spinner.Tick,
 	)
 }
 

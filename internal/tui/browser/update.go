@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -56,6 +57,10 @@ func loadFileContentCmd(path string) tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	case confirm.ConfirmedMsg:
 		// User confirmed the action in the dialog
 		// We need to know which action was confirmed. A simple way is to check the prompt.
@@ -174,11 +179,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case workspacesLoadedMsg:
+		if m.loadingCount > 0 {
+			m.loadingCount--
+		}
 		m.workspaces = msg.workspaces
 		m.updateViewsState()
 		return m, nil
 
 	case notesLoadedMsg:
+		if m.loadingCount > 0 {
+			m.loadingCount--
+		}
 		m.allNotes = msg.notes
 		// Only reset collapse state if focus just changed
 		if m.focusChanged {
@@ -227,10 +238,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.statusMessage = fmt.Sprintf("Pasted %d note(s) successfully", msg.pastedCount)
 		// Refresh notes to show the new locations
+		m.loadingCount++
 		if m.focusedWorkspace != nil {
-			return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
 		}
-		return m, fetchAllNotesCmd(m.service)
+		return m, tea.Batch(fetchAllNotesCmd(m.service), m.spinner.Tick)
 
 	case notesArchivedMsg:
 		if msg.err != nil {
@@ -266,10 +278,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Refresh notes to show the updated archive structure
+		m.loadingCount++
 		if m.focusedWorkspace != nil {
-			return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
 		}
-		return m, fetchAllNotesCmd(m.service)
+		return m, tea.Batch(fetchAllNotesCmd(m.service), m.spinner.Tick)
 
 	case noteCreatedMsg:
 		m.isCreatingNote = false
@@ -281,10 +294,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.statusMessage = fmt.Sprintf("Created note: %s", msg.note.Title)
 		// Refresh notes to show the new one
+		m.loadingCount++
 		if m.focusedWorkspace != nil {
-			return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
 		}
-		return m, fetchAllNotesCmd(m.service)
+		return m, tea.Batch(fetchAllNotesCmd(m.service), m.spinner.Tick)
 
 	case noteRenamedMsg:
 		m.isRenamingNote = false
@@ -297,10 +311,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.statusMessage = "Note renamed successfully"
 		// Refresh notes to show the updated name
+		m.loadingCount++
 		if m.focusedWorkspace != nil {
-			return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
 		}
-		return m, fetchAllNotesCmd(m.service)
+		return m, tea.Batch(fetchAllNotesCmd(m.service), m.spinner.Tick)
 
 	case tea.KeyMsg:
 		if m.help.ShowAll {
@@ -428,11 +443,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.ClearFocus):
 			if m.focusedWorkspace != nil || m.ecosystemPickerMode {
+				m.loadingCount++
 				m.focusedWorkspace = nil
 				m.ecosystemPickerMode = false
 				m.focusChanged = true
 				// Re-fetch all notes for the global view
-				return m, fetchAllNotesCmd(m.service)
+				return m, tea.Batch(fetchAllNotesCmd(m.service), m.spinner.Tick)
 			}
 		case key.Matches(msg, m.keys.FocusParent):
 			if m.focusedWorkspace != nil {
@@ -466,23 +482,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
+				m.loadingCount++
 				m.focusedWorkspace = parent // This can be nil if no parent is found, effectively clearing focus
 				m.focusChanged = true
 				// Re-fetch notes for the new focus level
 				if m.focusedWorkspace != nil {
-					return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+					return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
 				} else {
-					return m, fetchAllNotesCmd(m.service)
+					return m, tea.Batch(fetchAllNotesCmd(m.service), m.spinner.Tick)
 				}
 			}
 		case key.Matches(msg, m.keys.FocusSelected):
 			node := m.views.GetCurrentNode()
 			if node != nil && node.IsWorkspace {
+				m.loadingCount++
 				m.focusedWorkspace = node.Workspace
 				m.ecosystemPickerMode = false // Focusing on a workspace exits picker mode
 				m.focusChanged = true
 				// Re-fetch notes for the newly focused workspace
-				return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+				return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
 			}
 		case key.Matches(msg, m.keys.ToggleView):
 			m.views.ToggleViewMode()
@@ -634,11 +652,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ecosystemPickerMode {
 				node := m.views.GetCurrentNode()
 				if node != nil && node.IsWorkspace && node.Workspace.IsEcosystem() {
+					m.loadingCount++
 					m.focusedWorkspace = node.Workspace
 					m.ecosystemPickerMode = false
 					m.focusChanged = true
 					// Re-fetch notes for the selected ecosystem
-					return m, fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+					return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
 				}
 			} else {
 				var noteToOpen *models.Note

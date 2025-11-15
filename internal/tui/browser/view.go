@@ -40,8 +40,8 @@ func (m Model) getNoteCreationContext() string {
 }
 
 func (m Model) View() string {
-	if len(m.workspaces) == 0 && len(m.allNotes) == 0 {
-		return "Loading..."
+	if m.loadingCount > 0 && len(m.workspaces) == 0 {
+		return "\n" + lipgloss.NewStyle().PaddingLeft(2).Render(m.spinner.View()+" Loading notebook...")
 	}
 
 	if m.help.ShowAll {
@@ -194,7 +194,9 @@ func (m Model) View() string {
 
 	// Build status bar
 	var status string
-	if m.statusMessage != "" {
+	if m.loadingCount > 0 {
+		status = m.spinner.View() + " Loading..."
+	} else if m.statusMessage != "" {
 		status = m.statusMessage
 	} else {
 		// Get note count and selection info from views
