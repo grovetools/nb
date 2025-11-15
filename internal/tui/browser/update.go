@@ -79,7 +79,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fileContentReadyMsg:
 		if msg.err != nil {
 			m.previewContent = fmt.Sprintf("Error loading file:\n%v", msg.err)
-			m.statusMessage = fmt.Sprintf("Error loading %s", filepath.Base(msg.path))
+			if m.previewVisible {
+				m.statusMessage = fmt.Sprintf("Error loading %s", filepath.Base(msg.path))
+			}
 		} else {
 			// Check for a linked item to enhance the preview
 			var infoBox string
@@ -99,7 +101,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				infoBox = style.Render(fmt.Sprintf("%s\n%s", title, body)) + "\n\n"
 			}
 			m.previewContent = infoBox + msg.content
-			m.statusMessage = fmt.Sprintf("Previewing %s", filepath.Base(msg.path))
+			if m.previewVisible {
+				m.statusMessage = fmt.Sprintf("Previewing %s", filepath.Base(msg.path))
+			}
 		}
 		m.previewFile = msg.path
 		m.preview.SetContent(m.previewContent)
@@ -199,6 +203,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateViewsState()
 		m.findAndApplyLinks() // Detect and apply links between visible nodes
 		return m, m.updatePreviewContent()
+
+	case refreshMsg:
+		m.loadingCount = 2 // for workspaces and notes
+
+		var notesCmd tea.Cmd
+		if m.focusedWorkspace != nil {
+			notesCmd = fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+		} else {
+			notesCmd = fetchAllNotesCmd(m.service)
+		}
+
+		return m, tea.Batch(
+			fetchWorkspacesCmd(m.service.GetWorkspaceProvider()),
+			notesCmd,
+			m.spinner.Tick,
+		)
 
 	case notesDeletedMsg:
 		if msg.err != nil {
@@ -510,6 +530,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterInput.Placeholder = "Search notes..."
 			m.filterInput.Focus()
 			return m, textinput.Blink
+		case key.Matches(msg, m.keys.Refresh):
+			return m, func() tea.Msg { return refreshMsg{} }
 		case key.Matches(msg, m.keys.Grep):
 			m.isGrepping = true
 			m.filterInput.SetValue("")

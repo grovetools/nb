@@ -99,6 +99,9 @@ func (m Model) FileToEdit() string {
 	return m.fileToEdit
 }
 
+// refreshMsg signals that a full data refresh is required.
+type refreshMsg struct{}
+
 // quitPopupMsg signals that the TUI should exit, causing the tmux popup to close.
 type quitPopupMsg struct{}
 
@@ -252,7 +255,9 @@ func (m *Model) updatePreviewContent() tea.Cmd {
 			return nil
 		}
 		// Otherwise, load the new file.
-		m.statusMessage = fmt.Sprintf("Loading %s...", filepath.Base(node.Note.Path))
+		if m.previewVisible {
+			m.statusMessage = fmt.Sprintf("Loading %s...", filepath.Base(node.Note.Path))
+		}
 		return loadFileContentCmd(node.Note.Path)
 	}
 

@@ -32,6 +32,7 @@ type KeyMap struct {
 	TogglePreview  key.Binding
 	Grep           key.Binding
 	ToggleColumns  key.Binding
+	Refresh        key.Binding
 	Cut              key.Binding
 	Copy             key.Binding
 	Paste            key.Binding
@@ -59,6 +60,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.Grep,
 		k.Sort,
 		k.JumpToWorkspace,
+		k.Refresh,
 	}, []key.Binding{
 		k.PageUp,
 		k.PageDown,
@@ -186,6 +188,10 @@ var keys = KeyMap{
 	ToggleColumns: key.NewBinding(
 		key.WithKeys("V"),
 		key.WithHelp("V", "toggle columns"),
+	),
+	Refresh: key.NewBinding(
+		key.WithKeys("ctrl+r"),
+		key.WithHelp("ctrl+r", "refresh"),
 	),
 	CreateNote: key.NewBinding(
 		key.WithKeys("n"),
