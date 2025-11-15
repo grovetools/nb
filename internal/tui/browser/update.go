@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,9 +25,17 @@ import (
 
 // updateViewsState synchronizes the view state with the browser model
 func (m *Model) updateViewsState() {
+	notesToDisplay := m.allNotes
+	if m.recentNotesMode {
+		// Sort all notes by ModifiedAt in descending order (most recent first)
+		sort.SliceStable(notesToDisplay, func(i, j int) bool {
+			return notesToDisplay[i].ModifiedAt.After(notesToDisplay[j].ModifiedAt)
+		})
+	}
+
 	m.views.SetParentState(
 		m.service,
-		m.allNotes,
+		notesToDisplay,
 		m.workspaces,
 		m.focusedWorkspace,
 		m.filterInput.Value(),
@@ -563,6 +572,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.ToggleView):
 			m.views.ToggleViewMode()
+		case key.Matches(msg, m.keys.FocusRecent):
+			m.recentNotesMode = !m.recentNotesMode
+			if m.recentNotesMode {
+				// Save current view mode and switch to table view
+				m.savedViewMode = m.views.GetViewMode()
+				if m.savedViewMode != views.TableView {
+					m.views.ToggleViewMode()
+				}
+				// Enable MODIFIED column and update views
+				m.columnVisibility["MODIFIED"] = true
+				m.views.SetColumnVisibility(m.columnVisibility)
+				m.statusMessage = "Sorted by last modified"
+			} else {
+				// Restore previous view mode and disable MODIFIED column
+				if m.savedViewMode != views.TableView && m.views.GetViewMode() == views.TableView {
+					m.views.ToggleViewMode()
+				}
+				m.columnVisibility["MODIFIED"] = false
+				m.views.SetColumnVisibility(m.columnVisibility)
+				m.statusMessage = "Default view restored"
+			}
+			m.updateViewsState()
 		case key.Matches(msg, m.keys.Search):
 			m.isGrepping = false
 			// Don't clear tag filter when searching - allow search on top of tag filter

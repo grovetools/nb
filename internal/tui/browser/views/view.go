@@ -100,7 +100,8 @@ func (m *Model) renderTableView() string {
 	statusWidth := colWidths[2]
 	tagsWidth := colWidths[3]
 	createdWidth := colWidths[4]
-	pathWidth := colWidths[5]
+	modifiedWidth := colWidths[5]
+	pathWidth := colWidths[6]
 
 	// Header
 	var headerParts []string
@@ -117,6 +118,9 @@ func (m *Model) renderTableView() string {
 	}
 	if m.columnVisibility["CREATED"] {
 		headerParts = append(headerParts, separator, padOrTruncate("CREATED", createdWidth))
+	}
+	if m.columnVisibility["MODIFIED"] {
+		headerParts = append(headerParts, separator, padOrTruncate("MODIFIED", modifiedWidth))
 	}
 	if m.columnVisibility["PATH"] {
 		headerParts = append(headerParts, separator, padOrTruncate("PATH", pathWidth))
@@ -147,12 +151,13 @@ func (m *Model) renderTableView() string {
 			selCol = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange).Render("▶")
 		}
 
-		var typeCol, statusCol, tagsCol, createdCol, pathCol string
+		var typeCol, statusCol, tagsCol, createdCol, modifiedCol, pathCol string
 		if node.IsNote {
 			typeCol = string(node.Note.Type)
 			statusCol = getNoteStatus(node.Note)
 			tagsCol = strings.Join(node.Note.Tags, ", ")
 			createdCol = node.Note.CreatedAt.Format("2006-01-02 15:04")
+			modifiedCol = node.Note.ModifiedAt.Format("2006-01-02 15:04")
 			pathCol = node.RelativePath
 		} else if info.isPlan {
 			statusCol = m.GetPlanStatus(node.WorkspaceName, node.GroupName)
@@ -184,6 +189,9 @@ func (m *Model) renderTableView() string {
 		}
 		if m.columnVisibility["CREATED"] {
 			rowParts = append(rowParts, separator, padOrTruncate(createdCol, createdWidth))
+		}
+		if m.columnVisibility["MODIFIED"] {
+			rowParts = append(rowParts, separator, padOrTruncate(modifiedCol, modifiedWidth))
 		}
 		if m.columnVisibility["PATH"] {
 			rowParts = append(rowParts, separator, theme.DefaultTheme.Muted.Render(padOrTruncate(pathCol, pathWidth)))
@@ -385,7 +393,7 @@ func (m *Model) getSearchHighlightIndices(text string) (int, int) {
 }
 
 // calculateTableColumnWidths calculates optimal column widths based on content
-func (m *Model) calculateTableColumnWidths() [6]int {
+func (m *Model) calculateTableColumnWidths() [7]int {
 	// Min and max constraints for each column
 	const minNameWidth = 30
 	const maxNameWidth = 60
@@ -397,6 +405,8 @@ func (m *Model) calculateTableColumnWidths() [6]int {
 	const maxTagsWidth = 50
 	const minCreatedWidth = 17
 	const maxCreatedWidth = 17 // Fixed width for dates
+	const minModifiedWidth = 17
+	const maxModifiedWidth = 17 // Fixed width for dates
 	const minPathWidth = 20
 	const maxPathWidth = 120
 
@@ -406,6 +416,7 @@ func (m *Model) calculateTableColumnWidths() [6]int {
 	maxStatus := len("STATUS")
 	maxTags := len("TAGS")
 	maxCreated := len("CREATED")
+	maxModified := len("MODIFIED")
 	maxPath := len("PATH")
 
 	// Scan through all display nodes to find max widths
@@ -484,6 +495,12 @@ func (m *Model) calculateTableColumnWidths() [6]int {
 	if maxCreated > maxCreatedWidth {
 		maxCreated = maxCreatedWidth
 	}
+	if maxModified < minModifiedWidth {
+		maxModified = minModifiedWidth
+	}
+	if maxModified > maxModifiedWidth {
+		maxModified = maxModifiedWidth
+	}
 	if maxPath < minPathWidth {
 		maxPath = minPathWidth
 	}
@@ -504,11 +521,14 @@ func (m *Model) calculateTableColumnWidths() [6]int {
 	if !m.columnVisibility["CREATED"] {
 		maxCreated = 0
 	}
+	if !m.columnVisibility["MODIFIED"] {
+		maxModified = 0
+	}
 	if !m.columnVisibility["PATH"] {
 		maxPath = 0
 	}
 
-	return [6]int{maxName, maxType, maxStatus, maxTags, maxCreated, maxPath}
+	return [7]int{maxName, maxType, maxStatus, maxTags, maxCreated, maxModified, maxPath}
 }
 
 // getNoteStatus determines the status of a note (e.g., pending if it has todos)

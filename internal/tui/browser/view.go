@@ -211,6 +211,9 @@ func (m Model) View() string {
 	if m.focusedWorkspace != nil {
 		headerParts = append(headerParts, " > ", m.focusedWorkspace.Name)
 	}
+	if m.recentNotesMode {
+		headerParts = append(headerParts, " [Recent]")
+	}
 
 	// Add tag indicator inline with special styling
 	if m.isFilteringByTag {

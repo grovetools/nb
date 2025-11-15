@@ -159,6 +159,11 @@ func (m *Model) ToggleSortOrder() {
 	m.BuildDisplayTree()
 }
 
+// SetColumnVisibility updates the column visibility settings.
+func (m *Model) SetColumnVisibility(visibility map[string]bool) {
+	m.columnVisibility = visibility
+}
+
 // GetCurrentNode returns the node currently under the cursor.
 func (m *Model) GetCurrentNode() *DisplayNode {
 	if m.cursor >= 0 && m.cursor < len(m.displayNodes) {

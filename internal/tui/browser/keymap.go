@@ -43,6 +43,7 @@ type KeyMap struct {
 	CreateNoteGlobal key.Binding
 	Rename           key.Binding
 	CreatePlan       key.Binding
+	FocusRecent      key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -61,6 +62,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.FilterByTag,
 		k.Grep,
 		k.Sort,
+		k.FocusRecent,
 		k.JumpToWorkspace,
 		k.Refresh,
 	}, []key.Binding{
@@ -234,5 +236,9 @@ var keys = KeyMap{
 	Paste: key.NewBinding(
 		key.WithKeys("p"),
 		key.WithHelp("p", "paste from clipboard"),
+	),
+	FocusRecent: key.NewBinding(
+		key.WithKeys("f"),
+		key.WithHelp("f", "focus recent"),
 	),
 }

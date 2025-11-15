@@ -42,6 +42,8 @@ type Model struct {
 	hideGlobal   bool  // Whether to hide the global workspace node
 	spinner      spinner.Model
 	loadingCount int
+	recentNotesMode bool  // Whether to show only recent notes
+	savedViewMode views.ViewMode // View mode to restore when exiting recent notes mode
 
 	// Focus mode state
 	ecosystemPickerMode bool
@@ -168,7 +170,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	renameInput.Width = 60
 
 	// Column Visibility Setup - load from state
-	availableColumns := []string{"TYPE", "STATUS", "TAGS", "CREATED", "PATH"}
+	availableColumns := []string{"TYPE", "STATUS", "TAGS", "CREATED", "MODIFIED", "PATH"}
 
 	// Load saved state
 	state, err := loadState()
@@ -176,11 +178,12 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		// On error, use defaults
 		state = &tuiState{
 			ColumnVisibility: map[string]bool{
-				"TYPE":    true,
-				"STATUS":  true,
-				"TAGS":    true,
-				"CREATED": true,
-				"PATH":    true,
+				"TYPE":     true,
+				"STATUS":   true,
+				"TAGS":     true,
+				"CREATED":  true,
+				"MODIFIED": false,
+				"PATH":     true,
 			},
 		}
 	}
@@ -253,6 +256,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		preview:           preview,
 		previewFocused:    false,
 		previewVisible:    false, // Preview hidden by default
+		recentNotesMode:   false,
 	}
 }
 
