@@ -152,6 +152,11 @@ func (m *Model) adjustScroll() {
 
 // BuildDisplayTree constructs the hierarchical list of nodes for rendering.
 func (m *Model) BuildDisplayTree() {
+	if m.isFilteringByTag && m.selectedTag != "" {
+		m.buildTagFilteredTree()
+		return
+	}
+
 	var nodes []*DisplayNode
 	var workspacesToShow []*workspace.WorkspaceNode
 
@@ -517,6 +522,113 @@ func (m *Model) BuildDisplayTree() {
 	// 4. Add "ungrouped" section if there are standalone workspaces
 	if showUngroupedSection {
 		m.addUngroupedSection(&nodes, ungroupedWorkspaces, notesByWorkspace, hasSearchFilter, workspacePathMap)
+	}
+
+	m.displayNodes = nodes
+	m.clampCursor()
+}
+
+// buildTagFilteredTree constructs a simplified tree with notes hoisted under their workspace, filtered by a tag.
+func (m *Model) buildTagFilteredTree() {
+	// 1. Filter notes by tag
+	tagFilter := strings.ToLower(m.selectedTag)
+	var filteredNotes []*models.Note
+	for _, note := range m.allNotes {
+		// Skip archived notes unless showArchives is true
+		if !m.showArchives && strings.Contains(note.Path, string(filepath.Separator)+".archive"+string(filepath.Separator)) {
+			continue
+		}
+
+		for _, tag := range note.Tags {
+			if strings.EqualFold(tag, tagFilter) {
+				filteredNotes = append(filteredNotes, note)
+				break
+			}
+		}
+	}
+
+	// 2. Group notes by workspace
+	notesByWorkspace := make(map[string][]*models.Note)
+	for _, note := range filteredNotes {
+		notesByWorkspace[note.Workspace] = append(notesByWorkspace[note.Workspace], note)
+	}
+
+	// 3. Determine workspaces to show (replicating logic from BuildDisplayTree)
+	var workspacesToShow []*workspace.WorkspaceNode
+	if m.focusedWorkspace != nil {
+		workspacesToShow = append(workspacesToShow, m.focusedWorkspace)
+		// Add children of the focused workspace
+		normFocused, _ := pathutil.NormalizeForLookup(m.focusedWorkspace.Path)
+		for _, ws := range m.workspaces {
+			isSame, _ := pathutil.ComparePaths(ws.Path, m.focusedWorkspace.Path)
+			if isSame {
+				continue
+			}
+			normWs, _ := pathutil.NormalizeForLookup(ws.Path)
+			if strings.HasPrefix(normWs, normFocused+string(filepath.Separator)) {
+				workspacesToShow = append(workspacesToShow, ws)
+			}
+		}
+	} else {
+		// Global view, show all top-level workspaces
+		for _, ws := range m.workspaces {
+			if ws.Depth == 0 {
+				workspacesToShow = append(workspacesToShow, ws)
+			}
+		}
+	}
+
+	// 4. Build the display nodes
+	var nodes []*DisplayNode
+	workspacePathMap := make(map[string]string)
+	for _, ws := range m.workspaces {
+		workspacePathMap[ws.Name] = ws.Path
+	}
+
+	for _, ws := range workspacesToShow {
+		if notesInWs, ok := notesByWorkspace[ws.Name]; ok {
+			// Add workspace node
+			wsNode := &DisplayNode{
+				IsWorkspace: true,
+				Workspace:   ws,
+				Prefix:      ws.TreePrefix,
+				Depth:       ws.Depth,
+			}
+			nodes = append(nodes, wsNode)
+
+			// Sort notes within the workspace
+			sort.SliceStable(notesInWs, func(i, j int) bool {
+				if m.sortAscending {
+					return notesInWs[i].CreatedAt.Before(notesInWs[j].CreatedAt)
+				}
+				return notesInWs[i].CreatedAt.After(notesInWs[j].CreatedAt)
+			})
+
+			// Add note nodes directly under the workspace
+			for i, note := range notesInWs {
+				isLastNote := i == len(notesInWs)-1
+				var notePrefix strings.Builder
+				indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
+				indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+				notePrefix.WriteString(indentPrefix)
+				if ws.Depth > 0 || ws.TreePrefix != "" {
+					notePrefix.WriteString("  ")
+				}
+				if isLastNote {
+					notePrefix.WriteString("└─ ")
+				} else {
+					notePrefix.WriteString("├─ ")
+				}
+
+				nodes = append(nodes, &DisplayNode{
+					IsNote:       true,
+					Note:         note,
+					Prefix:       notePrefix.String(),
+					Depth:        ws.Depth + 1,
+					RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+				})
+			}
+		}
 	}
 
 	m.displayNodes = nodes

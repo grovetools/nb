@@ -54,6 +54,32 @@ func (m Model) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
 	}
 
+	// Render tag picker if active
+	if m.tagPickerMode {
+		content := m.tagPicker.View()
+
+		dialogBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(theme.DefaultTheme.Colors.Cyan).
+			Padding(1, 2).
+			Render(content)
+
+		helpText := lipgloss.NewStyle().
+			Faint(true).
+			Width(lipgloss.Width(dialogBox)).
+			Align(lipgloss.Center).
+			Render("\n\nPress / to search • Enter to select • Esc to cancel")
+
+		overlay := lipgloss.JoinVertical(lipgloss.Left, dialogBox, helpText)
+
+		// Add padding from top and left
+		paddedOverlay := lipgloss.NewStyle().
+			Padding(2, 0, 0, 4).
+			Render(overlay)
+
+		return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, paddedOverlay)
+	}
+
 	// Render note creation UI if active
 	if m.isCreatingNote {
 		// Get context information
@@ -82,7 +108,13 @@ func (m Model) View() string {
 			Render("\n\nPress Enter to confirm • Esc to cancel")
 
 		overlay := lipgloss.JoinVertical(lipgloss.Left, dialogBox, helpText)
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+
+		// Add padding from top and left
+		paddedOverlay := lipgloss.NewStyle().
+			Padding(2, 0, 0, 4).
+			Render(overlay)
+
+		return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, paddedOverlay)
 	}
 
 	// Render note rename UI if active
@@ -174,20 +206,34 @@ func (m Model) View() string {
 		}
 	}
 
-	// Build header string without styling first
-	headerText := notebookTitle
+	// Build header string with inline styling for tag indicator
+	headerParts := []string{notebookTitle}
 	if m.focusedWorkspace != nil {
-		headerText += " > " + m.focusedWorkspace.Name
-	}
-	if m.isGrepping {
-		headerText += " [Grep Mode]"
-	} else if m.filterInput.Focused() && !m.isGrepping {
-		headerText += " [Find Mode]"
-	} else if m.ecosystemPickerMode {
-		headerText += " [Select Ecosystem]"
+		headerParts = append(headerParts, " > ", m.focusedWorkspace.Name)
 	}
 
-	// Apply styling to complete header
+	// Add tag indicator inline with special styling
+	if m.isFilteringByTag {
+		tagStyled := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(theme.DefaultTheme.Colors.Orange).
+			Render(fmt.Sprintf(" [Tag: %s]", m.selectedTag))
+		headerParts = append(headerParts, tagStyled)
+	}
+
+	// Add mode indicators
+	if m.isGrepping {
+		headerParts = append(headerParts, " [Grep Mode]")
+	} else if m.filterInput.Focused() && !m.isGrepping && !m.isFilteringByTag {
+		headerParts = append(headerParts, " [Find Mode]")
+	} else if m.filterInput.Focused() && m.isFilteringByTag {
+		headerParts = append(headerParts, " [Search]")
+	} else if m.ecosystemPickerMode {
+		headerParts = append(headerParts, " [Select Ecosystem]")
+	}
+
+	// Join all parts and apply theme styling
+	headerText := lipgloss.JoinHorizontal(lipgloss.Left, headerParts...)
 	header := theme.DefaultTheme.Header.Render(headerText)
 
 	footer := m.help.View()

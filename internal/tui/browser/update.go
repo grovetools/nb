@@ -31,14 +31,21 @@ func (m *Model) updateViewsState() {
 		m.focusedWorkspace,
 		m.filterInput.Value(),
 		m.isGrepping,
+		m.isFilteringByTag,
+		m.selectedTag,
 		m.ecosystemPickerMode,
 		m.hideGlobal,
 		m.showArchives,
 	)
 	m.views.BuildDisplayTree()
 
-	// Apply text filter if present (not grep mode)
-	if m.filterInput.Value() != "" && !m.isGrepping {
+	// Apply text filter if present (not grep mode and not tag filter mode)
+	if m.filterInput.Value() != "" && !m.isGrepping && !m.isFilteringByTag {
+		m.views.FilterDisplayTree()
+	}
+
+	// Apply text filter on top of tag filter if both are active
+	if m.filterInput.Value() != "" && m.isFilteringByTag {
 		m.views.FilterDisplayTree()
 	}
 }
@@ -378,6 +385,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateNoteRename(msg)
 		}
 
+		// Handle tag picker mode
+		if m.tagPickerMode {
+			switch msg.String() {
+			case "esc":
+				m.tagPickerMode = false
+				return m, nil
+			case "enter":
+				// Apply the selected tag filter
+				if selectedItem, ok := m.tagPicker.SelectedItem().(tagItem); ok {
+					m.tagPickerMode = false
+					m.isFilteringByTag = true
+					m.selectedTag = selectedItem.tag
+					m.filterInput.SetValue("") // Clear filter input for additional search
+					// Expand everything when tag filter is active
+					m.views.SetCollapseState(make(map[string]bool))
+					m.updateViewsState()
+				}
+				return m, nil
+			default:
+				m.tagPicker, cmd = m.tagPicker.Update(msg)
+				return m, cmd
+			}
+		}
+
 		// Handle column selection mode
 		if m.columnSelectMode {
 			switch msg.String() {
@@ -406,7 +437,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, m.keys.Back): // Esc
 				m.filterInput.SetValue("")
 				m.filterInput.Blur()
+				// If we're in tag filter mode, only clear the search, not the tag filter
+				if m.isFilteringByTag {
+					m.updateViewsState()
+					return m, nil
+				}
 				m.isGrepping = false // Exit grep mode
+				m.isFilteringByTag = false // Exit tag filter mode
+				m.selectedTag = ""
 				m.updateViewsState()
 				return m, nil
 			case key.Matches(msg, m.keys.Confirm): // Enter
@@ -527,14 +565,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.views.ToggleViewMode()
 		case key.Matches(msg, m.keys.Search):
 			m.isGrepping = false
+			// Don't clear tag filter when searching - allow search on top of tag filter
+			if !m.isFilteringByTag {
+				m.selectedTag = ""
+			}
 			m.filterInput.SetValue("")
-			m.filterInput.Placeholder = "Search notes..."
+			if m.isFilteringByTag {
+				m.filterInput.Placeholder = fmt.Sprintf("Search in tag '%s'...", m.selectedTag)
+			} else {
+				m.filterInput.Placeholder = "Search notes..."
+			}
 			m.filterInput.Focus()
 			return m, textinput.Blink
-		case key.Matches(msg, m.keys.Refresh):
-			return m, func() tea.Msg { return refreshMsg{} }
+	case key.Matches(msg, m.keys.Refresh):
+		return m, func() tea.Msg { return refreshMsg{} }
+		case key.Matches(msg, m.keys.FilterByTag):
+			m.isGrepping = false
+			// Always show the tag picker - allows switching between tags
+			m.tagPickerMode = true
+			m.populateTagPicker()
+			return m, nil
 		case key.Matches(msg, m.keys.Grep):
 			m.isGrepping = true
+			m.isFilteringByTag = false
 			m.filterInput.SetValue("")
 			m.filterInput.Placeholder = "Grep content..."
 			m.filterInput.Focus()
@@ -726,6 +779,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ecosystemPickerMode {
 				m.ecosystemPickerMode = false
 				m.updateViewsState()
+				return m, nil
+			}
+			// If in tag filter mode, clear it
+			if m.isFilteringByTag {
+				m.isFilteringByTag = false
+				m.selectedTag = ""
+				m.filterInput.SetValue("")
+				m.updateViewsState()
+				m.statusMessage = "Tag filter cleared"
 				return m, nil
 			}
 			// If in cut mode, escape cancels the cut operation

@@ -93,6 +93,8 @@ type Model struct {
 	showArchives        bool
 	filterValue         string
 	isGrepping          bool
+	isFilteringByTag    bool
+	selectedTag         string
 }
 
 // New creates a new view model.
@@ -124,6 +126,8 @@ func (m *Model) SetParentState(
 	focused *workspace.WorkspaceNode,
 	filterValue string,
 	isGrepping bool,
+	isFilteringByTag bool,
+	selectedTag string,
 	ecoPickerMode, hideGlobal, showArchives bool,
 ) {
 	m.service = service
@@ -132,6 +136,8 @@ func (m *Model) SetParentState(
 	m.focusedWorkspace = focused
 	m.filterValue = filterValue
 	m.isGrepping = isGrepping
+	m.isFilteringByTag = isFilteringByTag
+	m.selectedTag = selectedTag
 	m.ecosystemPickerMode = ecoPickerMode
 	m.hideGlobal = hideGlobal
 	m.showArchives = showArchives

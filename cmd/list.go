@@ -20,6 +20,7 @@ func NewListCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 		listJSON          bool
 		listAllWorkspaces bool
 		listAllBranches   bool
+		listTag           string
 	)
 
 	cmd := &cobra.Command{
@@ -52,6 +53,20 @@ Examples:
 					return err
 				}
 
+				// Filter by tag if provided
+				if listTag != "" {
+					var filteredNotes []*models.Note
+					for _, note := range repoNotes {
+						for _, tag := range note.Tags {
+							if tag == listTag {
+								filteredNotes = append(filteredNotes, note)
+								break
+							}
+						}
+					}
+					repoNotes = filteredNotes
+				}
+
 				if len(repoNotes) == 0 {
 					if !listJSON {
 						fmt.Printf("No notes found in any branch of the '%s' repository\n", ctx.NotebookContextWorkspace.Name)
@@ -74,6 +89,20 @@ Examples:
 				allNotes, err := s.ListNotesFromAllWorkspaces(false)
 				if err != nil {
 					return err
+				}
+
+				// Filter by tag if provided
+				if listTag != "" {
+					var filteredNotes []*models.Note
+					for _, note := range allNotes {
+						for _, tag := range note.Tags {
+							if tag == listTag {
+								filteredNotes = append(filteredNotes, note)
+								break
+							}
+						}
+					}
+					allNotes = filteredNotes
 				}
 
 				if len(allNotes) == 0 {
@@ -109,6 +138,20 @@ Examples:
 					return err
 				}
 
+				// Filter by tag if provided
+				if listTag != "" {
+					var filteredNotes []*models.Note
+					for _, note := range allNotes {
+						for _, tag := range note.Tags {
+							if tag == listTag {
+								filteredNotes = append(filteredNotes, note)
+								break
+							}
+						}
+					}
+					allNotes = filteredNotes
+				}
+
 				if len(allNotes) == 0 {
 					if !listJSON {
 						fmt.Println("No notes found")
@@ -138,6 +181,20 @@ Examples:
 				return err
 			}
 
+			// Filter by tag if provided
+			if listTag != "" {
+				var filteredNotes []*models.Note
+				for _, note := range notes {
+					for _, tag := range note.Tags {
+						if tag == listTag {
+							filteredNotes = append(filteredNotes, note)
+							break
+						}
+					}
+				}
+				notes = filteredNotes
+			}
+
 			if len(notes) == 0 {
 				if listJSON {
 					fmt.Println("[]")
@@ -164,6 +221,7 @@ Examples:
 	cmd.Flags().BoolVar(&listJSON, "json", false, "Output in JSON format")
 	cmd.Flags().BoolVarP(&listAllWorkspaces, "workspaces", "w", false, "List notes from all workspaces")
 	cmd.Flags().BoolVar(&listAllBranches, "all-branches", false, "List notes from all branches in the current repository")
+	cmd.Flags().StringVar(&listTag, "tag", "", "Filter notes by a specific tag")
 
 	return cmd
 }

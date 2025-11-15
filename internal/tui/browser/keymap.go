@@ -14,6 +14,7 @@ type KeyMap struct {
 	FocusSelected   key.Binding
 	ToggleView      key.Binding
 	Search          key.Binding
+	FilterByTag     key.Binding
 	Sort            key.Binding
 	JumpToWorkspace key.Binding
 	PageUp          key.Binding
@@ -57,6 +58,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.FocusSelected,
 		k.ToggleView,
 		k.Search,
+		k.FilterByTag,
 		k.Grep,
 		k.Sort,
 		k.JumpToWorkspace,
@@ -116,6 +118,10 @@ var keys = KeyMap{
 	Search: key.NewBinding(
 		key.WithKeys("/"),
 		key.WithHelp("/", "search"),
+	),
+	FilterByTag: key.NewBinding(
+		key.WithKeys("&"),
+		key.WithHelp("&", "filter by tag"),
 	),
 	Sort: key.NewBinding(
 		key.WithKeys("s"),

@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -79,6 +81,12 @@ type Model struct {
 	// Grep mode state
 	isGrepping bool // True when in content search mode
 
+	// Tag filter mode state
+	isFilteringByTag bool   // True when in tag filter mode
+	selectedTag      string // The tag being filtered on
+	tagPickerMode    bool   // True when showing tag picker
+	tagPicker        list.Model
+
 	// Tmux split state
 	tmuxSplitPaneID string // ID of the tmux pane created for editing
 	tmuxTUIPaneID   string // ID of the pane running the TUI
@@ -138,7 +146,15 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	for _, t := range configuredTypes {
 		noteTypes = append(noteTypes, noteTypeItem(t))
 	}
-	noteTypePicker := list.New(noteTypes, noteTypeDelegate{}, 40, 12)
+	// Calculate height based on number of types + title + padding (min 10, max 25)
+	pickerHeight := len(noteTypes) + 4
+	if pickerHeight < 10 {
+		pickerHeight = 10
+	}
+	if pickerHeight > 25 {
+		pickerHeight = 25
+	}
+	noteTypePicker := list.New(noteTypes, noteTypeDelegate{}, 40, pickerHeight)
 	noteTypePicker.Title = "Select Note Type"
 	noteTypePicker.SetShowHelp(false)
 	noteTypePicker.SetShowStatusBar(false)
@@ -182,6 +198,15 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	columnList.SetShowStatusBar(false)
 	columnList.SetShowPagination(false)
 
+	// Initialize tag picker (will be populated when opened)
+	// Start with a reasonable default height, will be adjusted in populateTagPicker
+	tagPicker := list.New([]list.Item{}, tagDelegate{}, 40, 20)
+	tagPicker.Title = "Select Tag"
+	tagPicker.SetShowHelp(false)
+	tagPicker.SetFilteringEnabled(true)
+	tagPicker.SetShowStatusBar(true) // Need status bar for filter to work
+	tagPicker.SetShowPagination(false)
+
 	// Initialize views with KeyMap converted to views.KeyMap
 	viewsKeys := views.KeyMap{
 		Up:           keys.Up,
@@ -223,11 +248,64 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		availableColumns:  availableColumns,
 		confirmDialog:     confirmDialog,
 		clipboard:         []string{},
+		tagPicker:         tagPicker,
 		views:             viewsModel,
 		preview:           preview,
 		previewFocused:    false,
 		previewVisible:    false, // Preview hidden by default
 	}
+}
+
+// populateTagPicker collects all unique tags with counts and populates the tag picker, sorted by count descending
+func (m *Model) populateTagPicker() {
+	tagCounts := make(map[string]int)
+
+	// Count occurrences of each tag
+	for _, note := range m.allNotes {
+		// Skip archived notes unless showArchives is true
+		if !m.showArchives && filepath.Dir(note.Path) != "" {
+			if strings.Contains(note.Path, string(filepath.Separator)+".archive"+string(filepath.Separator)) {
+				continue
+			}
+		}
+
+		for _, tag := range note.Tags {
+			tagCounts[tag]++
+		}
+	}
+
+	// Convert to tagItem slice
+	type tagCount struct {
+		tag   string
+		count int
+	}
+	var tags []tagCount
+	for tag, count := range tagCounts {
+		tags = append(tags, tagCount{tag: tag, count: count})
+	}
+
+	// Sort by count descending
+	sort.Slice(tags, func(i, j int) bool {
+		return tags[i].count > tags[j].count
+	})
+
+	// Convert to list items
+	var items []list.Item
+	for _, tc := range tags {
+		items = append(items, tagItem{tag: tc.tag, count: tc.count})
+	}
+
+	m.tagPicker.SetItems(items)
+
+	// Adjust height based on number of tags (min 10, max 25)
+	pickerHeight := len(items) + 4
+	if pickerHeight < 10 {
+		pickerHeight = 10
+	}
+	if pickerHeight > 25 {
+		pickerHeight = 25
+	}
+	m.tagPicker.SetSize(40, pickerHeight)
 }
 
 // Init initializes the TUI.
@@ -519,6 +597,16 @@ func (i noteTypeItem) FilterValue() string { return string(i) }
 func (i noteTypeItem) Title() string       { return string(i) }
 func (i noteTypeItem) Description() string { return "" }
 
+// tagItem implements the list.Item interface for the tag picker.
+type tagItem struct {
+	tag   string
+	count int
+}
+
+func (i tagItem) FilterValue() string { return i.tag }
+func (i tagItem) Title() string       { return i.tag }
+func (i tagItem) Description() string { return fmt.Sprintf("%d notes", i.count) }
+
 // noteTypeDelegate is a custom delegate with minimal spacing for the note type picker
 type noteTypeDelegate struct{}
 
@@ -532,6 +620,29 @@ func (d noteTypeDelegate) Render(w io.Writer, m list.Model, index int, item list
 	}
 
 	str := string(i)
+	if index == m.Index() {
+		str = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange).Render("│ " + str)
+	} else {
+		str = "  " + str
+	}
+
+	fmt.Fprint(w, str)
+}
+
+// tagDelegate is a custom delegate with minimal spacing for the tag picker
+type tagDelegate struct{}
+
+func (d tagDelegate) Height() int                             { return 1 }
+func (d tagDelegate) Spacing() int                            { return 0 }
+func (d tagDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d tagDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	i, ok := item.(tagItem)
+	if !ok {
+		return
+	}
+
+	// Format with count
+	str := fmt.Sprintf("%s (%d)", i.tag, i.count)
 	if index == m.Index() {
 		str = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange).Render("│ " + str)
 	} else {
