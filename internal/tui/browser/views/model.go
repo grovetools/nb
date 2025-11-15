@@ -95,6 +95,7 @@ type Model struct {
 	isGrepping          bool
 	isFilteringByTag    bool
 	selectedTag         string
+	recentNotesMode     bool
 }
 
 // New creates a new view model.
@@ -128,7 +129,7 @@ func (m *Model) SetParentState(
 	isGrepping bool,
 	isFilteringByTag bool,
 	selectedTag string,
-	ecoPickerMode, hideGlobal, showArchives bool,
+	ecoPickerMode, hideGlobal, showArchives, recentNotesMode bool,
 ) {
 	m.service = service
 	m.allNotes = allNotes
@@ -141,6 +142,7 @@ func (m *Model) SetParentState(
 	m.ecosystemPickerMode = ecoPickerMode
 	m.hideGlobal = hideGlobal
 	m.showArchives = showArchives
+	m.recentNotesMode = recentNotesMode
 }
 
 // ToggleViewMode switches between tree and table views.
@@ -151,6 +153,11 @@ func (m *Model) ToggleViewMode() {
 		m.viewMode = TreeView
 	}
 	m.cursor = 0
+}
+
+// SetViewMode forces a specific view mode.
+func (m *Model) SetViewMode(mode ViewMode) {
+	m.viewMode = mode
 }
 
 // ToggleSortOrder switches between ascending and descending sort.

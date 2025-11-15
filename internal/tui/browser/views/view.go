@@ -101,7 +101,8 @@ func (m *Model) renderTableView() string {
 	tagsWidth := colWidths[3]
 	createdWidth := colWidths[4]
 	modifiedWidth := colWidths[5]
-	pathWidth := colWidths[6]
+	workspaceWidth := colWidths[6]
+	pathWidth := colWidths[7]
 
 	// Header
 	var headerParts []string
@@ -121,6 +122,9 @@ func (m *Model) renderTableView() string {
 	}
 	if m.columnVisibility["MODIFIED"] {
 		headerParts = append(headerParts, separator, padOrTruncate("MODIFIED", modifiedWidth))
+	}
+	if m.columnVisibility["WORKSPACE"] {
+		headerParts = append(headerParts, separator, padOrTruncate("WORKSPACE", workspaceWidth))
 	}
 	if m.columnVisibility["PATH"] {
 		headerParts = append(headerParts, separator, padOrTruncate("PATH", pathWidth))
@@ -151,11 +155,12 @@ func (m *Model) renderTableView() string {
 			selCol = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange).Render("▶")
 		}
 
-		var typeCol, statusCol, tagsCol, createdCol, modifiedCol, pathCol string
+		var typeCol, statusCol, tagsCol, createdCol, modifiedCol, workspaceCol, pathCol string
 		if node.IsNote {
 			typeCol = string(node.Note.Type)
 			statusCol = getNoteStatus(node.Note)
 			tagsCol = strings.Join(node.Note.Tags, ", ")
+			workspaceCol = node.Note.Workspace
 			createdCol = node.Note.CreatedAt.Format("2006-01-02 15:04")
 			modifiedCol = node.Note.ModifiedAt.Format("2006-01-02 15:04")
 			pathCol = node.RelativePath
@@ -192,6 +197,9 @@ func (m *Model) renderTableView() string {
 		}
 		if m.columnVisibility["MODIFIED"] {
 			rowParts = append(rowParts, separator, padOrTruncate(modifiedCol, modifiedWidth))
+		}
+		if m.columnVisibility["WORKSPACE"] {
+			rowParts = append(rowParts, separator, padOrTruncate(workspaceCol, workspaceWidth))
 		}
 		if m.columnVisibility["PATH"] {
 			rowParts = append(rowParts, separator, theme.DefaultTheme.Muted.Render(padOrTruncate(pathCol, pathWidth)))
@@ -393,7 +401,7 @@ func (m *Model) getSearchHighlightIndices(text string) (int, int) {
 }
 
 // calculateTableColumnWidths calculates optimal column widths based on content
-func (m *Model) calculateTableColumnWidths() [7]int {
+func (m *Model) calculateTableColumnWidths() [8]int {
 	// Min and max constraints for each column
 	const minNameWidth = 30
 	const maxNameWidth = 60
@@ -403,6 +411,8 @@ func (m *Model) calculateTableColumnWidths() [7]int {
 	const maxStatusWidth = 20
 	const minTagsWidth = 15
 	const maxTagsWidth = 50
+	const minWorkspaceWidth = 10
+	const maxWorkspaceWidth = 30
 	const minCreatedWidth = 17
 	const maxCreatedWidth = 17 // Fixed width for dates
 	const minModifiedWidth = 17
@@ -415,6 +425,7 @@ func (m *Model) calculateTableColumnWidths() [7]int {
 	maxType := len("TYPE")
 	maxStatus := len("STATUS")
 	maxTags := len("TAGS")
+	maxWorkspace := len("WORKSPACE")
 	maxCreated := len("CREATED")
 	maxModified := len("MODIFIED")
 	maxPath := len("PATH")
@@ -458,6 +469,9 @@ func (m *Model) calculateTableColumnWidths() [7]int {
 			if tagsLen > maxTags {
 				maxTags = tagsLen
 			}
+			if len(node.Note.Workspace) > maxWorkspace {
+				maxWorkspace = len(node.Note.Workspace)
+			}
 			if len(node.RelativePath) > maxPath {
 				maxPath = len(node.RelativePath)
 			}
@@ -489,6 +503,12 @@ func (m *Model) calculateTableColumnWidths() [7]int {
 	if maxTags > maxTagsWidth {
 		maxTags = maxTagsWidth
 	}
+	if maxWorkspace < minWorkspaceWidth {
+		maxWorkspace = minWorkspaceWidth
+	}
+	if maxWorkspace > maxWorkspaceWidth {
+		maxWorkspace = maxWorkspaceWidth
+	}
 	if maxCreated < minCreatedWidth {
 		maxCreated = minCreatedWidth
 	}
@@ -518,6 +538,9 @@ func (m *Model) calculateTableColumnWidths() [7]int {
 	if !m.columnVisibility["TAGS"] {
 		maxTags = 0
 	}
+	if !m.columnVisibility["WORKSPACE"] {
+		maxWorkspace = 0
+	}
 	if !m.columnVisibility["CREATED"] {
 		maxCreated = 0
 	}
@@ -528,7 +551,7 @@ func (m *Model) calculateTableColumnWidths() [7]int {
 		maxPath = 0
 	}
 
-	return [7]int{maxName, maxType, maxStatus, maxTags, maxCreated, maxModified, maxPath}
+	return [8]int{maxName, maxType, maxStatus, maxTags, maxCreated, maxModified, maxWorkspace, maxPath}
 }
 
 // getNoteStatus determines the status of a note (e.g., pending if it has todos)

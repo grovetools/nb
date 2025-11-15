@@ -152,6 +152,11 @@ func (m *Model) adjustScroll() {
 
 // BuildDisplayTree constructs the hierarchical list of nodes for rendering.
 func (m *Model) BuildDisplayTree() {
+	if m.recentNotesMode {
+		m.buildRecentNotesList()
+		return
+	}
+
 	if m.isFilteringByTag && m.selectedTag != "" {
 		m.buildTagFilteredTree()
 		return
@@ -1488,4 +1493,59 @@ func (m *Model) toggleFoldRecursive(cursorIndex int) {
 	} else {
 		m.closeFoldRecursive(cursorIndex)
 	}
+}
+
+// buildRecentNotesList constructs a flat list of notes for the recent view.
+func (m *Model) buildRecentNotesList() {
+	notesToDisplay := m.allNotes
+
+	// Filter by tag if active
+	if m.isFilteringByTag && m.selectedTag != "" {
+		var taggedNotes []*models.Note
+		for _, note := range notesToDisplay {
+			for _, tag := range note.Tags {
+				if tag == m.selectedTag {
+					taggedNotes = append(taggedNotes, note)
+					break
+				}
+			}
+		}
+		notesToDisplay = taggedNotes
+	}
+
+	// Filter out archived notes if not shown
+	if !m.showArchives {
+		var nonArchivedNotes []*models.Note
+		for _, note := range notesToDisplay {
+			if !note.IsArchived {
+				nonArchivedNotes = append(nonArchivedNotes, note)
+			}
+		}
+		notesToDisplay = nonArchivedNotes
+	}
+
+	// Sort by modified date descending
+	sort.SliceStable(notesToDisplay, func(i, j int) bool {
+		return notesToDisplay[i].ModifiedAt.After(notesToDisplay[j].ModifiedAt)
+	})
+
+	// Create flat list of display nodes
+	var nodes []*DisplayNode
+	workspacePathMap := make(map[string]string)
+	for _, ws := range m.workspaces {
+		workspacePathMap[ws.Name] = ws.Path
+	}
+
+	for _, note := range notesToDisplay {
+		nodes = append(nodes, &DisplayNode{
+			IsNote:       true,
+			Note:         note,
+			Depth:        0,
+			RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+		})
+	}
+
+	m.displayNodes = nodes
+	m.jumpMap = make(map[rune]int) // No jump keys in flat list
+	m.clampCursor()
 }

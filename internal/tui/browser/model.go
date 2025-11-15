@@ -44,6 +44,8 @@ type Model struct {
 	loadingCount int
 	recentNotesMode bool  // Whether to show only recent notes
 	savedViewMode views.ViewMode // View mode to restore when exiting recent notes mode
+	savedModVisibility bool      // Saved visibility state for MODIFIED column
+	savedWsVisibility  bool      // Saved visibility state for WORKSPACE column
 
 	// Focus mode state
 	ecosystemPickerMode bool
@@ -170,7 +172,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	renameInput.Width = 60
 
 	// Column Visibility Setup - load from state
-	availableColumns := []string{"TYPE", "STATUS", "TAGS", "CREATED", "MODIFIED", "PATH"}
+	availableColumns := []string{"TYPE", "STATUS", "TAGS", "WORKSPACE", "CREATED", "MODIFIED", "PATH"}
 
 	// Load saved state
 	state, err := loadState()
@@ -178,12 +180,13 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		// On error, use defaults
 		state = &tuiState{
 			ColumnVisibility: map[string]bool{
-				"TYPE":     true,
-				"STATUS":   true,
-				"TAGS":     true,
-				"CREATED":  true,
-				"MODIFIED": false,
-				"PATH":     true,
+				"TYPE":      true,
+				"STATUS":    true,
+				"TAGS":      true,
+				"WORKSPACE": false,
+				"CREATED":   true,
+				"MODIFIED":  false,
+				"PATH":      true,
 			},
 		}
 	}
@@ -736,11 +739,12 @@ func loadState() (*tuiState, error) {
 			// Return default state if file doesn't exist
 			return &tuiState{
 				ColumnVisibility: map[string]bool{
-					"TYPE":    true,
-					"STATUS":  true,
-					"TAGS":    true,
-					"CREATED": true,
-					"PATH":    true,
+					"TYPE":      true,
+					"STATUS":    true,
+					"TAGS":      true,
+					"WORKSPACE": false,
+					"CREATED":   true,
+					"PATH":      true,
 				},
 			}, nil
 		}

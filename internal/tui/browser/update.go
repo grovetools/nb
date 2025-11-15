@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -25,17 +24,9 @@ import (
 
 // updateViewsState synchronizes the view state with the browser model
 func (m *Model) updateViewsState() {
-	notesToDisplay := m.allNotes
-	if m.recentNotesMode {
-		// Sort all notes by ModifiedAt in descending order (most recent first)
-		sort.SliceStable(notesToDisplay, func(i, j int) bool {
-			return notesToDisplay[i].ModifiedAt.After(notesToDisplay[j].ModifiedAt)
-		})
-	}
-
 	m.views.SetParentState(
 		m.service,
-		notesToDisplay,
+		m.allNotes,
 		m.workspaces,
 		m.focusedWorkspace,
 		m.filterInput.Value(),
@@ -45,6 +36,7 @@ func (m *Model) updateViewsState() {
 		m.ecosystemPickerMode,
 		m.hideGlobal,
 		m.showArchives,
+		m.recentNotesMode,
 	)
 	m.views.BuildDisplayTree()
 
@@ -575,21 +567,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.FocusRecent):
 			m.recentNotesMode = !m.recentNotesMode
 			if m.recentNotesMode {
-				// Save current view mode and switch to table view
+				// Save current state and switch to recent notes mode
 				m.savedViewMode = m.views.GetViewMode()
-				if m.savedViewMode != views.TableView {
-					m.views.ToggleViewMode()
-				}
-				// Enable MODIFIED column and update views
+				m.views.SetViewMode(views.TableView)
+				m.savedModVisibility = m.columnVisibility["MODIFIED"]
+				m.savedWsVisibility = m.columnVisibility["WORKSPACE"]
 				m.columnVisibility["MODIFIED"] = true
+				m.columnVisibility["WORKSPACE"] = true
 				m.views.SetColumnVisibility(m.columnVisibility)
-				m.statusMessage = "Sorted by last modified"
+				m.statusMessage = "Recent notes view"
 			} else {
-				// Restore previous view mode and disable MODIFIED column
-				if m.savedViewMode != views.TableView && m.views.GetViewMode() == views.TableView {
-					m.views.ToggleViewMode()
-				}
-				m.columnVisibility["MODIFIED"] = false
+				// Restore previous state
+				m.views.SetViewMode(m.savedViewMode)
+				m.columnVisibility["MODIFIED"] = m.savedModVisibility
+				m.columnVisibility["WORKSPACE"] = m.savedWsVisibility
 				m.views.SetColumnVisibility(m.columnVisibility)
 				m.statusMessage = "Default view restored"
 			}
