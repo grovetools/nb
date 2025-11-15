@@ -649,16 +649,18 @@ func getPlanStatusIcon(status string) string {
 	}
 }
 
-// getViewportHeight calculates how many lines are available for the list.
+// getViewportHeight calculates how many lines are available for the list content,
+// accounting for chrome rendered within this view component.
 func (m *Model) getViewportHeight() int {
-	// Account for:
-	// - Top margin: 2 lines
-	// - Header: 1 line
-	// - Blank line before footer: 1 line
-	// - Status bar: 1 line
-	// - Footer (help): 1 line
-	// - Scroll indicator (when shown): 2 lines (blank + indicator)
-	const fixedLines = 15
+	var fixedLines int
+	if m.viewMode == TableView {
+		// Account for table header (2 lines), scroll indicator (2 lines), and bottom margin (1 line).
+		fixedLines = 5
+	} else {
+		// Account for scroll indicator (2 lines) and bottom margin (1 line).
+		fixedLines = 3
+	}
+
 	availableHeight := m.height - fixedLines
 	if availableHeight < 1 {
 		return 1
