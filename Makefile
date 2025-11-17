@@ -2,6 +2,7 @@
 
 # Build variables
 BINARY_NAME=nb
+E2E_BINARY_NAME=tend
 BUILD_DIR=bin
 GO=go
 VERSION_PKG=github.com/mattsolo1/grove-core/version
@@ -97,6 +98,18 @@ build-all:
 		GOOS=$$os GOARCH=$$arch $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$${output_name} .; \
 	done
 
+# --- E2E Testing ---
+# Build the custom tend binary for grove-notebook E2E tests.
+test-e2e-build:
+	@echo "Building E2E test binary $(E2E_BINARY_NAME)..."
+	@go build $(LDFLAGS) -o $(BUILD_DIR)/$(E2E_BINARY_NAME) ./tests/e2e
+
+# Run E2E tests. Depends on the main 'nb' binary and the test runner.
+# Pass arguments via ARGS, e.g., make test-e2e ARGS="run -i"
+test-e2e: build test-e2e-build
+	@echo "Running E2E tests..."
+	@PATH=$(CURDIR)/bin:$(PATH) $(BUILD_DIR)/$(E2E_BINARY_NAME) run $(ARGS)
+
 # Help
 help:
 	@echo "Available targets:"
@@ -111,3 +124,4 @@ help:
 	@echo "  make dev            - Build with race detector"
 	@echo "  make lint           - Run the linter"
 	@echo "  make build-all      - Build for multiple platforms"
+	@echo "  make test-e2e ARGS=...- Run E2E tests (e.g., ARGS=\"run -i notebook-centralized-structure\")"
