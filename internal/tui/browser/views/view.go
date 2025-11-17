@@ -611,18 +611,22 @@ func stripAnsi(s string) string {
 // getNoteIcon returns the appropriate icon for a note type
 func getNoteIcon(noteType string) string {
 	switch noteType {
+	case "note":
+		return theme.IconNote
+	case "plan":
+		return theme.IconPlan
 	case "chat":
-		return theme.IconChat // ★
-	case "interactive_agent":
-		return theme.IconInteractiveAgent // ⚙
+		return theme.IconChat
 	case "oneshot":
-		return theme.IconOneshot // ●
+		return theme.IconOneshot
+	case "interactive_agent":
+		return theme.IconInteractiveAgent
 	case "headless_agent":
-		return theme.IconHeadlessAgent // ◆
+		return theme.IconHeadlessAgent
 	case "shell":
-		return theme.IconShell // ▶
+		return theme.IconShell
 	default:
-		return "▢" // Default fallback
+		return theme.IconNote // Default to a generic note icon
 	}
 }
 
@@ -677,18 +681,30 @@ func (m *Model) GetPlanStatus(workspaceName, planGroup string) string {
 // getPlanStatusIcon returns the appropriate icon for a plan status
 func getPlanStatusIcon(status string) string {
 	switch status {
-	case "completed", "finished", "done":
-		return theme.IconStatusCompleted // ●
-	case "running", "active", "in_progress":
-		return theme.IconStatusRunning // ◐
-	case "failed", "error":
-		return theme.IconStatusFailed // ✗
-	case "abandoned", "cancelled":
-		return theme.IconStatusAbandoned // ⊗
-	case "pending", "todo", "unknown":
-		fallthrough
+	case "completed":
+		return theme.IconStatusCompleted
+	case "running":
+		return theme.IconStatusRunning
+	case "failed":
+		return theme.IconStatusFailed
+	case "blocked":
+		return theme.IconStatusBlocked
+	case "needs_review":
+		return theme.IconStatusNeedsReview
+	case "pending_user":
+		return theme.IconStatusPendingUser
+	case "pending_llm":
+		return theme.IconInteractiveAgent
+	case "interrupted":
+		return theme.IconStatusInterrupted
+	case "todo":
+		return theme.IconStatusTodo
+	case "hold":
+		return theme.IconStatusHold
+	case "abandoned":
+		return theme.IconStatusAbandoned
 	default:
-		return theme.IconStatusTodo // ○
+		return theme.IconPending // pending
 	}
 }
 
