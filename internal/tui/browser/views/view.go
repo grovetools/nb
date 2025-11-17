@@ -251,6 +251,10 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		// For archive parent nodes (e.g., "current/.archive" or "plans/.archive"), display just ".archive"
 		if strings.HasSuffix(node.GroupName, "/.archive") {
 			info.name = ".archive"
+			icon := getGroupIcon(".archive")
+			if icon != "" {
+				info.indicator = icon
+			}
 		} else if node.IsPlan() {
 			// Handle plan nodes (but not archive nodes that start with "plans/")
 			info.isPlan = true
@@ -262,6 +266,12 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 			} else {
 				planStatus := m.GetPlanStatus(node.WorkspaceName, node.GroupName)
 				info.indicator = getPlanStatusIcon(planStatus) + " "
+			}
+		} else {
+			// Regular note groups - add their icons
+			icon := getGroupIcon(node.GroupName)
+			if icon != "" {
+				info.indicator = icon
 			}
 		}
 		if node.ChildCount > 0 {
@@ -627,6 +637,32 @@ func getNoteIcon(noteType string) string {
 		return theme.IconShell
 	default:
 		return theme.IconNote // Default to a generic note icon
+	}
+}
+
+// getGroupIcon returns the appropriate icon for a note group
+func getGroupIcon(groupName string) string {
+	switch groupName {
+	case "current":
+		return theme.IconNoteCurrent
+	case "issues":
+		return theme.IconNoteIssues
+	case "inbox":
+		return theme.IconNoteInbox
+	case "completed":
+		return theme.IconNoteCompleted
+	case "review":
+		return theme.IconNoteReview
+	case "in_progress":
+		return theme.IconNoteInProgress
+	case "learn":
+		return theme.IconSchool
+	case "plans":
+		return theme.IconPlan
+	case ".archive":
+		return theme.IconArchive
+	default:
+		return "" // No icon for unknown groups
 	}
 }
 
