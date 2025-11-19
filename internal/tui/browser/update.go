@@ -358,6 +358,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// Handle filtering mode early - before any other key bindings
+		if m.filterInput.Focused() {
+			// Only handle Esc and Enter specially, pass everything else to the input
+			// Note: We check msg.String() directly instead of using key bindings
+			// because m.keys.Confirm includes "y" which should be typed in the input
+			if msg.String() == "esc" {
+				m.filterInput.SetValue("")
+				m.filterInput.Blur()
+				// If we're in tag filter mode, only clear the search, not the tag filter
+				if m.isFilteringByTag {
+					m.updateViewsState()
+					return m, nil
+				}
+				m.isGrepping = false // Exit grep mode
+				m.isFilteringByTag = false // Exit tag filter mode
+				m.selectedTag = ""
+				m.updateViewsState()
+				return m, nil
+			}
+			if msg.String() == "enter" {
+				m.filterInput.Blur()
+				return m, nil
+			}
+			// Pass all other keys to the input
+			m.filterInput, cmd = m.filterInput.Update(msg)
+			if m.isGrepping {
+				m.applyGrepFilter()
+			} else {
+				m.updateViewsState()
+			}
+			return m, cmd
+		}
+
 		// If preview is focused, it gets priority for key events.
 		if m.previewFocused {
 			switch {
@@ -429,36 +462,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			default:
 				m.columnList, cmd = m.columnList.Update(msg)
-				return m, cmd
-			}
-		}
-
-		// Handle filtering mode
-		if m.filterInput.Focused() {
-			switch {
-			case key.Matches(msg, m.keys.Back): // Esc
-				m.filterInput.SetValue("")
-				m.filterInput.Blur()
-				// If we're in tag filter mode, only clear the search, not the tag filter
-				if m.isFilteringByTag {
-					m.updateViewsState()
-					return m, nil
-				}
-				m.isGrepping = false // Exit grep mode
-				m.isFilteringByTag = false // Exit tag filter mode
-				m.selectedTag = ""
-				m.updateViewsState()
-				return m, nil
-			case key.Matches(msg, m.keys.Confirm): // Enter
-				m.filterInput.Blur()
-				return m, nil
-			default:
-				m.filterInput, cmd = m.filterInput.Update(msg)
-				if m.isGrepping {
-					m.applyGrepFilter()
-				} else {
-					m.updateViewsState()
-				}
 				return m, cmd
 			}
 		}
@@ -830,6 +833,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !key.Matches(msg, m.keys.GoToTop) && !key.Matches(msg, m.keys.FoldPrefix) && !key.Matches(msg, m.keys.Delete) {
 				m.lastKey = ""
 			}
+		}
+
+	default:
+		if m.filterInput.Focused() {
+			var cmd tea.Cmd
+			m.filterInput, cmd = m.filterInput.Update(msg)
+			return m, cmd
 		}
 	}
 	return m, nil
