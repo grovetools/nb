@@ -343,6 +343,36 @@ func generatePromptsContent(title, workspace, branch string, tags []string, now 
 	return frontmatter.BuildContent(fm, body)
 }
 
+// generateDocsContent creates content for documentation notes
+func generateDocsContent(title, workspace, branch string, tags []string, now time.Time, timestampStr string) string {
+	id := GenerateNoteID(title)
+	fm := &frontmatter.Frontmatter{
+		ID:       id,
+		Title:    title,
+		Aliases:  []string{},
+		Tags:     tags,
+		Created:  timestampStr,
+		Modified: timestampStr,
+	}
+
+	// Add repository and branch if not in global workspace
+	if workspace != "" && workspace != globalWorkspace {
+		fm.Repository = workspace
+		if branch != "" {
+			fm.Branch = branch
+		}
+	}
+
+	body := fmt.Sprintf(`# %s
+
+## Overview
+
+## Examples
+
+`, title)
+	return frontmatter.BuildContent(fm, body)
+}
+
 // generateDefaultContent creates content for all other note types
 func generateDefaultContent(title, workspace, branch, worktree string, tags []string, now time.Time, timestampStr string) string {
 	id := GenerateNoteID(title)
@@ -421,6 +451,24 @@ func CreateNoteContent(noteType models.NoteType, title, workspace, branch, workt
 	// Default templates
 	now := time.Now()
 	timestampStr := frontmatter.FormatTimestamp(now)
+
+	// Dispatch to specialized content generators based on note type
+	switch string(noteType) {
+	case "docs":
+		return generateDocsContent(title, workspace, branch, allTags, now, timestampStr)
+	case "daily":
+		return generateDailyContent(title, workspace, branch, allTags, now, timestampStr)
+	case "learn":
+		return generateLearnContent(title, workspace, branch, allTags, now, timestampStr)
+	case "blog":
+		return generateBlogContent(title, workspace, branch, allTags, now, timestampStr)
+	case "prompts":
+		return generatePromptsContent(title, workspace, branch, allTags, now, timestampStr)
+	case "quick":
+		return generateQuickContent(title, workspace, branch, allTags, now, timestampStr)
+	case "llm":
+		return generateLLMContent(title, workspace, branch, allTags, now, timestampStr)
+	}
 
 	// Fallback to default generator
 	return generateDefaultContent(title, workspace, branch, worktree, allTags, now, timestampStr)

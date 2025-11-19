@@ -399,8 +399,9 @@ func (m *Model) BuildDisplayTree() {
 			groupOrder := map[string]int{
 				"inbox":       1,
 				"issues":      2,
-				"in_progress": 3,
-				"review":      4,
+				"docs":        3,
+				"in_progress": 4,
+				"review":      5,
 			}
 
 			// Extract completed group to render it after plans

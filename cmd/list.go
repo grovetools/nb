@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
@@ -32,7 +33,8 @@ func NewListCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 Examples:
   nb list              # List current notes
   nb list llm          # List LLM notes
-  nb list learn        # List learning notes`,
+  nb list learn        # List learning notes
+  nb list docs         # List documentation notes`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s := *svc
 
@@ -251,27 +253,29 @@ func printNotesTable(notes []*models.Note) {
 func getNoteTypeIcon(noteType models.NoteType) string {
 	switch noteType {
 	case "current", "inbox":
-		return "📝"
+		return theme.IconNoteCurrent
 	case "llm":
-		return "🤖"
+		return theme.IconInteractiveAgent
 	case "learn":
-		return "📚"
+		return theme.IconSchool
 	case "daily":
-		return "📅"
+		return theme.IconCalendar
 	case "issues":
-		return "🐛"
+		return theme.IconIssueOpened
 	case "architecture":
-		return "🏗️"
+		return theme.IconArchitecture
 	case "todos":
-		return "✅"
+		return theme.IconChecklist
 	case "quick":
-		return "⚡"
+		return theme.IconClockFast
 	case "blog":
-		return "✍️"
+		return theme.IconRss
 	case "prompts":
-		return "💡"
+		return theme.IconLightbulb
+	case "docs":
+		return theme.IconDocs
 	default:
-		return "📄"
+		return theme.IconNote
 	}
 }
 
@@ -297,6 +301,8 @@ func getTypeAbbreviation(noteType models.NoteType) string {
 		return "blg"
 	case "prompts":
 		return "pmt"
+	case "docs":
+		return "doc"
 	default:
 		// For unknown types, take first 3 chars
 		typeStr := string(noteType)

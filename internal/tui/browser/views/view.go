@@ -657,6 +657,8 @@ func getGroupIcon(groupName string) string {
 		return theme.IconNoteInProgress
 	case "learn":
 		return theme.IconSchool
+	case "docs":
+		return theme.IconDocs
 	case "plans":
 		return theme.IconPlan
 	case ".archive":

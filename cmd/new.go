@@ -30,6 +30,7 @@ Examples:
   nb new                     # Create note with timestamp only
   nb new "meeting notes"     # Create note with title
   nb new -t learn "golang"   # Create learning note
+  nb new -t docs "API Documentation" # Create documentation note
   nb new -t issues "bug report" # Create issues note
   nb new -t architecture "api design" # Create architecture note
   nb new -t todos "sprint tasks" # Create todos note
