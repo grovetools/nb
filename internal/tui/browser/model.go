@@ -74,6 +74,10 @@ type Model struct {
 	renameInput    textinput.Model
 	noteToRename   *models.Note
 
+	// Note promotion state
+	isPromotingToPlan bool // True when confirming worktree creation for a new plan
+	noteToPromote     *models.Note
+
 	// Column Visibility
 	columnVisibility map[string]bool
 	columnSelectMode bool

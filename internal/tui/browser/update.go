@@ -63,6 +63,41 @@ func loadFileContentCmd(path string) tea.Cmd {
 	}
 }
 
+// createPlanCmd creates a command to promote a note to a plan, with optional worktree.
+func (m *Model) createPlanCmd(withWorktree bool) tea.Cmd {
+	if m.noteToPromote == nil {
+		return func() tea.Msg {
+			return fmt.Errorf("no note selected for promotion")
+		}
+	}
+
+	planName := sanitizeForFilename(m.noteToPromote.Title)
+	notePath := m.noteToPromote.Path
+
+	args := []string{
+		"plan", "init", planName,
+		"--recipe", "chat",
+		"--extract-all-from", notePath,
+		"--note-ref", notePath,
+		"--open-session",
+	}
+
+	if withWorktree {
+		args = append(args, "--worktree")
+	}
+
+	cmd := exec.Command("flow", args...)
+
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\nError promoting note to plan: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "\nSuccessfully promoted note to plan '%s'\n", planName)
+		}
+		return tea.Quit()
+	})
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
@@ -72,6 +107,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case confirm.ConfirmedMsg:
 		// User confirmed the action in the dialog
+		// Handle confirmation for promoting a note to a plan
+		if m.isPromotingToPlan {
+			m.isPromotingToPlan = false
+			// User chose 'yes' to creating a worktree
+			m.statusMessage = "Promoting note to plan with worktree..."
+			return m, m.createPlanCmd(true)
+		}
 		// We need to know which action was confirmed. A simple way is to check the prompt.
 		if strings.Contains(strings.ToLower(m.confirmDialog.Prompt), "archive") {
 			m.statusMessage = "Archiving..."
@@ -82,6 +124,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.deleteSelectedNotesCmd()
 		}
 	case confirm.CancelledMsg:
+		// Handle confirmation for promoting a note to a plan
+		if m.isPromotingToPlan {
+			m.isPromotingToPlan = false
+			// User chose 'no' to creating a worktree
+			m.statusMessage = "Promoting note to plan without worktree..."
+			return m, m.createPlanCmd(false)
+		}
 		// User cancelled, just clear the status message
 		m.statusMessage = ""
 		return m, nil
@@ -710,35 +759,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.CreatePlan):
 			node := m.views.GetCurrentNode()
 			if node != nil && node.IsNote {
-				// Sanitize the note title for the plan name
-				planName := sanitizeForFilename(node.Note.Title)
-				notePath := node.Note.Path
-
-				// Show status message to user
-				m.statusMessage = fmt.Sprintf("Promoting '%s' to plan '%s'...", node.Note.Title, planName)
-
-				// Construct the flow plan init command
-				cmd := exec.Command("flow", "plan", "init", planName,
-					"--recipe", "chat",
-					"--worktree",
-					"--extract-all-from", notePath,
-					"--note-ref", notePath,
-					"--open-session",
-				)
-
-				// Execute the command - this will take over the terminal and open a tmux session
-				// When complete, we'll quit the TUI
-				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-					if err != nil {
-						// If there was an error, show it before quitting
-						fmt.Fprintf(os.Stderr, "\nError promoting note to plan: %v\n", err)
-					} else {
-						// Success message
-						fmt.Fprintf(os.Stderr, "\nSuccessfully promoted note to plan '%s'\n", planName)
-					}
-					return tea.Quit()
-				})
+				m.isPromotingToPlan = true
+				m.noteToPromote = node.Note
+				m.confirmDialog.Activate("Create a git worktree for this plan?")
+				m.statusMessage = "Confirm worktree creation..."
 			}
+			return m, nil
 		case key.Matches(msg, m.keys.Archive):
 			// Archive selected notes and/or plan groups
 			noteCount, selectedNotes, selectedPlans := m.views.GetCounts()
