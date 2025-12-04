@@ -333,18 +333,27 @@ func (m *Model) BuildDisplayTree() {
 		}
 
 		if noteGroups, ok := notesByWorkspace[wsKey]; ok {
-			// Separate regular groups and archived subgroups
+			// Separate regular groups, archived subgroups, and artifact subgroups
 			// archiveSubgroups maps "parent" -> "child" -> notes
 			// e.g., "plans" -> "test-plan" -> [notes in plans/.archive/test-plan]
+			// artifactSubgroups maps "parent" -> notes
+			// e.g., "plans/binary-test" -> [artifacts in plans/binary-test/.artifacts/]
 			var regularGroups []string
 			planGroups := make(map[string][]*models.Note)
 			holdPlanGroups := make(map[string][]*models.Note)
 			archiveSubgroups := make(map[string]map[string][]*models.Note)
+			artifactSubgroups := make(map[string][]*models.Note)
 
 			for name, notes := range noteGroups {
 				// Check if this is an archived group - skip if archives are hidden
 				isArchived := strings.Contains(name, "/.archive")
 				if isArchived && !m.showArchives {
+					continue
+				}
+
+				// Check if this is an artifact group - skip if artifacts are hidden
+				isArtifact := strings.Contains(name, "/.artifacts")
+				if isArtifact && !m.showArtifacts {
 					continue
 				}
 
@@ -377,6 +386,13 @@ func (m *Model) BuildDisplayTree() {
 					}
 					// Use empty string as key to indicate notes directly in .archive
 					archiveSubgroups[parent][""] = notes
+					continue
+				}
+
+				// Check if this matches pattern "<parent>/.artifacts" (artifacts directly in .artifacts folder)
+				if strings.HasSuffix(name, "/.artifacts") {
+					parent := strings.TrimSuffix(name, "/.artifacts")
+					artifactSubgroups[parent] = notes
 					continue
 				}
 
@@ -495,12 +511,13 @@ func (m *Model) BuildDisplayTree() {
 					continue
 				}
 
-				// Check if this group has archived children
+				// Check if this group has archived or artifact children
 				hasArchives := len(archiveSubgroups[groupName]) > 0 && m.showArchives
+				hasArtifacts := len(artifactSubgroups[groupName]) > 0 && m.showArtifacts
 
 				// Add note nodes
 				for j, note := range notesInGroup {
-					isLastNote := j == len(notesInGroup)-1 && !hasArchives
+					isLastNote := j == len(notesInGroup)-1 && !hasArchives && !hasArtifacts
 					var notePrefix strings.Builder
 					noteIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
 					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
@@ -523,12 +540,17 @@ func (m *Model) BuildDisplayTree() {
 				if hasArchives {
 					m.addArchiveSubgroup(&nodes, ws, groupPrefix.String(), archiveSubgroups[groupName], hasSearchFilter, workspacePathMap)
 				}
+
+				// Add .artifacts subgroup if this group has artifact children
+				if hasArtifacts {
+					m.addArtifactSubgroup(&nodes, ws, groupPrefix.String(), artifactSubgroups[groupName], hasSearchFilter, workspacePathMap)
+				}
 			}
 
 			// Add "plans" parent group if there are any plans
 			if hasPlans {
 				hasGroupsAfter := hasHoldPlans || hasCompleted
-				m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, hasSearchFilter, workspacePathMap, hasGroupsAfter)
+				m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, artifactSubgroups, hasSearchFilter, workspacePathMap, hasGroupsAfter)
 			}
 
 			// Add ".hold" parent group if there are any on-hold plans
@@ -811,7 +833,72 @@ func (m *Model) addArchiveSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspac
 	}
 }
 
-func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, planGroups map[string][]*models.Note, archiveSubgroups map[string]map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasGroupsAfter bool) {
+func (m *Model) addArtifactSubgroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, groupPrefix string, artifactNotes []*models.Note, hasSearchFilter bool, workspacePathMap map[string]string) {
+	// Calculate .artifacts prefix (last child under this group)
+	var artifactsPrefix strings.Builder
+	artifactsIndent := strings.ReplaceAll(groupPrefix, "├─", "│ ")
+	artifactsIndent = strings.ReplaceAll(artifactsIndent, "└─", "  ")
+	artifactsPrefix.WriteString(artifactsIndent)
+	artifactsPrefix.WriteString("└─ ")
+
+	// Get parent group name from the last group node
+	parentGroupName := ""
+	if len(*nodes) > 0 {
+		for i := len(*nodes) - 1; i >= 0; i-- {
+			if (*nodes)[i].IsGroup && !strings.Contains((*nodes)[i].GroupName, "/.artifacts") {
+				parentGroupName = (*nodes)[i].GroupName
+				break
+			}
+		}
+	}
+
+	// Add .artifacts parent node
+	artifactsParentNode := &DisplayNode{
+		IsGroup:       true,
+		GroupName:     parentGroupName + "/.artifacts",
+		WorkspaceName: ws.Name,
+		Prefix:        artifactsPrefix.String(),
+		Depth:         ws.Depth + 2,
+		ChildCount:    len(artifactNotes),
+	}
+	*nodes = append(*nodes, artifactsParentNode)
+
+	// Check if .artifacts parent is collapsed
+	artifactsParentNodeID := artifactsParentNode.NodeID()
+	if !m.collapsedNodes[artifactsParentNodeID] || hasSearchFilter {
+		// Sort artifact notes by created date
+		sort.SliceStable(artifactNotes, func(i, j int) bool {
+			if m.sortAscending {
+				return artifactNotes[i].CreatedAt.Before(artifactNotes[j].CreatedAt)
+			}
+			return artifactNotes[i].CreatedAt.After(artifactNotes[j].CreatedAt)
+		})
+
+		// Add individual artifact notes
+		for ai, artifact := range artifactNotes {
+			isLastArtifact := ai == len(artifactNotes)-1
+			var artifactPrefix strings.Builder
+			artifactIndent := strings.ReplaceAll(artifactsPrefix.String(), "├─", "│ ")
+			artifactIndent = strings.ReplaceAll(artifactIndent, "└─", "  ")
+			artifactPrefix.WriteString(artifactIndent)
+			if isLastArtifact {
+				artifactPrefix.WriteString("└─ ")
+			} else {
+				artifactPrefix.WriteString("├─ ")
+			}
+
+			*nodes = append(*nodes, &DisplayNode{
+				IsNote:       true,
+				Note:         artifact,
+				Prefix:       artifactPrefix.String(),
+				Depth:        ws.Depth + 3,
+				RelativePath: calculateRelativePath(artifact, workspacePathMap, m.focusedWorkspace),
+			})
+		}
+	}
+}
+
+func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, planGroups map[string][]*models.Note, archiveSubgroups map[string]map[string][]*models.Note, artifactSubgroups map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasGroupsAfter bool) {
 	// Calculate plans parent prefix
 	var plansPrefix strings.Builder
 	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
@@ -886,9 +973,13 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 			// Check if this plan is collapsed (unless searching)
 			planNodeID := planNode.NodeID()
 			if !m.collapsedNodes[planNodeID] || hasSearchFilter {
+				// Check if this plan has artifacts
+				planFullName := "plans/" + planName
+				hasPlanArtifacts := len(artifactSubgroups[planFullName]) > 0 && m.showArtifacts
+
 				// Add notes in this plan
 				for ni, note := range planNotes {
-					isLastNote := ni == len(planNotes)-1
+					isLastNote := ni == len(planNotes)-1 && !hasPlanArtifacts
 					var notePrefix strings.Builder
 					noteIndent := strings.ReplaceAll(planPrefix.String(), "├─", "│ ")
 					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
@@ -905,6 +996,11 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 						Depth:        ws.Depth + 3,
 						RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
 					})
+				}
+
+				// Add .artifacts subgroup if this plan has artifacts
+				if hasPlanArtifacts {
+					m.addArtifactSubgroup(nodes, ws, planPrefix.String(), artifactSubgroups[planFullName], hasSearchFilter, workspacePathMap)
 				}
 			}
 		}

@@ -36,6 +36,7 @@ func (m *Model) updateViewsState() {
 		m.ecosystemPickerMode,
 		m.hideGlobal,
 		m.showArchives,
+		m.showArtifacts,
 		m.showOnHold,
 		m.recentNotesMode,
 	)
@@ -267,9 +268,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		var notesCmd tea.Cmd
 		if m.focusedWorkspace != nil {
-			notesCmd = fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+			notesCmd = fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts)
 		} else {
-			notesCmd = fetchAllNotesCmd(m.service)
+			notesCmd = fetchAllNotesCmd(m.service, m.showArtifacts)
 		}
 
 		return m, tea.Batch(
@@ -318,9 +319,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh notes to show the new locations
 		m.loadingCount++
 		if m.focusedWorkspace != nil {
-			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
+			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 		}
-		return m, tea.Batch(fetchAllNotesCmd(m.service), m.spinner.Tick)
+		return m, tea.Batch(fetchAllNotesCmd(m.service, m.showArtifacts), m.spinner.Tick)
 
 	case notesArchivedMsg:
 		if msg.err != nil {
@@ -358,9 +359,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh notes to show the updated archive structure
 		m.loadingCount++
 		if m.focusedWorkspace != nil {
-			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
+			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 		}
-		return m, tea.Batch(fetchAllNotesCmd(m.service), m.spinner.Tick)
+		return m, tea.Batch(fetchAllNotesCmd(m.service, m.showArtifacts), m.spinner.Tick)
 
 	case noteCreatedMsg:
 		m.isCreatingNote = false
@@ -374,9 +375,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh notes to show the new one
 		m.loadingCount++
 		if m.focusedWorkspace != nil {
-			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
+			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 		}
-		return m, tea.Batch(fetchAllNotesCmd(m.service), m.spinner.Tick)
+		return m, tea.Batch(fetchAllNotesCmd(m.service, m.showArtifacts), m.spinner.Tick)
 
 	case noteRenamedMsg:
 		m.isRenamingNote = false
@@ -391,9 +392,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh notes to show the updated name
 		m.loadingCount++
 		if m.focusedWorkspace != nil {
-			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
+			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 		}
-		return m, tea.Batch(fetchAllNotesCmd(m.service), m.spinner.Tick)
+		return m, tea.Batch(fetchAllNotesCmd(m.service, m.showArtifacts), m.spinner.Tick)
 
 	case tea.KeyMsg:
 		if m.help.ShowAll {
@@ -561,7 +562,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ecosystemPickerMode = false
 				m.focusChanged = true
 				// Re-fetch all notes for the global view
-				return m, tea.Batch(fetchAllNotesCmd(m.service), m.spinner.Tick)
+				return m, tea.Batch(fetchAllNotesCmd(m.service, m.showArtifacts), m.spinner.Tick)
 			}
 		case key.Matches(msg, m.keys.FocusParent):
 			if m.focusedWorkspace != nil {
@@ -600,9 +601,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focusChanged = true
 				// Re-fetch notes for the new focus level
 				if m.focusedWorkspace != nil {
-					return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
+					return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 				} else {
-					return m, tea.Batch(fetchAllNotesCmd(m.service), m.spinner.Tick)
+					return m, tea.Batch(fetchAllNotesCmd(m.service, m.showArtifacts), m.spinner.Tick)
 				}
 			}
 		case key.Matches(msg, m.keys.FocusSelected):
@@ -613,7 +614,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ecosystemPickerMode = false // Focusing on a workspace exits picker mode
 				m.focusChanged = true
 				// Re-fetch notes for the newly focused workspace
-				return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
+				return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 			}
 		case key.Matches(msg, m.keys.ToggleView):
 			m.views.ToggleViewMode()
@@ -678,6 +679,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showArchives = !m.showArchives
 			m.statusMessage = fmt.Sprintf("Archives: %v (Found %d notes)", m.showArchives, len(m.allNotes))
 			m.updateViewsState()
+		case key.Matches(msg, m.keys.ToggleArtifacts):
+			m.showArtifacts = !m.showArtifacts
+			m.statusMessage = fmt.Sprintf("Artifacts: %v", m.showArtifacts)
+			// Refetch notes with new artifact visibility setting
+			var notesCmd tea.Cmd
+			if m.focusedWorkspace != nil {
+				notesCmd = fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts)
+			} else {
+				notesCmd = fetchAllNotesCmd(m.service, m.showArtifacts)
+			}
+			return m, tea.Batch(notesCmd, m.spinner.Tick)
 		case key.Matches(msg, m.keys.ToggleHold):
 			m.showOnHold = !m.showOnHold
 			m.statusMessage = fmt.Sprintf("On-hold plans: %v", m.showOnHold)
@@ -789,7 +801,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.ecosystemPickerMode = false
 					m.focusChanged = true
 					// Re-fetch notes for the selected ecosystem
-					return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace), m.spinner.Tick)
+					return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 				}
 			} else {
 				var noteToOpen *models.Note

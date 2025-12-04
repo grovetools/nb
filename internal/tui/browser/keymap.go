@@ -24,9 +24,10 @@ type KeyMap struct {
 	Fold            key.Binding
 	Unfold          key.Binding
 	FoldPrefix      key.Binding // z key for fold commands
-	ToggleArchives key.Binding
-	ToggleGlobal   key.Binding
-	ToggleHold     key.Binding
+	ToggleArchives  key.Binding
+	ToggleArtifacts key.Binding
+	ToggleGlobal    key.Binding
+	ToggleHold      key.Binding
 	ToggleSelect   key.Binding
 	SelectNone     key.Binding
 	Archive        key.Binding
@@ -75,6 +76,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.Unfold,
 		k.FoldPrefix,
 		k.ToggleArchives,
+		k.ToggleArtifacts,
 		k.ToggleGlobal,
 		k.ToggleHold,
 	}, []key.Binding{
@@ -166,6 +168,10 @@ var keys = KeyMap{
 	ToggleArchives: key.NewBinding(
 		key.WithKeys("A"),
 		key.WithHelp("A", "toggle archives"),
+	),
+	ToggleArtifacts: key.NewBinding(
+		key.WithKeys("b"),
+		key.WithHelp("b", "toggle artifacts"),
 	),
 	ToggleGlobal: key.NewBinding(
 		key.WithKeys("~"),

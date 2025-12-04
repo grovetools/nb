@@ -497,7 +497,7 @@ func (s *Service) ListNotes(ctx *WorkspaceContext, noteType models.NoteType) ([]
 }
 
 // ListAllNotes lists all notes in the specified workspace context (all directories)
-func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool) ([]*models.Note, error) {
+func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, includeArtifacts bool) ([]*models.Note, error) {
 	// Get all content directories for this workspace
 	contentDirs, err := s.notebookLocator.GetAllContentDirs(ctx.NotebookContextWorkspace)
 	if err != nil {
@@ -542,61 +542,99 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool) ([]*
 				}
 			}
 
-			if !info.IsDir() && strings.HasSuffix(path, ".md") {
-				note, err := ParseNote(path)
-				if err == nil {
-					note.Workspace = ctx.NotebookContextWorkspace.Name
-					note.Branch = ctx.Branch
+			if !info.IsDir() {
+				if strings.HasSuffix(path, ".md") {
+					note, err := ParseNote(path)
+					if err == nil {
+						note.Workspace = ctx.NotebookContextWorkspace.Name
+						note.Branch = ctx.Branch
 
-					// Set Group from directory path for grouping in UI
-					relPath, _ := filepath.Rel(contentDir.Path, path)
-					parts := strings.Split(filepath.ToSlash(relPath), "/")
+						// Set Group from directory path for grouping in UI
+						relPath, _ := filepath.Rel(contentDir.Path, path)
+						parts := strings.Split(filepath.ToSlash(relPath), "/")
 
-					switch contentDir.Type {
-					case "plans":
-						if len(parts) > 2 {
-							// This is inside a nested subdirectory: "plans/<dir>/<subdir>"
-							// Preserve the full path for archived plans like "plans/.archive/planname"
-							note.Group = "plans/" + filepath.Join(parts[0], parts[1])
-						} else if len(parts) > 1 {
-							// This is inside a plan subdirectory: "plans/<planname>"
-							note.Group = "plans/" + parts[0]
-						} else {
-							// This is a top-level plan file (shouldn't happen but handle it)
-							note.Group = "plans"
-						}
-						// Set Type as plan
-						if note.Type == "" {
-							note.Type = "plan"
+						switch contentDir.Type {
+						case "plans":
+							if len(parts) > 2 {
+								// This is inside a nested subdirectory: "plans/<dir>/<subdir>"
+								// Preserve the full path for archived plans like "plans/.archive/planname"
+								note.Group = "plans/" + filepath.Join(parts[0], parts[1])
+							} else if len(parts) > 1 {
+								// This is inside a plan subdirectory: "plans/<planname>"
+								note.Group = "plans/" + parts[0]
+							} else {
+								// This is a top-level plan file (shouldn't happen but handle it)
+								note.Group = "plans"
+							}
+							// Set Type as plan
+							if note.Type == "" {
+								note.Type = "plan"
+							}
+
+						case "chats":
+							if len(parts) > 2 {
+								// This is inside a nested subdirectory: "chats/<dir>/<subdir>"
+								note.Group = "chats/" + filepath.Join(parts[0], parts[1])
+							} else if len(parts) > 1 {
+								// This is inside a chat subdirectory: "chats/<chatname>"
+								note.Group = "chats/" + parts[0]
+							} else {
+								note.Group = "chats"
+							}
+							if note.Type == "" {
+								note.Type = "chat"
+							}
+
+						case "notes":
+							if len(parts) > 1 {
+								note.Group = strings.Join(parts[:len(parts)-1], "/")
+							} else if len(parts) == 1 {
+								note.Group = "quick"
+							}
+							// Set Type from directory if not already set from frontmatter (for backwards compatibility)
+							if note.Type == "" {
+								note.Type = models.NoteType(note.Group)
+							}
 						}
 
-					case "chats":
-						if len(parts) > 2 {
-							// This is inside a nested subdirectory: "chats/<dir>/<subdir>"
-							note.Group = "chats/" + filepath.Join(parts[0], parts[1])
-						} else if len(parts) > 1 {
-							// This is inside a chat subdirectory: "chats/<chatname>"
-							note.Group = "chats/" + parts[0]
-						} else {
-							note.Group = "chats"
-						}
-						if note.Type == "" {
-							note.Type = "chat"
-						}
-
-					case "notes":
-						if len(parts) > 1 {
-							note.Group = strings.Join(parts[:len(parts)-1], "/")
-						} else if len(parts) == 1 {
-							note.Group = "quick"
-						}
-						// Set Type from directory if not already set from frontmatter (for backwards compatibility)
-						if note.Type == "" {
-							note.Type = models.NoteType(note.Group)
-						}
+						notes = append(notes, note)
 					}
+				} else if includeArtifacts && strings.Contains(path, "/.artifacts/") && strings.HasSuffix(path, ".xml") {
+					artifact, err := ParseArtifact(path)
+					if err == nil {
+						artifact.Workspace = ctx.NotebookContextWorkspace.Name
+						artifact.Branch = ctx.Branch
 
-					notes = append(notes, note)
+						// Set Group from directory path, matching the structure used for regular notes
+						relPath, _ := filepath.Rel(contentDir.Path, path)
+						parts := strings.Split(filepath.ToSlash(relPath), "/")
+
+						switch contentDir.Type {
+						case "plans":
+							if len(parts) > 2 {
+								// e.g., "binary-test/.artifacts/file.xml" -> "plans/binary-test/.artifacts"
+								artifact.Group = "plans/" + filepath.Join(parts[:len(parts)-1]...)
+							} else if len(parts) > 1 {
+								artifact.Group = "plans/" + parts[0]
+							} else {
+								artifact.Group = "plans"
+							}
+						case "chats":
+							if len(parts) > 2 {
+								artifact.Group = "chats/" + filepath.Join(parts[:len(parts)-1]...)
+							} else if len(parts) > 1 {
+								artifact.Group = "chats/" + parts[0]
+							} else {
+								artifact.Group = "chats"
+							}
+						case "notes":
+							if len(parts) > 1 {
+								artifact.Group = strings.Join(parts[:len(parts)-1], "/")
+							}
+						}
+
+						notes = append(notes, artifact)
+					}
 				}
 			}
 			return nil
@@ -607,12 +645,12 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool) ([]*
 }
 
 // ListAllGlobalNotes lists all notes in the global workspace (all directories)
-func (s *Service) ListAllGlobalNotes(includeArchived bool) ([]*models.Note, error) {
+func (s *Service) ListAllGlobalNotes(includeArchived bool, includeArtifacts bool) ([]*models.Note, error) {
 	ctx, err := s.GetWorkspaceContext("global")
 	if err != nil {
 		return nil, fmt.Errorf("get global workspace context: %w", err)
 	}
-	return s.ListAllNotes(ctx, includeArchived)
+	return s.ListAllNotes(ctx, includeArchived, includeArtifacts)
 }
 
 // ListGlobalNotes lists notes in the global workspace

@@ -88,7 +88,7 @@ Examples:
 
 			// Handle --workspaces flag first (list from all workspaces)
 			if listAllWorkspaces {
-				allNotes, err := s.ListNotesFromAllWorkspaces(false)
+				allNotes, err := s.ListNotesFromAllWorkspaces(false, false)
 				if err != nil {
 					return err
 				}
@@ -131,9 +131,9 @@ Examples:
 				var err error
 
 				if listGlobal {
-					allNotes, err = s.ListAllGlobalNotes(false)
+					allNotes, err = s.ListAllGlobalNotes(false, false)
 				} else {
-					allNotes, err = s.ListAllNotes(ctx, false)
+					allNotes, err = s.ListAllNotes(ctx, false, false)
 				}
 
 				if err != nil {

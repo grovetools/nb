@@ -17,7 +17,7 @@ type notesLoadedMsg struct {
 	notes []*models.Note
 }
 
-func fetchFocusedNotesCmd(svc *service.Service, focusedWS *workspace.WorkspaceNode) tea.Cmd {
+func fetchFocusedNotesCmd(svc *service.Service, focusedWS *workspace.WorkspaceNode, showArtifacts bool) tea.Cmd {
 	return func() tea.Msg {
 		var notesToLoad []*workspace.WorkspaceNode
 		notesToLoad = append(notesToLoad, focusedWS)
@@ -45,7 +45,7 @@ func fetchFocusedNotesCmd(svc *service.Service, focusedWS *workspace.WorkspaceNo
 			}
 
 			// Fetch notes for the workspace (including archived)
-			notes, err := svc.ListAllNotes(wsCtx, true)
+			notes, err := svc.ListAllNotes(wsCtx, true, showArtifacts)
 			if err == nil {
 				for _, note := range notes {
 					if !seenNotes[note.Path] {
@@ -57,7 +57,7 @@ func fetchFocusedNotesCmd(svc *service.Service, focusedWS *workspace.WorkspaceNo
 		}
 
 		// Also fetch global notes explicitly (including archived)
-		globalNotes, err := svc.ListAllGlobalNotes(true)
+		globalNotes, err := svc.ListAllGlobalNotes(true, showArtifacts)
 		if err == nil {
 			for _, note := range globalNotes {
 				if !seenNotes[note.Path] {
@@ -96,10 +96,10 @@ func fetchWorkspacesCmd(provider *workspace.Provider) tea.Cmd {
 	}
 }
 
-func fetchAllNotesCmd(svc *service.Service) tea.Cmd {
+func fetchAllNotesCmd(svc *service.Service, showArtifacts bool) tea.Cmd {
 	return func() tea.Msg {
 		// Fetch notes from all provider-known workspaces (including archived)
-		notes, err := svc.ListNotesFromAllWorkspaces(true)
+		notes, err := svc.ListNotesFromAllWorkspaces(true, showArtifacts)
 		if err != nil {
 			// In a real app, we'd return an error message.
 			// For now, we return an empty list.
@@ -107,7 +107,7 @@ func fetchAllNotesCmd(svc *service.Service) tea.Cmd {
 		}
 
 		// Also fetch global notes explicitly and append them (including archived)
-		globalNotes, err := svc.ListAllGlobalNotes(true)
+		globalNotes, err := svc.ListAllGlobalNotes(true, showArtifacts)
 		if err == nil {
 			notes = append(notes, globalNotes...)
 		}

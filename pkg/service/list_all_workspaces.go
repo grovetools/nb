@@ -9,7 +9,7 @@ import (
 )
 
 // ListNotesFromAllWorkspaces returns notes from all registered workspaces
-func (s *Service) ListNotesFromAllWorkspaces(includeArchived bool) ([]*models.Note, error) {
+func (s *Service) ListNotesFromAllWorkspaces(includeArchived bool, includeArtifacts bool) ([]*models.Note, error) {
 	allNotes := []*models.Note{}
 	allWorkspaces := s.workspaceProvider.All()
 
@@ -35,7 +35,7 @@ func (s *Service) ListNotesFromAllWorkspaces(includeArchived bool) ([]*models.No
 			NotebookContextWorkspace: contextNode,
 		}
 
-		notes, err := s.ListAllNotes(wsCtx, includeArchived)
+		notes, err := s.ListAllNotes(wsCtx, includeArchived, includeArtifacts)
 		if err != nil {
 			// don't fail, just log and continue
 			fmt.Fprintf(os.Stderr, "Warning: could not list notes for workspace %s: %v\n", ws.Name, err)

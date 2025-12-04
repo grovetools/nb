@@ -23,6 +23,7 @@ type nodeRenderInfo struct {
 	count      string // "(d)"
 	suffix     string
 	isArchived bool
+	isArtifact bool
 	isPlan      bool
 	isGroup     bool
 	isWorkspace bool
@@ -247,11 +248,19 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		info.isGroup = true
 		info.name = node.GroupName
 		info.isArchived = strings.Contains(node.GroupName, "/.archive")
+		info.isArtifact = strings.Contains(node.GroupName, "/.artifacts")
 
 		// For archive parent nodes (e.g., "current/.archive" or "plans/.archive"), display just ".archive"
 		if strings.HasSuffix(node.GroupName, "/.archive") {
 			info.name = ".archive"
 			icon := getGroupIcon(".archive")
+			if icon != "" {
+				info.indicator = icon
+			}
+		} else if strings.HasSuffix(node.GroupName, "/.artifacts") {
+			// For artifact parent nodes, display just ".artifacts"
+			info.name = ".artifacts"
+			icon := getGroupIcon(".artifacts")
 			if icon != "" {
 				info.indicator = icon
 			}
@@ -281,6 +290,7 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		info.note = node.Note
 		info.name = node.Note.Title
 		info.isArchived = strings.Contains(node.Note.Path, "/.archive/")
+		info.isArtifact = node.Note.IsArtifact
 		if _, ok := m.selected[node.Note.Path]; ok {
 			info.indicator = "■" // Selected indicator
 		} else {
@@ -366,10 +376,10 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 	if info.note != nil {
 		if _, isCut := m.cutPaths[info.note.Path]; isCut {
 			style = style.Faint(true).Strikethrough(true)
-		} else if info.isArchived {
+		} else if info.isArchived || info.isArtifact {
 			style = style.Faint(true)
 		}
-	} else if info.isArchived {
+	} else if info.isArchived || info.isArtifact {
 		style = style.Faint(true)
 	}
 
@@ -635,6 +645,8 @@ func getNoteIcon(noteType string) string {
 		return theme.IconHeadlessAgent
 	case "shell":
 		return theme.IconShell
+	case "artifact":
+		return theme.IconDocs
 	default:
 		return theme.IconNote // Default to a generic note icon
 	}
@@ -663,6 +675,8 @@ func getGroupIcon(groupName string) string {
 		return theme.IconPlan
 	case ".archive":
 		return theme.IconArchive
+	case ".artifacts":
+		return theme.IconDocs
 	default:
 		return "" // No icon for unknown groups
 	}

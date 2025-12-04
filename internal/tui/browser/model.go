@@ -37,10 +37,11 @@ type Model struct {
 	width      int
 	height     int
 	filterInput textinput.Model
-	lastKey     string // For detecting 'gg' and 'z' sequences
-	showArchives bool  // Whether to show .archive directories
-	hideGlobal   bool  // Whether to hide the global workspace node
-	showOnHold   bool  // Whether to show on-hold plans
+	lastKey      string // For detecting 'gg' and 'z' sequences
+	showArchives bool   // Whether to show .archive directories
+	showArtifacts bool  // Whether to show .artifacts directories
+	hideGlobal   bool   // Whether to hide the global workspace node
+	showOnHold   bool   // Whether to show on-hold plans
 	spinner      spinner.Model
 	loadingCount int
 	recentNotesMode bool  // Whether to show only recent notes
@@ -248,6 +249,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 		spinner:           s,
 		loadingCount:      2, // For initial workspaces + notes load
 		showArchives:      false, // Default to hiding archives
+		showArtifacts:     false, // Default to hiding artifacts
 		focusedWorkspace:  initialFocus,
 		focusChanged:      initialFocus != nil, // Trigger initial collapse state setup
 		noteTitleInput:    noteTitleInput,
@@ -324,9 +326,9 @@ func (m *Model) populateTagPicker() {
 func (m Model) Init() tea.Cmd {
 	var notesCmd tea.Cmd
 	if m.focusedWorkspace != nil {
-		notesCmd = fetchFocusedNotesCmd(m.service, m.focusedWorkspace)
+		notesCmd = fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts)
 	} else {
-		notesCmd = fetchAllNotesCmd(m.service)
+		notesCmd = fetchAllNotesCmd(m.service, m.showArtifacts)
 	}
 	return tea.Batch(
 		fetchWorkspacesCmd(m.service.GetWorkspaceProvider()),

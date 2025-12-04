@@ -134,6 +134,33 @@ func ParseNote(path string) (*models.Note, error) {
 	return note, nil
 }
 
+// ParseArtifact reads and parses an artifact file (e.g., briefing.xml)
+func ParseArtifact(path string) (*models.Note, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract metadata from path
+	workspace, branch, _ := GetNoteMetadata(path)
+
+	// For artifacts, the title is the filename without extension
+	title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+
+	note := &models.Note{
+		Path:       path,
+		Title:      title,
+		Type:       "artifact",
+		Workspace:  workspace,
+		Branch:     branch,
+		CreatedAt:  info.ModTime(),
+		ModifiedAt: info.ModTime(),
+		IsArtifact: true,
+	}
+
+	return note, nil
+}
+
 // extractTitle gets the title from markdown content
 func extractTitle(content string) string {
 	lines := strings.Split(content, "\n")
