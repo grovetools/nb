@@ -260,10 +260,12 @@ func (m *Model) BuildDisplayTree() {
 	}
 
 	for _, note := range m.allNotes {
-		if _, ok := notesByWorkspace[note.Workspace]; !ok {
-			notesByWorkspace[note.Workspace] = make(map[string][]*models.Note)
+		// Normalize workspace name to lowercase for case-insensitive matching
+		wsKey := strings.ToLower(note.Workspace)
+		if _, ok := notesByWorkspace[wsKey]; !ok {
+			notesByWorkspace[wsKey] = make(map[string][]*models.Note)
 		}
-		notesByWorkspace[note.Workspace][note.Group] = append(notesByWorkspace[note.Workspace][note.Group], note)
+		notesByWorkspace[wsKey][note.Group] = append(notesByWorkspace[wsKey][note.Group], note)
 	}
 
 	// 3. Build the display node list and jump map
@@ -272,6 +274,9 @@ func (m *Model) BuildDisplayTree() {
 	needsSeparator := false // Track if we need to add a separator before the next workspace
 
 	for _, ws := range workspacesToShow {
+		// Normalize workspace name to lowercase for case-insensitive matching
+		wsKey := strings.ToLower(ws.Name)
+
 		// Add separator between ecosystem's own notes and child workspaces
 		if needsSeparator && m.focusedWorkspace != nil && m.focusedWorkspace.IsEcosystem() {
 			isSame, _ := pathutil.ComparePaths(ws.Path, m.focusedWorkspace.Path)
@@ -290,7 +295,7 @@ func (m *Model) BuildDisplayTree() {
 			continue
 		}
 
-		hasNotes := len(notesByWorkspace[ws.Name]) > 0
+		hasNotes := len(notesByWorkspace[wsKey]) > 0
 		// Always show ecosystem nodes at depth 0, even if they have no direct notes
 		// (their children may have notes)
 		// Also always show the global workspace
@@ -327,7 +332,7 @@ func (m *Model) BuildDisplayTree() {
 			continue
 		}
 
-		if noteGroups, ok := notesByWorkspace[ws.Name]; ok {
+		if noteGroups, ok := notesByWorkspace[wsKey]; ok {
 			// Separate regular groups and archived subgroups
 			// archiveSubgroups maps "parent" -> "child" -> notes
 			// e.g., "plans" -> "test-plan" -> [notes in plans/.archive/test-plan]
@@ -579,7 +584,9 @@ func (m *Model) buildTagFilteredTree() {
 	// 2. Group notes by workspace
 	notesByWorkspace := make(map[string][]*models.Note)
 	for _, note := range filteredNotes {
-		notesByWorkspace[note.Workspace] = append(notesByWorkspace[note.Workspace], note)
+		// Normalize workspace name to lowercase for case-insensitive matching
+		wsKey := strings.ToLower(note.Workspace)
+		notesByWorkspace[wsKey] = append(notesByWorkspace[wsKey], note)
 	}
 
 	// 3. Determine workspaces to show (replicating logic from BuildDisplayTree)
@@ -615,7 +622,9 @@ func (m *Model) buildTagFilteredTree() {
 	}
 
 	for _, ws := range workspacesToShow {
-		if notesInWs, ok := notesByWorkspace[ws.Name]; ok {
+		// Normalize workspace name to lowercase for case-insensitive matching
+		wsKey := strings.ToLower(ws.Name)
+		if notesInWs, ok := notesByWorkspace[wsKey]; ok {
 			// Add workspace node
 			wsNode := &DisplayNode{
 				IsWorkspace: true,
@@ -1211,7 +1220,9 @@ func (m *Model) addUngroupedSection(nodes *[]*DisplayNode, ungroupedWorkspaces [
 				continue
 			}
 
-			hasNotes := len(notesByWorkspace[ws.Name]) > 0
+			// Normalize workspace name to lowercase for case-insensitive matching
+			wsKey := strings.ToLower(ws.Name)
+			hasNotes := len(notesByWorkspace[wsKey]) > 0
 			if !hasNotes && ws.Depth > 0 {
 				continue
 			}
