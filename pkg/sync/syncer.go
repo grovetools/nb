@@ -2,6 +2,7 @@ package sync
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -116,48 +117,105 @@ func (s *Syncer) syncWithProvider(
 		"prs_type":    config.PRsType,
 	}
 
-	// Fetch remote items
+	// 1. Fetch remote items and map them by ID
 	remoteItems, err := provider.Sync(providerConfig, repoPath)
 	if err != nil {
 		return nil, fmt.Errorf("provider %s sync failed: %w", provider.Name(), err)
 	}
-
-	// Process each remote item
+	remoteItemsMap := make(map[string]*Item)
 	for _, item := range remoteItems {
-		var noteType models.NoteType
-		if item.Type == "issue" && config.IssuesType != "" {
-			noteType = models.NoteType(config.IssuesType)
-		} else if (item.Type == "pr" || item.Type == "pull_request") && config.PRsType != "" {
-			noteType = models.NoteType(config.PRsType)
-		} else {
-			continue // This item type is not configured for sync
-		}
+		remoteItemsMap[item.ID] = item
+	}
 
-		// Check if note exists (by RemoteID)
-		existingNote, err := s.findNoteByRemoteID(ctx, item.ID, provider.Name())
-		if err != nil {
-			report.Failed++
-			continue
+	// 2. Fetch local notes with remote metadata and map them by ID
+	localNotes, err := s.svc.ListAllNotes(ctx, true, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list local notes: %w", err)
+	}
+	localNotesMap := make(map[string]*models.Note)
+	allRemoteIDs := make(map[string]bool)
+	for _, note := range localNotes {
+		if note.Remote != nil && note.Remote.Provider == provider.Name() {
+			localNotesMap[note.Remote.ID] = note
+			allRemoteIDs[note.Remote.ID] = true
 		}
+	}
+	for id := range remoteItemsMap {
+		allRemoteIDs[id] = true
+	}
 
-		if existingNote == nil {
-			// Create new note
-			if err := s.createNoteFromItem(ctx, item, noteType); err != nil {
+	// 3. Iterate and sync
+	for id := range allRemoteIDs {
+		localNote, localExists := localNotesMap[id]
+		remoteItem, remoteExists := remoteItemsMap[id]
+
+		switch {
+		// Case 1: Exists locally and remotely -> compare and sync
+		case localExists && remoteExists:
+			// Get the actual file modification time (not from frontmatter)
+			fileInfo, err := os.Stat(localNote.Path)
+			if err != nil {
+				report.Failed++
+				continue
+			}
+			fileMtime := fileInfo.ModTime()
+
+			// Compare remote's UpdatedAt with local file modification time
+			// If remote is newer, pull. If local is newer, push.
+			if remoteItem.UpdatedAt.After(fileMtime) {
+				// Remote is newer ("pull")
+				if s.needsUpdate(localNote, remoteItem) {
+					if err := s.updateNoteFromItem(localNote, remoteItem); err != nil {
+						report.Failed++
+					} else {
+						report.Updated++
+					}
+				} else {
+					report.Unchanged++
+				}
+			} else if fileMtime.After(remoteItem.UpdatedAt) {
+				// Local is newer ("push")
+				syncItem, err := s.noteToSyncItem(localNote)
+				if err != nil {
+					report.Failed++
+					continue
+				}
+				updatedRemoteItem, err := provider.UpdateItem(syncItem, repoPath)
+				if err != nil {
+					report.Failed++
+				} else {
+					// Update local note with new sync state from remote
+					if err := s.updateNoteFromItem(localNote, updatedRemoteItem); err != nil {
+						report.Failed++
+					} else {
+						report.Updated++
+					}
+				}
+			} else {
+				// Timestamps are equal, no update needed
+				report.Unchanged++
+			}
+
+		// Case 2: Exists only remotely -> create locally
+		case !localExists && remoteExists:
+			var noteType models.NoteType
+			if remoteItem.Type == "issue" && config.IssuesType != "" {
+				noteType = models.NoteType(config.IssuesType)
+			} else if (remoteItem.Type == "pr" || remoteItem.Type == "pull_request") && config.PRsType != "" {
+				noteType = models.NoteType(config.PRsType)
+			} else {
+				continue // Skip
+			}
+			if err := s.createNoteFromItem(ctx, remoteItem, noteType); err != nil {
 				report.Failed++
 			} else {
 				report.Created++
 			}
-		} else {
-			// Check if update is needed
-			if s.needsUpdate(existingNote, item) {
-				if err := s.updateNoteFromItem(existingNote, item); err != nil {
-					report.Failed++
-				} else {
-					report.Updated++
-				}
-			} else {
-				report.Unchanged++
-			}
+
+		// Case 3: Exists only locally -> remote was deleted
+		case localExists && !remoteExists:
+			// For now, we do nothing. Deletion sync is a future feature.
+			report.Unchanged++
 		}
 	}
 
@@ -174,9 +232,62 @@ func (s *Syncer) createNoteFromItem(ctx *service.WorkspaceContext, item *Item, n
 
 // updateNoteFromItem updates an existing note from a sync.Item.
 func (s *Syncer) updateNoteFromItem(note *models.Note, item *Item) error {
+	// Read the existing body content to preserve it, only update frontmatter
+	content, err := os.ReadFile(note.Path)
+	if err != nil {
+		return fmt.Errorf("could not read existing note content: %w", err)
+	}
+	_, body, err := frontmatter.Parse(string(content))
+	if err != nil {
+		// If frontmatter is corrupt, just use the remote body
+		body = item.Body
+	}
+
 	fm := s.buildFrontmatter(item)
-	body := fmt.Sprintf("# %s\n\n%s", item.Title, item.Body)
 	return s.svc.UpdateNoteWithContent(note.Path, fm, body)
+}
+
+// noteToSyncItem constructs a sync.Item from a local note file.
+func (s *Syncer) noteToSyncItem(note *models.Note) (*Item, error) {
+	content, err := os.ReadFile(note.Path)
+	if err != nil {
+		return nil, err
+	}
+	fm, body, err := frontmatter.Parse(string(content))
+	if err != nil {
+		return nil, err
+	}
+
+	// Determine type from note metadata
+	itemType := "issue"
+	noteTypeStr := string(note.Type)
+	if strings.Contains(noteTypeStr, "pr") || strings.Contains(noteTypeStr, "pull") {
+		itemType = "pr"
+	}
+
+	// Use freshly parsed frontmatter values to ensure we get the latest changes
+	if fm.Remote == nil {
+		return nil, fmt.Errorf("note does not have remote metadata")
+	}
+
+	state := fm.Remote.State
+	url := fm.Remote.URL
+	labels := fm.Remote.Labels
+	assignees := fm.Remote.Assignees
+	milestone := fm.Remote.Milestone
+
+	return &Item{
+		ID:        note.Remote.ID,
+		Type:      itemType,
+		Title:     fm.Title,
+		Body:      body,
+		State:     state,
+		URL:       url,
+		Labels:    labels,
+		Assignees: assignees,
+		Milestone: milestone,
+		UpdatedAt: note.ModifiedAt,
+	}, nil
 }
 
 // buildFrontmatter creates a Frontmatter struct from a sync.Item.
@@ -184,7 +295,7 @@ func (s *Syncer) buildFrontmatter(item *Item) *frontmatter.Frontmatter {
 	fm := &frontmatter.Frontmatter{
 		Title:    item.Title,
 		Created:  frontmatter.FormatTimestamp(item.UpdatedAt),
-		Modified: frontmatter.FormatTimestamp(time.Now()),
+		Modified: frontmatter.FormatTimestamp(item.UpdatedAt),
 		Remote: &frontmatter.RemoteMetadata{
 			Provider:  "github",
 			ID:        item.ID,

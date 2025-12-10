@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/mattsolo1/grove-notebook/pkg/sync"
@@ -52,6 +53,101 @@ func (p *GitHubProvider) Sync(config map[string]string, repoPath string) ([]*syn
 	return allItems, nil
 }
 
+// UpdateItem pushes changes for a single item to GitHub.
+func (p *GitHubProvider) UpdateItem(item *sync.Item, repoPath string) (*sync.Item, error) {
+	itemType := item.Type
+	if itemType == "pull_request" {
+		itemType = "pr" // gh cli uses 'pr'
+	}
+
+	// 1. Update title and body
+	editArgs := []string{itemType, "edit", item.ID, "--title", item.Title, "--body", item.Body}
+	cmd := exec.Command("gh", editArgs...)
+	cmd.Dir = repoPath
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("gh %s edit failed: %w\n%s", itemType, err, string(output))
+	}
+
+	// 2. Update state if necessary
+	// We need to fetch the current remote state to see if a state change is needed.
+	remoteItem, err := p.fetchSingleItem(itemType, item.ID, repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch remote item after edit: %w", err)
+	}
+
+	if remoteItem.State != item.State {
+		var stateCmd *exec.Cmd
+		switch strings.ToLower(item.State) {
+		case "open":
+			stateArgs := []string{itemType, "reopen", item.ID}
+			stateCmd = exec.Command("gh", stateArgs...)
+		case "closed", "merged":
+			stateArgs := []string{itemType, "close", item.ID}
+			stateCmd = exec.Command("gh", stateArgs...)
+		}
+
+		if stateCmd != nil {
+			stateCmd.Dir = repoPath
+			if output, err := stateCmd.CombinedOutput(); err != nil {
+				return nil, fmt.Errorf("gh %s state change failed: %w\n%s", itemType, err, string(output))
+			}
+		}
+	}
+
+	// 3. Re-fetch the item to get the final state and new UpdatedAt timestamp
+	return p.fetchSingleItem(itemType, item.ID, repoPath)
+}
+
+// fetchSingleItem fetches a single issue or PR from GitHub.
+func (p *GitHubProvider) fetchSingleItem(itemType, itemID, repoPath string) (*sync.Item, error) {
+	cmdArgs := []string{itemType, "view", itemID, "--json", "id,number,title,body,state,url,updatedAt,labels,assignees,milestone"}
+	cmd := exec.Command("gh", cmdArgs...)
+	cmd.Dir = repoPath
+
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh %s view command failed: %w", itemType, err)
+	}
+
+	var ghItem ghItem
+	if err := json.Unmarshal(output, &ghItem); err != nil {
+		return nil, fmt.Errorf("failed to parse gh JSON output for single item: %w", err)
+	}
+
+	return p.ghItemToSyncItem(&ghItem, itemType), nil
+}
+
+// ghItemToSyncItem converts a ghItem to a sync.Item.
+func (p *GitHubProvider) ghItemToSyncItem(item *ghItem, itemType string) *sync.Item {
+	var labels []string
+	for _, label := range item.Labels {
+		labels = append(labels, label.Name)
+	}
+
+	var assignees []string
+	for _, assignee := range item.Assignees {
+		assignees = append(assignees, assignee.Login)
+	}
+
+	var milestone string
+	if item.Milestone != nil {
+		milestone = item.Milestone.Title
+	}
+
+	return &sync.Item{
+		ID:        fmt.Sprintf("%d", item.Number),
+		Type:      itemType,
+		Title:     item.Title,
+		Body:      item.Body,
+		State:     strings.ToLower(item.State),
+		URL:       item.URL,
+		Labels:    labels,
+		Assignees: assignees,
+		Milestone: milestone,
+		UpdatedAt: item.UpdatedAt,
+	}
+}
+
 // ghItem represents the JSON structure returned by 'gh ... list --json'.
 type ghItem struct {
 	ID        string    `json:"id"`
@@ -89,35 +185,8 @@ func (p *GitHubProvider) fetchItems(itemType string, repoPath string) ([]*sync.I
 	}
 
 	var syncItems []*sync.Item
-	for _, item := range ghItems {
-		var labels []string
-		for _, label := range item.Labels {
-			labels = append(labels, label.Name)
-		}
-
-		var assignees []string
-		for _, assignee := range item.Assignees {
-			assignees = append(assignees, assignee.Login)
-		}
-
-		var milestone string
-		if item.Milestone != nil {
-			milestone = item.Milestone.Title
-		}
-
-		syncItem := &sync.Item{
-			ID:        fmt.Sprintf("%d", item.Number),
-			Type:      itemType,
-			Title:     item.Title,
-			Body:      item.Body,
-			State:     item.State,
-			URL:       item.URL,
-			Labels:    labels,
-			Assignees: assignees,
-			Milestone: milestone,
-			UpdatedAt: item.UpdatedAt,
-		}
-		syncItems = append(syncItems, syncItem)
+	for i := range ghItems {
+		syncItems = append(syncItems, p.ghItemToSyncItem(&ghItems[i], itemType))
 	}
 
 	return syncItems, nil

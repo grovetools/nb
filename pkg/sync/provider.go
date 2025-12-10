@@ -4,8 +4,12 @@ import "time"
 
 // Provider defines the interface for a source of syncable items (e.g., GitHub).
 type Provider interface {
+	// Name returns the provider's name (e.g., "github").
 	Name() string
+	// Sync fetches all relevant items from the remote.
 	Sync(config map[string]string, repoPath string) ([]*Item, error)
+	// UpdateItem pushes changes for a single item to the remote and returns the updated item.
+	UpdateItem(item *Item, repoPath string) (*Item, error)
 }
 
 // Item represents a generic syncable entity.

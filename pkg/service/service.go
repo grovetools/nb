@@ -47,7 +47,15 @@ func (s *Service) CreateNoteWithContent(
 		return nil, fmt.Errorf("write note: %w", err)
 	}
 
-	// 5. Parse the note and return it
+	// 5. Set file modification time to match frontmatter if specified
+	if fm.Modified != "" {
+		if modTime, err := frontmatter.ParseTimestamp(fm.Modified); err == nil {
+			// Use the same time for both atime and mtime
+			os.Chtimes(notePath, modTime, modTime)
+		}
+	}
+
+	// 6. Parse the note and return it
 	note, err := ParseNote(notePath)
 	if err != nil {
 		return nil, fmt.Errorf("parse created note: %w", err)
@@ -75,6 +83,15 @@ func (s *Service) UpdateNoteWithContent(
 	if err := os.WriteFile(notePath, []byte(content), info.Mode()); err != nil {
 		return fmt.Errorf("write updated note: %w", err)
 	}
+
+	// 4. Set file modification time to match frontmatter if specified
+	if fm.Modified != "" {
+		if modTime, err := frontmatter.ParseTimestamp(fm.Modified); err == nil {
+			// Use the same time for both atime and mtime
+			os.Chtimes(notePath, modTime, modTime)
+		}
+	}
+
 	return nil
 }
 
