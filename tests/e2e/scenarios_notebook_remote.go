@@ -46,7 +46,8 @@ func NotebookRemoteSyncScenario() *harness.Scenario {
 							"updatedAt": "%s",
 							"labels": [{"name": "bug"}, {"name": "critical"}],
 							"assignees": [{"login": "user1"}, {"login": "user2"}],
-							"milestone": {"title": "v1.0"}
+							"milestone": {"title": "v1.0"},
+							"comments": []
 						}
 					]`, pastTime)
 					if err := fs.WriteString(filepath.Join(stateDir, "issues.json"), initialIssuesJSON); err != nil {
@@ -64,7 +65,8 @@ func NotebookRemoteSyncScenario() *harness.Scenario {
 							"updatedAt": "%s",
 							"labels": [{"name": "feature"}],
 							"assignees": [{"login": "reviewer1"}],
-							"milestone": {"title": "v1.1"}
+							"milestone": {"title": "v1.1"},
+							"comments": []
 						}
 					]`, pastTime)
 					if err := fs.WriteString(filepath.Join(stateDir, "prs.json"), initialPRsJSON); err != nil {
@@ -146,6 +148,7 @@ notebooks:
 					assert.Contains(issueContent, "  labels: [bug, critical]")
 					assert.Contains(issueContent, "  assignees: [user1, user2]")
 					assert.Contains(issueContent, "  milestone: v1.0")
+					assert.Contains(issueContent, "<!-- nb-sync-marker -->")
 
 					// Verify PR note
 					prNoteDir := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb", "workspaces", "sync-project", "prs")
@@ -270,7 +273,8 @@ notebooks:
 							"updatedAt": "%s",
 							"labels": [{"name": "bug"}],
 							"assignees": [{"login": "user3"}],
-							"milestone": {"title": "v2.0"}
+							"milestone": {"title": "v2.0"},
+							"comments": []
 						},
 						{
 							"id": "I_102",
@@ -282,7 +286,8 @@ notebooks:
 							"updatedAt": "%s",
 							"labels": [],
 							"assignees": [],
-							"milestone": null
+							"milestone": null,
+							"comments": []
 						}
 					]`, futureTime, futureTime)
 					return fs.WriteString(filepath.Join(stateDir, "issues.json"), updatedIssuesJSON)

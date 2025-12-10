@@ -342,12 +342,14 @@ func (m *Model) BuildDisplayTree() {
 			planGroups := make(map[string][]*models.Note)
 			holdPlanGroups := make(map[string][]*models.Note)
 			archiveSubgroups := make(map[string]map[string][]*models.Note)
+			closedSubgroups := make(map[string]map[string][]*models.Note)
 			artifactSubgroups := make(map[string][]*models.Note)
 
 			for name, notes := range noteGroups {
-				// Check if this is an archived group - skip if archives are hidden
+				// Check if this is an archived or closed group - skip if archives are hidden
 				isArchived := strings.Contains(name, "/.archive")
-				if isArchived && !m.showArchives {
+				isClosed := strings.Contains(name, "/.closed")
+				if (isArchived || isClosed) && !m.showArchives {
 					continue
 				}
 
@@ -361,6 +363,12 @@ func (m *Model) BuildDisplayTree() {
 				// Count occurrences of "/.archive" in the path
 				archiveCount := strings.Count(name, "/.archive")
 				if archiveCount > 1 {
+					continue
+				}
+
+				// Skip double-nested closed (e.g., issues/.closed/foo/.closed/bar)
+				closedCount := strings.Count(name, "/.closed")
+				if closedCount > 1 {
 					continue
 				}
 
@@ -386,6 +394,31 @@ func (m *Model) BuildDisplayTree() {
 					}
 					// Use empty string as key to indicate notes directly in .archive
 					archiveSubgroups[parent][""] = notes
+					continue
+				}
+
+				// Check if this matches pattern "<parent>/.closed/<child>"
+				if strings.Contains(name, "/.closed/") {
+					parts := strings.Split(name, "/.closed/")
+					if len(parts) == 2 {
+						parent := parts[0]
+						child := parts[1]
+						if closedSubgroups[parent] == nil {
+							closedSubgroups[parent] = make(map[string][]*models.Note)
+						}
+						closedSubgroups[parent][child] = notes
+						continue
+					}
+				}
+
+				// Check if this matches pattern "<parent>/.closed" (notes directly in .closed folder)
+				if strings.HasSuffix(name, "/.closed") {
+					parent := strings.TrimSuffix(name, "/.closed")
+					if closedSubgroups[parent] == nil {
+						closedSubgroups[parent] = make(map[string][]*models.Note)
+					}
+					// Use empty string as key to indicate notes directly in .closed
+					closedSubgroups[parent][""] = notes
 					continue
 				}
 
@@ -511,13 +544,14 @@ func (m *Model) BuildDisplayTree() {
 					continue
 				}
 
-				// Check if this group has archived or artifact children
+				// Check if this group has archived, closed, or artifact children
 				hasArchives := len(archiveSubgroups[groupName]) > 0 && m.showArchives
+				hasClosed := len(closedSubgroups[groupName]) > 0 && m.showArchives
 				hasArtifacts := len(artifactSubgroups[groupName]) > 0 && m.showArtifacts
 
 				// Add note nodes
 				for j, note := range notesInGroup {
-					isLastNote := j == len(notesInGroup)-1 && !hasArchives && !hasArtifacts
+					isLastNote := j == len(notesInGroup)-1 && !hasArchives && !hasClosed && !hasArtifacts
 					var notePrefix strings.Builder
 					noteIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
 					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
@@ -539,6 +573,11 @@ func (m *Model) BuildDisplayTree() {
 				// Add .archive subgroup if this group has archived children
 				if hasArchives {
 					m.addArchiveSubgroup(&nodes, ws, groupPrefix.String(), archiveSubgroups[groupName], hasSearchFilter, workspacePathMap)
+				}
+
+				// Add .closed subgroup if this group has closed children
+				if hasClosed {
+					m.addClosedSubgroup(&nodes, ws, groupPrefix.String(), closedSubgroups[groupName], hasSearchFilter, workspacePathMap)
 				}
 
 				// Add .artifacts subgroup if this group has artifact children
@@ -824,6 +863,140 @@ func (m *Model) addArchiveSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspac
 						IsNote:       true,
 						Note:         note,
 						Prefix:       archivedNotePrefix.String(),
+						Depth:        ws.Depth + 4,
+						RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+					})
+				}
+			}
+		}
+	}
+}
+
+func (m *Model) addClosedSubgroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, groupPrefix string, closedSubgroups map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string) {
+	// Sort closed child names
+	var closedNames []string
+	for name := range closedSubgroups {
+		closedNames = append(closedNames, name)
+	}
+	sort.Strings(closedNames)
+
+	// Count total closed notes
+	totalClosedNotes := 0
+	for _, notes := range closedSubgroups {
+		totalClosedNotes += len(notes)
+	}
+
+	// Calculate .closed prefix (last child under this group)
+	var closedPrefix strings.Builder
+	closedIndent := strings.ReplaceAll(groupPrefix, "├─", "│ ")
+	closedIndent = strings.ReplaceAll(closedIndent, "└─", "  ")
+	closedPrefix.WriteString(closedIndent)
+	closedPrefix.WriteString("└─ ")
+
+	// Get parent group name from groupPrefix context
+	parentGroupName := ""
+	if len(*nodes) > 0 {
+		for i := len(*nodes) - 1; i >= 0; i-- {
+			if (*nodes)[i].IsGroup && !strings.Contains((*nodes)[i].GroupName, "/.closed") {
+				parentGroupName = (*nodes)[i].GroupName
+				break
+			}
+		}
+	}
+
+	// Add .closed parent node
+	closedParentNode := &DisplayNode{
+		IsGroup:       true,
+		GroupName:     parentGroupName + "/.closed",
+		WorkspaceName: ws.Name,
+		Prefix:        closedPrefix.String(),
+		Depth:         ws.Depth + 2,
+		ChildCount:    totalClosedNotes,
+	}
+	*nodes = append(*nodes, closedParentNode)
+
+	// Check if .closed parent is collapsed
+	closedParentNodeID := closedParentNode.NodeID()
+	if !m.collapsedNodes[closedParentNodeID] || hasSearchFilter {
+		// Add individual closed children
+		for pi, closedName := range closedNames {
+			isLastClosed := pi == len(closedNames)-1
+			closedNotes := closedSubgroups[closedName]
+
+			// Sort notes within the closed child
+			sort.SliceStable(closedNotes, func(i, j int) bool {
+				if m.sortAscending {
+					return closedNotes[i].CreatedAt.Before(closedNotes[j].CreatedAt)
+				}
+				return closedNotes[i].CreatedAt.After(closedNotes[j].CreatedAt)
+			})
+
+			// If closedName is empty, these are notes directly in .closed folder
+			if closedName == "" {
+				// Add notes directly under .closed parent
+				for ni, note := range closedNotes {
+					isLastNote := ni == len(closedNotes)-1 && isLastClosed
+					var notePrefix strings.Builder
+					noteIndent := strings.ReplaceAll(closedPrefix.String(), "├─", "│ ")
+					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+					notePrefix.WriteString(noteIndent)
+					if isLastNote {
+						notePrefix.WriteString("└─ ")
+					} else {
+						notePrefix.WriteString("├─ ")
+					}
+					*nodes = append(*nodes, &DisplayNode{
+						IsNote:       true,
+						Note:         note,
+						Prefix:       notePrefix.String(),
+						Depth:        ws.Depth + 3,
+						RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+					})
+				}
+				continue
+			}
+
+			// Calculate closed child prefix
+			var closedChildPrefix strings.Builder
+			closedChildIndent := strings.ReplaceAll(closedPrefix.String(), "├─", "│ ")
+			closedChildIndent = strings.ReplaceAll(closedChildIndent, "└─", "  ")
+			closedChildPrefix.WriteString(closedChildIndent)
+			if isLastClosed {
+				closedChildPrefix.WriteString("└─ ")
+			} else {
+				closedChildPrefix.WriteString("├─ ")
+			}
+
+			// Add closed child node
+			closedChildNode := &DisplayNode{
+				IsGroup:       true,
+				GroupName:     parentGroupName + "/.closed/" + closedName,
+				WorkspaceName: ws.Name,
+				Prefix:        closedChildPrefix.String(),
+				Depth:         ws.Depth + 3,
+				ChildCount:    len(closedNotes),
+			}
+			*nodes = append(*nodes, closedChildNode)
+
+			// Check if closed child is collapsed
+			closedChildNodeID := closedChildNode.NodeID()
+			if !m.collapsedNodes[closedChildNodeID] || hasSearchFilter {
+				// Add notes within the closed child
+				for ni, note := range closedNotes {
+					isLastClosedNote := ni == len(closedNotes)-1
+					var closedNotePrefix strings.Builder
+					closedNoteIndent := strings.ReplaceAll(closedChildPrefix.String(), "├─", "│ ")
+					closedNoteIndent = strings.ReplaceAll(closedIndent, "└─", "  ")
+					closedNotePrefix.WriteString(closedNoteIndent)
+					if isLastClosedNote {
+						closedNotePrefix.WriteString("└─ ")
+					} else {
+						closedNotePrefix.WriteString("├─ ")
+					}
+					*nodes = append(*nodes, &DisplayNode{
+						IsNote:       true,
+						Note:         note,
+						Prefix:       closedNotePrefix.String(),
 						Depth:        ws.Depth + 4,
 						RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
 					})

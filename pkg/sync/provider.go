@@ -10,6 +10,18 @@ type Provider interface {
 	Sync(config map[string]string, repoPath string) ([]*Item, error)
 	// UpdateItem pushes changes for a single item to the remote and returns the updated item.
 	UpdateItem(item *Item, repoPath string) (*Item, error)
+	// AddComment posts a new comment to an item.
+	AddComment(itemType, itemID, body, repoPath string) error
+	// GetItem fetches a single item from the remote.
+	GetItem(itemType, itemID, repoPath string) (*Item, error)
+}
+
+// Comment represents a single comment on a syncable item.
+type Comment struct {
+	ID        string
+	Body      string
+	Author    string
+	CreatedAt time.Time
 }
 
 // Item represents a generic syncable entity.
@@ -24,6 +36,7 @@ type Item struct {
 	Assignees []string
 	Milestone string
 	UpdatedAt time.Time
+	Comments  []*Comment
 }
 
 // Report summarizes the results of a sync operation.

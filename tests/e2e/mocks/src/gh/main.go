@@ -9,15 +9,26 @@ import (
 	"time"
 )
 
+// ghComment represents a comment in the mock data.
+type ghComment struct {
+	ID        string    `json:"id"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
+	Author    struct {
+		Login string `json:"login"`
+	} `json:"author"`
+}
+
 // ghItem represents the JSON structure used in our mock data files.
 type ghItem struct {
-	ID        string    `json:"id"`
-	Number    int       `json:"number"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	State     string    `json:"state"`
-	URL       string    `json:"url"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID        string      `json:"id"`
+	Number    int         `json:"number"`
+	Title     string      `json:"title"`
+	Body      string      `json:"body"`
+	State     string      `json:"state"`
+	URL       string      `json:"url"`
+	UpdatedAt time.Time   `json:"updatedAt"`
+	Comments  []ghComment `json:"comments"`
 	Labels    []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
@@ -51,6 +62,8 @@ func main() {
 		handleEdit(args, stateDir)
 	case len(args) > 1 && (args[1] == "reopen" || args[1] == "close"):
 		handleStateChange(args, stateDir)
+	case len(args) > 1 && args[1] == "comment":
+		handleComment(args, stateDir)
 	default:
 		fmt.Fprintf(os.Stderr, "mock gh: unhandled command %v\n", args)
 		os.Exit(1)
@@ -157,6 +170,31 @@ func handleStateChange(args []string, stateDir string) {
 		} else if newState == "close" {
 			item.State = "CLOSED"
 		}
+	})
+}
+
+func handleComment(args []string, stateDir string) {
+	itemType := args[0]
+	itemID := args[2]
+	body := ""
+	for i := 3; i < len(args); i++ {
+		if args[i] == "--body" && i+1 < len(args) {
+			body = args[i+1]
+			i++
+		}
+	}
+
+	updateItem(itemType, itemID, stateDir, func(item *ghItem) {
+		newComment := ghComment{
+			ID:        fmt.Sprintf("C_%d", time.Now().UnixNano()),
+			Body:      body,
+			CreatedAt: time.Now(),
+		}
+		newComment.Author.Login = "mock-user"
+		if item.Comments == nil {
+			item.Comments = []ghComment{}
+		}
+		item.Comments = append(item.Comments, newComment)
 	})
 }
 

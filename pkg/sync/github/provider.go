@@ -53,6 +53,26 @@ func (p *GitHubProvider) Sync(config map[string]string, repoPath string) ([]*syn
 	return allItems, nil
 }
 
+// AddComment posts a new comment to a GitHub issue or pull request.
+func (p *GitHubProvider) AddComment(itemType, itemID, body, repoPath string) error {
+	if itemType == "pull_request" {
+		itemType = "pr"
+	}
+
+	cmd := exec.Command("gh", itemType, "comment", itemID, "--body", body)
+	cmd.Dir = repoPath
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("gh %s comment failed: %w\n%s", itemType, err, string(output))
+	}
+	return nil
+}
+
+// GetItem fetches a single item from GitHub.
+func (p *GitHubProvider) GetItem(itemType, itemID, repoPath string) (*sync.Item, error) {
+	return p.fetchSingleItem(itemType, itemID, repoPath)
+}
+
 // UpdateItem pushes changes for a single item to GitHub.
 func (p *GitHubProvider) UpdateItem(item *sync.Item, repoPath string) (*sync.Item, error) {
 	itemType := item.Type
@@ -100,7 +120,7 @@ func (p *GitHubProvider) UpdateItem(item *sync.Item, repoPath string) (*sync.Ite
 
 // fetchSingleItem fetches a single issue or PR from GitHub.
 func (p *GitHubProvider) fetchSingleItem(itemType, itemID, repoPath string) (*sync.Item, error) {
-	cmdArgs := []string{itemType, "view", itemID, "--json", "id,number,title,body,state,url,updatedAt,labels,assignees,milestone"}
+	cmdArgs := []string{itemType, "view", itemID, "--json", "id,number,title,body,state,url,updatedAt,labels,assignees,milestone,comments"}
 	cmd := exec.Command("gh", cmdArgs...)
 	cmd.Dir = repoPath
 
@@ -134,6 +154,16 @@ func (p *GitHubProvider) ghItemToSyncItem(item *ghItem, itemType string) *sync.I
 		milestone = item.Milestone.Title
 	}
 
+	var comments []*sync.Comment
+	for _, c := range item.Comments {
+		comments = append(comments, &sync.Comment{
+			ID:        c.ID,
+			Body:      c.Body,
+			Author:    c.Author.Login,
+			CreatedAt: c.CreatedAt,
+		})
+	}
+
 	return &sync.Item{
 		ID:        fmt.Sprintf("%d", item.Number),
 		Type:      itemType,
@@ -145,18 +175,30 @@ func (p *GitHubProvider) ghItemToSyncItem(item *ghItem, itemType string) *sync.I
 		Assignees: assignees,
 		Milestone: milestone,
 		UpdatedAt: item.UpdatedAt,
+		Comments:  comments,
 	}
+}
+
+// ghComment represents the structure of a single comment from the gh CLI.
+type ghComment struct {
+	ID        string    `json:"id"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
+	Author    struct {
+		Login string `json:"login"`
+	} `json:"author"`
 }
 
 // ghItem represents the JSON structure returned by 'gh ... list --json'.
 type ghItem struct {
-	ID        string    `json:"id"`
-	Number    int       `json:"number"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	State     string    `json:"state"`
-	URL       string    `json:"url"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID        string      `json:"id"`
+	Number    int         `json:"number"`
+	Title     string      `json:"title"`
+	Body      string      `json:"body"`
+	State     string      `json:"state"`
+	URL       string      `json:"url"`
+	UpdatedAt time.Time   `json:"updatedAt"`
+	Comments  []ghComment `json:"comments"`
 	Labels    []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
@@ -170,7 +212,7 @@ type ghItem struct {
 
 // fetchItems executes the gh command to get issues or PRs.
 func (p *GitHubProvider) fetchItems(itemType string, repoPath string) ([]*sync.Item, error) {
-	cmdArgs := []string{itemType, "list", "--state", "all", "--limit", "200", "--json", "id,number,title,body,state,url,updatedAt,labels,assignees,milestone"}
+	cmdArgs := []string{itemType, "list", "--state", "all", "--limit", "200", "--json", "id,number,title,body,state,url,updatedAt,labels,assignees,milestone,comments"}
 	cmd := exec.Command("gh", cmdArgs...)
 	cmd.Dir = repoPath
 

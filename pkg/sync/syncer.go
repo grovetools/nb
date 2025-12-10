@@ -11,6 +11,8 @@ import (
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
 
+const syncMarker = "<!-- nb-sync-marker -->"
+
 // ProviderFactory is a function that creates a Provider instance.
 type ProviderFactory func() Provider
 
@@ -175,17 +177,49 @@ func (s *Syncer) syncWithProvider(
 				}
 			} else if fileMtime.After(remoteItem.UpdatedAt) {
 				// Local is newer ("push")
-				syncItem, err := s.noteToSyncItem(localNote)
+				// Check for new local comments to push
+				content, err := os.ReadFile(localNote.Path)
 				if err != nil {
 					report.Failed++
 					continue
 				}
-				updatedRemoteItem, err := provider.UpdateItem(syncItem, repoPath)
-				if err != nil {
-					report.Failed++
+				contentStr := string(content)
+
+				localComment := ""
+				if markerIndex := strings.Index(contentStr, syncMarker); markerIndex != -1 {
+					localComment = strings.TrimSpace(contentStr[markerIndex+len(syncMarker):])
+				}
+
+				if localComment != "" {
+					itemType := "issue"
+					if localNote.Remote.Provider == "github" {
+						noteTypeStr := string(localNote.Type)
+						if strings.Contains(noteTypeStr, "pr") || strings.Contains(noteTypeStr, "pull") {
+							itemType = "pr"
+						}
+					}
+					err := provider.AddComment(itemType, localNote.Remote.ID, localComment, repoPath)
+					if err != nil {
+						report.Failed++
+					} else {
+						// Comment pushed, now update local state
+						updatedRemoteItem, err := provider.GetItem(itemType, localNote.Remote.ID, repoPath)
+						if err != nil {
+							report.Failed++
+						} else {
+							// Update local note with new sync state from remote, clearing local content since we just pushed it
+							if err := s.updateNoteFromItemPreserveLocal(localNote, updatedRemoteItem, false); err != nil {
+								report.Failed++
+							} else {
+								report.Updated++
+							}
+						}
+					}
 				} else {
-					// Update local note with new sync state from remote
-					if err := s.updateNoteFromItem(localNote, updatedRemoteItem); err != nil {
+					// No local comment, but file is modified.
+					// Rebuild the synced section from remote to restore any deleted comments
+					// and preserve any local content after the marker.
+					if err := s.updateNoteFromItem(localNote, remoteItem); err != nil {
 						report.Failed++
 					} else {
 						report.Updated++
@@ -206,7 +240,8 @@ func (s *Syncer) syncWithProvider(
 			} else {
 				continue // Skip
 			}
-			if err := s.createNoteFromItem(ctx, remoteItem, noteType); err != nil {
+			_, err := s.createNoteFromItem(ctx, remoteItem, noteType)
+			if err != nil {
 				report.Failed++
 			} else {
 				report.Created++
@@ -222,29 +257,108 @@ func (s *Syncer) syncWithProvider(
 	return report, nil
 }
 
-// createNoteFromItem creates a new note from a sync.Item.
-func (s *Syncer) createNoteFromItem(ctx *service.WorkspaceContext, item *Item, noteType models.NoteType) error {
+// formatComments formats a slice of comments into a markdown string.
+func formatComments(comments []*Comment) string {
+	var sb strings.Builder
+	for _, comment := range comments {
+		sb.WriteString("\n\n---\n\n")
+		sb.WriteString(fmt.Sprintf("> **%s** commented at %s:\n\n", comment.Author, comment.CreatedAt.Format(time.RFC822)))
+		sb.WriteString(comment.Body)
+	}
+	return sb.String()
+}
+
+// createNoteFromItem creates a new note from a sync.Item and returns the note path.
+func (s *Syncer) createNoteFromItem(ctx *service.WorkspaceContext, item *Item, noteType models.NoteType) (string, error) {
 	fm := s.buildFrontmatter(item)
-	body := fmt.Sprintf("# %s\n\n%s", item.Title, item.Body)
-	_, err := s.svc.CreateNoteWithContent(ctx, noteType, item.Title, fm, body)
-	return err
+
+	// Build the body with the main content, comments, and sync marker
+	var bodyBuilder strings.Builder
+	bodyBuilder.WriteString(fmt.Sprintf("# %s\n\n%s", item.Title, item.Body))
+	bodyBuilder.WriteString(formatComments(item.Comments))
+	bodyBuilder.WriteString("\n\n" + syncMarker)
+
+	note, err := s.svc.CreateNoteWithContent(ctx, noteType, item.Title, fm, bodyBuilder.String())
+	if err != nil {
+		return "", err
+	}
+	return note.Path, nil
 }
 
 // updateNoteFromItem updates an existing note from a sync.Item.
 func (s *Syncer) updateNoteFromItem(note *models.Note, item *Item) error {
-	// Read the existing body content to preserve it, only update frontmatter
+	return s.updateNoteFromItemPreserveLocal(note, item, true)
+}
+
+// updateNoteFromItemPreserveLocal updates an existing note from a sync.Item with option to preserve local content.
+func (s *Syncer) updateNoteFromItemPreserveLocal(note *models.Note, item *Item, preserveLocal bool) error {
 	content, err := os.ReadFile(note.Path)
 	if err != nil {
 		return fmt.Errorf("could not read existing note content: %w", err)
 	}
-	_, body, err := frontmatter.Parse(string(content))
-	if err != nil {
-		// If frontmatter is corrupt, just use the remote body
-		body = item.Body
+	contentStr := string(content)
+
+	// Get last sync time from the note's frontmatter
+	lastSyncTime := note.Remote.UpdatedAt
+
+	// Find new comments
+	var newComments []*Comment
+	for _, comment := range item.Comments {
+		if comment.CreatedAt.After(lastSyncTime) {
+			newComments = append(newComments, comment)
+		}
 	}
 
-	fm := s.buildFrontmatter(item)
-	return s.svc.UpdateNoteWithContent(note.Path, fm, body)
+	// Split content by sync marker to preserve local content
+	localContent := ""
+	if preserveLocal {
+		if markerIndex := strings.Index(contentStr, syncMarker); markerIndex != -1 {
+			localContent = contentStr[markerIndex+len(syncMarker):]
+		}
+	}
+
+	// Rebuild the synced body from the remote item
+	var syncedBodyBuilder strings.Builder
+	syncedBodyBuilder.WriteString(fmt.Sprintf("# %s\n\n%s", item.Title, item.Body))
+
+	// Add all existing comments up to the last sync time
+	for _, comment := range item.Comments {
+		if !comment.CreatedAt.After(lastSyncTime) {
+			syncedBodyBuilder.WriteString("\n\n---\n\n")
+			syncedBodyBuilder.WriteString(fmt.Sprintf("> **%s** commented at %s:\n\n", comment.Author, comment.CreatedAt.Format(time.RFC822)))
+			syncedBodyBuilder.WriteString(comment.Body)
+		}
+	}
+
+	// Add new comments
+	if len(newComments) > 0 {
+		syncedBodyBuilder.WriteString(formatComments(newComments))
+	}
+
+	// Rebuild body content
+	var newBodyBuilder strings.Builder
+	newBodyBuilder.WriteString(syncedBodyBuilder.String())
+	newBodyBuilder.WriteString("\n\n" + syncMarker)
+	newBodyBuilder.WriteString(localContent)
+	newBody := newBodyBuilder.String()
+
+	// Parse the original content to get and update the frontmatter
+	fm, _, err := frontmatter.Parse(contentStr)
+	if err != nil {
+		// If parsing fails, create a new frontmatter struct
+		fm = s.buildFrontmatter(item)
+	} else {
+		// Update existing frontmatter
+		fm.Title = item.Title
+		fm.Remote.State = strings.ToLower(item.State)
+		fm.Remote.UpdatedAt = item.UpdatedAt.Format(time.RFC3339)
+		fm.Modified = frontmatter.FormatTimestamp(item.UpdatedAt)
+		fm.Remote.Labels = item.Labels
+		fm.Remote.Assignees = item.Assignees
+		fm.Remote.Milestone = item.Milestone
+	}
+
+	return s.svc.UpdateNoteWithContent(note.Path, fm, newBody)
 }
 
 // noteToSyncItem constructs a sync.Item from a local note file.

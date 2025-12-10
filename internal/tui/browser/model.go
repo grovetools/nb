@@ -39,7 +39,7 @@ type Model struct {
 	height     int
 	filterInput textinput.Model
 	lastKey      string // For detecting 'gg' and 'z' sequences
-	showArchives bool   // Whether to show .archive directories
+	showArchives bool   // Whether to show .archive and .closed directories
 	showArtifacts bool  // Whether to show .artifacts directories
 	hideGlobal   bool   // Whether to hide the global workspace node
 	showOnHold   bool   // Whether to show on-hold plans
@@ -277,9 +277,10 @@ func (m *Model) populateTagPicker() {
 
 	// Count occurrences of each tag
 	for _, note := range m.allNotes {
-		// Skip archived notes unless showArchives is true
+		// Skip archived and closed notes unless showArchives is true
 		if !m.showArchives && filepath.Dir(note.Path) != "" {
-			if strings.Contains(note.Path, string(filepath.Separator)+".archive"+string(filepath.Separator)) {
+			if strings.Contains(note.Path, string(filepath.Separator)+".archive"+string(filepath.Separator)) ||
+				strings.Contains(note.Path, string(filepath.Separator)+".closed"+string(filepath.Separator)) {
 				continue
 			}
 		}

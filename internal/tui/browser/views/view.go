@@ -247,13 +247,20 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 	} else if node.IsGroup {
 		info.isGroup = true
 		info.name = node.GroupName
-		info.isArchived = strings.Contains(node.GroupName, "/.archive")
+		info.isArchived = strings.Contains(node.GroupName, "/.archive") || strings.Contains(node.GroupName, "/.closed")
 		info.isArtifact = strings.Contains(node.GroupName, "/.artifacts")
 
 		// For archive parent nodes (e.g., "current/.archive" or "plans/.archive"), display just ".archive"
 		if strings.HasSuffix(node.GroupName, "/.archive") {
 			info.name = ".archive"
 			icon := getGroupIcon(".archive")
+			if icon != "" {
+				info.indicator = icon
+			}
+		} else if strings.HasSuffix(node.GroupName, "/.closed") {
+			// For closed parent nodes (e.g., "github-issues/.closed"), display just ".closed"
+			info.name = ".closed"
+			icon := getGroupIcon(".closed")
 			if icon != "" {
 				info.indicator = icon
 			}
@@ -289,7 +296,7 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 	} else if node.IsNote {
 		info.note = node.Note
 		info.name = node.Note.Title
-		info.isArchived = strings.Contains(node.Note.Path, "/.archive/")
+		info.isArchived = strings.Contains(node.Note.Path, "/.archive/") || strings.Contains(node.Note.Path, "/.closed/")
 		info.isArtifact = node.Note.IsArtifact
 		if _, ok := m.selected[node.Note.Path]; ok {
 			info.indicator = "■" // Selected indicator
@@ -685,6 +692,8 @@ func getGroupIcon(groupName string) string {
 	case "plans":
 		return theme.IconPlan
 	case ".archive":
+		return theme.IconArchive
+	case ".closed":
 		return theme.IconArchive
 	case ".artifacts":
 		return theme.IconDocs
