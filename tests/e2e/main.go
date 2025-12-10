@@ -17,6 +17,7 @@ func main() {
 		NotebookCentralizedStructureScenario(),
 		NotebookLocalStructureScenario(),
 		NotebookWorktreeContextScenario(),
+		NotebookRemoteSyncScenario(),
 	}
 
 	// Setup signal handling for graceful shutdown.
