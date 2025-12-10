@@ -43,7 +43,6 @@ func NewMigrateCmd(svc **service.Service, workspaceOverride *string) *cobra.Comm
 		migrateYes           bool
 		renameCurrentToInbox bool
 		ensureTypeInTags     bool
-		renameSyncFields     bool
 		migrateNotebook      string
 	)
 
@@ -104,50 +103,6 @@ Examples:
 				}, os.Stdout)
 				if err != nil {
 					return fmt.Errorf("failed to rename 'current' to 'inbox': %w", err)
-				}
-				if migrateShowReport {
-					printMigrationReport(report, migrateDryRun)
-				}
-				return nil
-			}
-
-			// Handle sync field renaming
-			if renameSyncFields {
-				// Determine which notebook to use
-				notebookName := migrateNotebook
-				if notebookName == "" && s.CoreConfig != nil && s.CoreConfig.Notebooks != nil && s.CoreConfig.Notebooks.Rules != nil {
-					notebookName = s.CoreConfig.Notebooks.Rules.Default
-				}
-				if notebookName == "" {
-					notebookName = "nb" // Final fallback
-				}
-
-				// Get the notebook root path
-				var notebookRoot string
-				if s.CoreConfig != nil && s.CoreConfig.Notebooks != nil && s.CoreConfig.Notebooks.Definitions != nil {
-					if notebook, exists := s.CoreConfig.Notebooks.Definitions[notebookName]; exists && notebook != nil {
-						if notebook.RootDir != "" {
-							expandedPath, err := pathutil.Expand(notebook.RootDir)
-							if err != nil {
-								return fmt.Errorf("failed to expand notebook root_dir '%s': %w", notebook.RootDir, err)
-							}
-							notebookRoot = expandedPath
-						}
-					}
-				}
-
-				// Fallback to default notebook path if not configured
-				if notebookRoot == "" {
-					notebookRoot = filepath.Join(os.Getenv("HOME"), "Documents", "nb")
-				}
-
-				report, err := migration.RenameSyncFields(notebookRoot, migration.MigrationOptions{
-					DryRun:     migrateDryRun,
-					Verbose:    migrateVerbose,
-					ShowReport: migrateShowReport,
-				}, os.Stdout)
-				if err != nil {
-					return fmt.Errorf("failed to rename sync fields: %w", err)
 				}
 				if migrateShowReport {
 					printMigrationReport(report, migrateDryRun)
@@ -263,7 +218,6 @@ Examples:
 	cmd.Flags().BoolVar(&migrateStructure, "structure", false, "Migrate from old repos/{workspace}/{branch} structure to new notebooks structure")
 	cmd.Flags().BoolVar(&renameCurrentToInbox, "rename-current-to-inbox", false, "Rename 'current' note type directories to 'inbox' and update notes")
 	cmd.Flags().BoolVar(&ensureTypeInTags, "ensure-type-in-tags", false, "Ensure all notes have their type in the tags array")
-	cmd.Flags().BoolVar(&renameSyncFields, "rename-sync-fields", false, "Rename legacy 'sync_*' frontmatter fields to 'remote_*' and migrate tags")
 	cmd.Flags().StringVar(&migrateNotebook, "notebook", "", "Specify which notebook to migrate (default: uses default notebook from config)")
 	cmd.Flags().StringVar(&migrateTarget, "target", "", "Target directory for migration (default: uses notebook root_dir from config)")
 	cmd.Flags().BoolVarP(&migrateYes, "yes", "y", false, "Skip confirmation prompts")
