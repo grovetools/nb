@@ -20,6 +20,8 @@ import (
 	"github.com/mattsolo1/grove-notebook/internal/tui/browser/views"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/mattsolo1/grove-notebook/pkg/sync"
+	"github.com/mattsolo1/grove-notebook/pkg/sync/github"
 )
 
 // updateViewsState synchronizes the view state with the browser model
@@ -95,6 +97,27 @@ func (m *Model) createPlanCmd(note *models.Note) tea.Cmd {
 		// On success, trigger a full refresh of the note browser
 		return refreshMsg{}
 	})
+}
+
+func (m *Model) syncWorkspaceCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Get workspace context
+		ctx, err := m.service.GetWorkspaceContext("")
+		if err != nil {
+			return syncFinishedMsg{err: err}
+		}
+
+		// Create syncer and register providers
+		syncer := sync.NewSyncer(m.service)
+		syncer.RegisterProvider("github", func() sync.Provider {
+			return github.NewProvider()
+		})
+
+		// Run sync
+		reports, err := syncer.SyncWorkspace(ctx)
+
+		return syncFinishedMsg{reports: reports, err: err}
+	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -246,6 +269,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateViewsState()
 		m.findAndApplyLinks() // Detect and apply links between visible nodes
 		return m, m.updatePreviewContent()
+
+	case syncFinishedMsg:
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Sync failed: %v", msg.err)
+			return m, nil
+		}
+		var reportStrings []string
+		for _, report := range msg.reports {
+			reportStrings = append(reportStrings, fmt.Sprintf("%s: %d created, %d updated", report.Provider, report.Created, report.Updated))
+		}
+		m.statusMessage = "Sync complete: " + strings.Join(reportStrings, "; ")
+		return m, func() tea.Msg { return refreshMsg{} }
 
 	case refreshMsg:
 		m.loadingCount = 2 // for workspaces and notes
@@ -639,7 +674,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 	case key.Matches(msg, m.keys.Refresh):
 		return m, func() tea.Msg { return refreshMsg{} }
-		case key.Matches(msg, m.keys.FilterByTag):
+	case key.Matches(msg, m.keys.Sync):
+		m.statusMessage = "Syncing with remotes..."
+		return m, tea.Batch(m.syncWorkspaceCmd(), m.spinner.Tick)
+	case key.Matches(msg, m.keys.FilterByTag):
 			m.isGrepping = false
 			// Always show the tag picker - allows switching between tags
 			m.tagPickerMode = true

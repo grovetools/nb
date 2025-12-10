@@ -36,6 +36,7 @@ type KeyMap struct {
 	Grep           key.Binding
 	ToggleColumns  key.Binding
 	Refresh        key.Binding
+	Sync           key.Binding
 	Cut              key.Binding
 	Copy             key.Binding
 	Paste            key.Binding
@@ -67,6 +68,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.FocusRecent,
 		k.JumpToWorkspace,
 		k.Refresh,
+		k.Sync,
 	}, []key.Binding{
 		k.PageUp,
 		k.PageDown,
@@ -212,6 +214,10 @@ var keys = KeyMap{
 	Refresh: key.NewBinding(
 		key.WithKeys("ctrl+r"),
 		key.WithHelp("ctrl+r", "refresh"),
+	),
+	Sync: key.NewBinding(
+		key.WithKeys("S"),
+		key.WithHelp("S", "sync with remotes"),
 	),
 	CreateNote: key.NewBinding(
 		key.WithKeys("n"),

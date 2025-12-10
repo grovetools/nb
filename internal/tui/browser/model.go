@@ -25,6 +25,7 @@ import (
 	"github.com/mattsolo1/grove-notebook/internal/tui/browser/views"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/mattsolo1/grove-notebook/pkg/sync"
 )
 
 // Model is the main model for the notebook browser TUI
@@ -389,6 +390,12 @@ type notesArchivedMsg struct {
 type notesDeletedMsg struct {
 	deletedPaths []string
 	err          error
+}
+
+// syncFinishedMsg is sent when a sync operation completes
+type syncFinishedMsg struct {
+	reports []*sync.Report
+	err     error
 }
 
 // notesPastedMsg is sent after a paste operation

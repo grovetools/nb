@@ -376,6 +376,8 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 	if info.note != nil {
 		if _, isCut := m.cutPaths[info.note.Path]; isCut {
 			style = style.Faint(true).Strikethrough(true)
+		} else if info.note.SyncState == "closed" || info.note.SyncState == "merged" {
+			style = style.Faint(true)
 		} else if info.isArchived || info.isArtifact {
 			style = style.Faint(true)
 		}
@@ -576,6 +578,9 @@ func (m *Model) calculateTableColumnWidths() [8]int {
 
 // getNoteStatus determines the status of a note (e.g., pending if it has todos)
 func getNoteStatus(note *models.Note) string {
+	if note.SyncState != "" {
+		return note.SyncState
+	}
 	if note.HasTodos {
 		// A more sophisticated check could see if all are checked off
 		return "pending"
@@ -655,6 +660,10 @@ func getNoteIcon(noteType string) string {
 // getGroupIcon returns the appropriate icon for a note group
 func getGroupIcon(groupName string) string {
 	switch groupName {
+	case "github-issues":
+		return theme.IconIssueOpened
+	case "github-prs":
+		return theme.IconPullRequest
 	case "current":
 		return theme.IconNoteCurrent
 	case "issues":

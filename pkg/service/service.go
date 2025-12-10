@@ -17,6 +17,67 @@ import (
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 )
 
+// CreateNoteWithContent creates a new note programmatically without opening an editor.
+// This is used by the sync system to create notes for synced items.
+func (s *Service) CreateNoteWithContent(
+	ctx *WorkspaceContext,
+	noteType models.NoteType,
+	title string,
+	fm *frontmatter.Frontmatter,
+	body string,
+) (*models.Note, error) {
+	// 1. Ensure directory exists
+	noteDir, err := s.getNotePathForContext(ctx, string(noteType))
+	if err != nil {
+		return nil, fmt.Errorf("get note path: %w", err)
+	}
+	if err := os.MkdirAll(noteDir, 0755); err != nil {
+		return nil, fmt.Errorf("ensure directories: %w", err)
+	}
+
+	// 2. Generate filename from title
+	filename := GenerateFilename(title)
+	notePath := filepath.Join(noteDir, filename)
+
+	// 3. Build complete content with frontmatter + body
+	content := frontmatter.BuildContent(fm, body)
+
+	// 4. Write file to disk
+	if err := os.WriteFile(notePath, []byte(content), 0644); err != nil {
+		return nil, fmt.Errorf("write note: %w", err)
+	}
+
+	// 5. Parse the note and return it
+	note, err := ParseNote(notePath)
+	if err != nil {
+		return nil, fmt.Errorf("parse created note: %w", err)
+	}
+	return note, nil
+}
+
+// UpdateNoteWithContent updates an existing note's content programmatically.
+// This is used by the sync system to update notes when remote items change.
+func (s *Service) UpdateNoteWithContent(
+	notePath string,
+	fm *frontmatter.Frontmatter,
+	body string,
+) error {
+	// 1. Get original file info to preserve permissions
+	info, err := os.Stat(notePath)
+	if err != nil {
+		return fmt.Errorf("stat original note: %w", err)
+	}
+
+	// 2. Build new content with updated frontmatter + body
+	content := frontmatter.BuildContent(fm, body)
+
+	// 3. Write back to disk
+	if err := os.WriteFile(notePath, []byte(content), info.Mode()); err != nil {
+		return fmt.Errorf("write updated note: %w", err)
+	}
+	return nil
+}
+
 // DeleteNotes removes note files from the filesystem.
 func (s *Service) DeleteNotes(paths []string) error {
 	var errs []string

@@ -22,6 +22,13 @@ type Note struct {
 	IsArtifact bool      `json:"is_artifact,omitempty"`
 	PlanRef    string    `json:"plan_ref,omitempty"`
 
+	// Sync fields
+	SyncProvider  string    `json:"sync_provider,omitempty"`
+	SyncID        string    `json:"sync_id,omitempty"`
+	SyncURL       string    `json:"sync_url,omitempty"`
+	SyncState     string    `json:"sync_state,omitempty"`
+	SyncUpdatedAt time.Time `json:"sync_updated_at,omitempty"`
+
 	// Frontmatter fields
 	ID         string   `json:"id"`
 	Aliases    []string `json:"aliases"`

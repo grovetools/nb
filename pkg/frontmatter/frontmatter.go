@@ -26,6 +26,13 @@ type Frontmatter struct {
 	Started    string   `yaml:"started,omitempty"` // For LLM notes
 	PlanRef    string   `yaml:"plan_ref,omitempty"` // Reference to associated plan
 
+	// Sync fields
+	SyncProvider  string `yaml:"sync_provider,omitempty"`
+	SyncID        string `yaml:"sync_id,omitempty"`
+	SyncURL       string `yaml:"sync_url,omitempty"`
+	SyncState     string `yaml:"sync_state,omitempty"`
+	SyncUpdatedAt string `yaml:"sync_updated_at,omitempty"`
+
 	// Blog-specific fields
 	Description string `yaml:"description,omitempty"`
 	PublishDate string   `yaml:"publishDate,omitempty"`
@@ -97,6 +104,23 @@ func Build(fm *Frontmatter) string {
 	}
 	if fm.PlanRef != "" {
 		sb.WriteString(fmt.Sprintf("plan_ref: %s\n", fm.PlanRef))
+	}
+
+	// Sync fields
+	if fm.SyncProvider != "" {
+		sb.WriteString(fmt.Sprintf("sync_provider: %s\n", fm.SyncProvider))
+	}
+	if fm.SyncID != "" {
+		sb.WriteString(fmt.Sprintf("sync_id: %s\n", fm.SyncID))
+	}
+	if fm.SyncURL != "" {
+		sb.WriteString(fmt.Sprintf("sync_url: %s\n", fm.SyncURL))
+	}
+	if fm.SyncState != "" {
+		sb.WriteString(fmt.Sprintf("sync_state: %s\n", fm.SyncState))
+	}
+	if fm.SyncUpdatedAt != "" {
+		sb.WriteString(fmt.Sprintf("sync_updated_at: %s\n", fm.SyncUpdatedAt))
 	}
 
 	// Blog-specific fields
