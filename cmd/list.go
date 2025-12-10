@@ -254,6 +254,8 @@ func getNoteTypeIcon(noteType models.NoteType) string {
 	switch noteType {
 	case "current", "inbox":
 		return theme.IconNoteCurrent
+	case "claude_session":
+		return theme.IconInteractiveAgent
 	case "llm":
 		return theme.IconInteractiveAgent
 	case "learn":

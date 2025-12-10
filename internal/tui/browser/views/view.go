@@ -642,6 +642,8 @@ func getNoteIcon(noteType string) string {
 		return theme.IconPlan
 	case "chat":
 		return theme.IconChat
+	case "claude_session":
+		return theme.IconInteractiveAgent
 	case "oneshot":
 		return theme.IconOneshot
 	case "interactive_agent":
