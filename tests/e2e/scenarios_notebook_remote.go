@@ -41,7 +41,9 @@ func NotebookRemoteSyncScenario() *harness.Scenario {
 							"state": "OPEN",
 							"url": "https://github.com/test/repo/issues/101",
 							"updatedAt": "2024-01-01T12:00:00Z",
-							"labels": [{"name": "bug"}, {"name": "critical"}]
+							"labels": [{"name": "bug"}, {"name": "critical"}],
+							"assignees": [{"login": "user1"}, {"login": "user2"}],
+							"milestone": {"title": "v1.0"}
 						}
 					]`
 					if err := fs.WriteString(filepath.Join(stateDir, "issues.json"), initialIssuesJSON); err != nil {
@@ -56,7 +58,9 @@ func NotebookRemoteSyncScenario() *harness.Scenario {
 							"state": "OPEN",
 							"url": "https://github.com/test/repo/pull/202",
 							"updatedAt": "2024-01-01T12:00:00Z",
-							"labels": [{"name": "feature"}]
+							"labels": [{"name": "feature"}],
+							"assignees": [{"login": "reviewer1"}],
+							"milestone": {"title": "v1.1"}
 						}
 					]`
 					if err := fs.WriteString(filepath.Join(stateDir, "prs.json"), initialPRsJSON); err != nil {
@@ -131,11 +135,13 @@ notebooks:
 					ctx.Set("issue_note_path", issueNotePath) // Save for update test
 
 					issueContent, _ := fs.ReadString(issueNotePath)
-					assert.Contains(issueContent, "sync_id: 101")
+					assert.Contains(issueContent, "remote:")
+					assert.Contains(issueContent, "  id: 101")
 					assert.Contains(issueContent, "title: Initial Issue")
 					assert.Contains(issueContent, "This is the body of the initial issue.")
-					assert.Contains(issueContent, "- bug")
-					assert.Contains(issueContent, "- critical")
+					assert.Contains(issueContent, "  labels: [bug, critical]")
+					assert.Contains(issueContent, "  assignees: [user1, user2]")
+					assert.Contains(issueContent, "  milestone: v1.0")
 
 					// Verify PR note
 					prNoteDir := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb", "workspaces", "sync-project", "prs")
@@ -150,7 +156,16 @@ notebooks:
 					ctx.Set("pr_note_path", prNotePath) // Save for update test
 
 					prContent, _ := fs.ReadString(prNotePath)
-					return assert.Contains(prContent, "sync_id: 202")
+					if err := assert.Contains(prContent, "remote:"); err != nil {
+						return err
+					}
+					if err := assert.Contains(prContent, "  id: 202"); err != nil {
+						return err
+					}
+					if err := assert.Contains(prContent, "  assignees: [reviewer1]"); err != nil {
+						return err
+					}
+					return assert.Contains(prContent, "  milestone: v1.1")
 				},
 			},
 
@@ -177,7 +192,9 @@ notebooks:
 							"state": "CLOSED",
 							"url": "https://github.com/test/repo/issues/101",
 							"updatedAt": "2024-01-02T12:00:00Z",
-							"labels": [{"name": "bug"}]
+							"labels": [{"name": "bug"}],
+							"assignees": [{"login": "user3"}],
+							"milestone": {"title": "v2.0"}
 						},
 						{
 							"number": 102,
@@ -186,7 +203,9 @@ notebooks:
 							"state": "OPEN",
 							"url": "https://github.com/test/repo/issues/102",
 							"updatedAt": "2024-01-02T13:00:00Z",
-							"labels": []
+							"labels": [],
+							"assignees": [],
+							"milestone": null
 						}
 					]`
 					return fs.WriteString(filepath.Join(stateDir, "issues.json"), updatedIssuesJSON)
@@ -219,11 +238,17 @@ notebooks:
 					if err := assert.Contains(updatedContent, "title: Updated Issue Title"); err != nil {
 						return fmt.Errorf("issue note title was not updated: %w", err)
 					}
-					if err := assert.Contains(updatedContent, "sync_state: closed"); err != nil {
+					if err := assert.Contains(updatedContent, "  state: closed"); err != nil {
 						return fmt.Errorf("issue note state was not updated: %w", err)
 					}
-					if err := assert.NotContains(updatedContent, "- critical"); err != nil {
-						return fmt.Errorf("issue note tags were not updated: %w", err)
+					if err := assert.NotContains(updatedContent, "critical"); err != nil {
+						return fmt.Errorf("issue note labels were not updated: %w", err)
+					}
+					if err := assert.Contains(updatedContent, "  assignees: [user3]"); err != nil {
+						return fmt.Errorf("issue note assignees were not updated: %w", err)
+					}
+					if err := assert.Contains(updatedContent, "  milestone: v2.0"); err != nil {
+						return fmt.Errorf("issue note milestone was not updated: %w", err)
 					}
 
 					// Verify new note was created.

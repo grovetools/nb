@@ -376,7 +376,7 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 	if info.note != nil {
 		if _, isCut := m.cutPaths[info.note.Path]; isCut {
 			style = style.Faint(true).Strikethrough(true)
-		} else if info.note.SyncState == "closed" || info.note.SyncState == "merged" {
+		} else if info.note.Remote != nil && (info.note.Remote.State == "closed" || info.note.Remote.State == "merged") {
 			style = style.Faint(true)
 		} else if info.isArchived || info.isArtifact {
 			style = style.Faint(true)
@@ -578,8 +578,8 @@ func (m *Model) calculateTableColumnWidths() [8]int {
 
 // getNoteStatus determines the status of a note (e.g., pending if it has todos)
 func getNoteStatus(note *models.Note) string {
-	if note.SyncState != "" {
-		return note.SyncState
+	if note.Remote != nil && note.Remote.State != "" {
+		return note.Remote.State
 	}
 	if note.HasTodos {
 		// A more sophisticated check could see if all are checked off

@@ -17,6 +17,8 @@ type Item struct {
 	State     string // "open", "closed", "merged", etc.
 	URL       string
 	Labels    []string
+	Assignees []string
+	Milestone string
 	UpdatedAt time.Time
 }
 

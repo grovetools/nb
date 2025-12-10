@@ -64,11 +64,17 @@ type ghItem struct {
 	Labels    []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
+	Assignees []struct {
+		Login string `json:"login"`
+	} `json:"assignees"`
+	Milestone *struct {
+		Title string `json:"title"`
+	} `json:"milestone"`
 }
 
 // fetchItems executes the gh command to get issues or PRs.
 func (p *GitHubProvider) fetchItems(itemType string, repoPath string) ([]*sync.Item, error) {
-	cmdArgs := []string{itemType, "list", "--state", "all", "--limit", "200", "--json", "id,number,title,body,state,url,updatedAt,labels"}
+	cmdArgs := []string{itemType, "list", "--state", "all", "--limit", "200", "--json", "id,number,title,body,state,url,updatedAt,labels,assignees,milestone"}
 	cmd := exec.Command("gh", cmdArgs...)
 	cmd.Dir = repoPath
 
@@ -89,6 +95,16 @@ func (p *GitHubProvider) fetchItems(itemType string, repoPath string) ([]*sync.I
 			labels = append(labels, label.Name)
 		}
 
+		var assignees []string
+		for _, assignee := range item.Assignees {
+			assignees = append(assignees, assignee.Login)
+		}
+
+		var milestone string
+		if item.Milestone != nil {
+			milestone = item.Milestone.Title
+		}
+
 		syncItem := &sync.Item{
 			ID:        fmt.Sprintf("%d", item.Number),
 			Type:      itemType,
@@ -97,6 +113,8 @@ func (p *GitHubProvider) fetchItems(itemType string, repoPath string) ([]*sync.I
 			State:     item.State,
 			URL:       item.URL,
 			Labels:    labels,
+			Assignees: assignees,
+			Milestone: milestone,
 			UpdatedAt: item.UpdatedAt,
 		}
 		syncItems = append(syncItems, syncItem)

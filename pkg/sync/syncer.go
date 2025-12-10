@@ -32,17 +32,17 @@ func (s *Syncer) RegisterProvider(name string, factory ProviderFactory) {
 	s.providerFactories[name] = factory
 }
 
-// findNoteBySyncID searches for a note with matching sync metadata.
-func (s *Syncer) findNoteBySyncID(ctx *service.WorkspaceContext, syncID, provider string) (*models.Note, error) {
+// findNoteByRemoteID searches for a note with matching remote metadata.
+func (s *Syncer) findNoteByRemoteID(ctx *service.WorkspaceContext, remoteID, provider string) (*models.Note, error) {
 	// Get all notes in workspace, including archived, but not artifacts.
 	notes, err := s.svc.ListAllNotes(ctx, true, false)
 	if err != nil {
 		return nil, err
 	}
 
-	// Search for matching SyncProvider and SyncID
+	// Search for matching Remote.Provider and Remote.ID
 	for _, note := range notes {
-		if note.SyncProvider == provider && note.SyncID == syncID {
+		if note.Remote != nil && note.Remote.Provider == provider && note.Remote.ID == remoteID {
 			return note, nil
 		}
 	}
@@ -54,7 +54,10 @@ func (s *Syncer) findNoteBySyncID(ctx *service.WorkspaceContext, syncID, provide
 func (s *Syncer) needsUpdate(note *models.Note, item *Item) bool {
 	// Compare UpdatedAt timestamps. If the remote item's timestamp is after the
 	// note's last sync timestamp, it needs an update.
-	return item.UpdatedAt.After(note.SyncUpdatedAt)
+	if note.Remote == nil {
+		return true
+	}
+	return item.UpdatedAt.After(note.Remote.UpdatedAt)
 }
 
 // SyncWorkspace syncs a given workspace with its configured remote providers.
@@ -130,8 +133,8 @@ func (s *Syncer) syncWithProvider(
 			continue // This item type is not configured for sync
 		}
 
-		// Check if note exists (by SyncID)
-		existingNote, err := s.findNoteBySyncID(ctx, item.ID, provider.Name())
+		// Check if note exists (by RemoteID)
+		existingNote, err := s.findNoteByRemoteID(ctx, item.ID, provider.Name())
 		if err != nil {
 			report.Failed++
 			continue
@@ -176,16 +179,26 @@ func (s *Syncer) updateNoteFromItem(note *models.Note, item *Item) error {
 	return s.svc.UpdateNoteWithContent(note.Path, fm, body)
 }
 
+// buildFrontmatter creates a Frontmatter struct from a sync.Item.
 func (s *Syncer) buildFrontmatter(item *Item) *frontmatter.Frontmatter {
-	return &frontmatter.Frontmatter{
-		Title:         item.Title,
-		Tags:          item.Labels,
-		Created:       frontmatter.FormatTimestamp(item.UpdatedAt),
-		Modified:      frontmatter.FormatTimestamp(time.Now()),
-		SyncProvider:  "github",
-		SyncID:        item.ID,
-		SyncURL:       item.URL,
-		SyncState:     strings.ToLower(item.State),
-		SyncUpdatedAt: item.UpdatedAt.Format(time.RFC3339),
+	fm := &frontmatter.Frontmatter{
+		Title:    item.Title,
+		Created:  frontmatter.FormatTimestamp(item.UpdatedAt),
+		Modified: frontmatter.FormatTimestamp(time.Now()),
+		Remote: &frontmatter.RemoteMetadata{
+			Provider:  "github",
+			ID:        item.ID,
+			URL:       item.URL,
+			State:     strings.ToLower(item.State),
+			UpdatedAt: item.UpdatedAt.Format(time.RFC3339),
+			Labels:    item.Labels,
+			Assignees: item.Assignees,
+			Milestone: item.Milestone,
+		},
 	}
+
+	// IMPORTANT: We no longer populate the main `tags` field from remote labels.
+	// The migration copies existing tags to remote.labels once.
+	// Going forward, `tags` is for local use only.
+	return fm
 }

@@ -11,6 +11,18 @@ import (
 
 var frontmatterPattern = regexp.MustCompile(`(?s)^---\n(.*?)\n---\n(.*)`)
 
+// RemoteMetadata represents sync metadata from remote sources (GitHub, etc.)
+type RemoteMetadata struct {
+	Provider  string   `yaml:"provider,omitempty"`
+	ID        string   `yaml:"id,omitempty"`
+	URL       string   `yaml:"url,omitempty"`
+	State     string   `yaml:"state,omitempty"`
+	UpdatedAt string   `yaml:"updated_at,omitempty"`
+	Labels    []string `yaml:"labels,flow,omitempty"`
+	Assignees []string `yaml:"assignees,flow,omitempty"`
+	Milestone string   `yaml:"milestone,omitempty"`
+}
+
 // Frontmatter represents the structured metadata at the beginning of a note
 type Frontmatter struct {
 	ID         string   `yaml:"id"`
@@ -24,14 +36,10 @@ type Frontmatter struct {
 	Created    string   `yaml:"created"`
 	Modified   string   `yaml:"modified"`
 	Started    string   `yaml:"started,omitempty"` // For LLM notes
-	PlanRef    string   `yaml:"plan_ref,omitempty"` // Reference to associated plan
+	PlanRef string `yaml:"plan_ref,omitempty"` // Reference to associated plan
 
-	// Sync fields
-	SyncProvider  string `yaml:"sync_provider,omitempty"`
-	SyncID        string `yaml:"sync_id,omitempty"`
-	SyncURL       string `yaml:"sync_url,omitempty"`
-	SyncState     string `yaml:"sync_state,omitempty"`
-	SyncUpdatedAt string `yaml:"sync_updated_at,omitempty"`
+	// Remote sync metadata
+	Remote *RemoteMetadata `yaml:"remote,omitempty"`
 
 	// Blog-specific fields
 	Description string `yaml:"description,omitempty"`
@@ -106,21 +114,33 @@ func Build(fm *Frontmatter) string {
 		sb.WriteString(fmt.Sprintf("plan_ref: %s\n", fm.PlanRef))
 	}
 
-	// Sync fields
-	if fm.SyncProvider != "" {
-		sb.WriteString(fmt.Sprintf("sync_provider: %s\n", fm.SyncProvider))
-	}
-	if fm.SyncID != "" {
-		sb.WriteString(fmt.Sprintf("sync_id: %s\n", fm.SyncID))
-	}
-	if fm.SyncURL != "" {
-		sb.WriteString(fmt.Sprintf("sync_url: %s\n", fm.SyncURL))
-	}
-	if fm.SyncState != "" {
-		sb.WriteString(fmt.Sprintf("sync_state: %s\n", fm.SyncState))
-	}
-	if fm.SyncUpdatedAt != "" {
-		sb.WriteString(fmt.Sprintf("sync_updated_at: %s\n", fm.SyncUpdatedAt))
+	// Remote sync metadata
+	if fm.Remote != nil {
+		sb.WriteString("remote:\n")
+		if fm.Remote.Provider != "" {
+			sb.WriteString(fmt.Sprintf("  provider: %s\n", fm.Remote.Provider))
+		}
+		if fm.Remote.ID != "" {
+			sb.WriteString(fmt.Sprintf("  id: %s\n", fm.Remote.ID))
+		}
+		if fm.Remote.URL != "" {
+			sb.WriteString(fmt.Sprintf("  url: %s\n", fm.Remote.URL))
+		}
+		if fm.Remote.State != "" {
+			sb.WriteString(fmt.Sprintf("  state: %s\n", fm.Remote.State))
+		}
+		if fm.Remote.UpdatedAt != "" {
+			sb.WriteString(fmt.Sprintf("  updated_at: %s\n", fm.Remote.UpdatedAt))
+		}
+		if len(fm.Remote.Labels) > 0 {
+			sb.WriteString(fmt.Sprintf("  labels: %s\n", formatYAMLArray(fm.Remote.Labels)))
+		}
+		if len(fm.Remote.Assignees) > 0 {
+			sb.WriteString(fmt.Sprintf("  assignees: %s\n", formatYAMLArray(fm.Remote.Assignees)))
+		}
+		if fm.Remote.Milestone != "" {
+			sb.WriteString(fmt.Sprintf("  milestone: %s\n", fm.Remote.Milestone))
+		}
 	}
 
 	// Blog-specific fields

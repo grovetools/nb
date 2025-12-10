@@ -5,6 +5,18 @@ import "time"
 // NoteType represents the type of note
 type NoteType string
 
+// RemoteMetadata represents sync metadata from remote sources
+type RemoteMetadata struct {
+	Provider  string    `json:"provider,omitempty"`
+	ID        string    `json:"id,omitempty"`
+	URL       string    `json:"url,omitempty"`
+	State     string    `json:"state,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	Labels    []string  `json:"labels,omitempty"`
+	Assignees []string  `json:"assignees,omitempty"`
+	Milestone string    `json:"milestone,omitempty"`
+}
+
 // Note represents a note file
 type Note struct {
 	Path       string    `json:"path"`
@@ -19,15 +31,11 @@ type Note struct {
 	WordCount  int       `json:"word_count"`
 	HasTodos   bool      `json:"has_todos"`
 	IsArchived bool      `json:"is_archived"`
-	IsArtifact bool      `json:"is_artifact,omitempty"`
-	PlanRef    string    `json:"plan_ref,omitempty"`
+	IsArtifact bool   `json:"is_artifact,omitempty"`
+	PlanRef    string `json:"plan_ref,omitempty"`
 
-	// Sync fields
-	SyncProvider  string    `json:"sync_provider,omitempty"`
-	SyncID        string    `json:"sync_id,omitempty"`
-	SyncURL       string    `json:"sync_url,omitempty"`
-	SyncState     string    `json:"sync_state,omitempty"`
-	SyncUpdatedAt time.Time `json:"sync_updated_at,omitempty"`
+	// Remote sync metadata
+	Remote *RemoteMetadata `json:"remote,omitempty"`
 
 	// Frontmatter fields
 	ID         string   `json:"id"`

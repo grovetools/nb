@@ -118,23 +118,23 @@ func ParseNote(path string) (*models.Note, error) {
 			note.PlanRef = fm.PlanRef
 		}
 
-		// Parse sync fields
-		if fm.SyncProvider != "" {
-			note.SyncProvider = fm.SyncProvider
-		}
-		if fm.SyncID != "" {
-			note.SyncID = fm.SyncID
-		}
-		if fm.SyncURL != "" {
-			note.SyncURL = fm.SyncURL
-		}
-		if fm.SyncState != "" {
-			note.SyncState = fm.SyncState
-		}
-		if fm.SyncUpdatedAt != "" {
-			// Assuming SyncUpdatedAt is stored in RFC3339 format, e.g., from gh cli
-			if t, err := time.Parse(time.RFC3339, fm.SyncUpdatedAt); err == nil {
-				note.SyncUpdatedAt = t
+		// Parse remote sync fields
+		if fm.Remote != nil {
+			note.Remote = &models.RemoteMetadata{
+				Provider:  fm.Remote.Provider,
+				ID:        fm.Remote.ID,
+				URL:       fm.Remote.URL,
+				State:     fm.Remote.State,
+				Labels:    fm.Remote.Labels,
+				Assignees: fm.Remote.Assignees,
+				Milestone: fm.Remote.Milestone,
+			}
+
+			// Parse UpdatedAt timestamp
+			if fm.Remote.UpdatedAt != "" {
+				if t, err := time.Parse(time.RFC3339, fm.Remote.UpdatedAt); err == nil {
+					note.Remote.UpdatedAt = t
+				}
 			}
 		}
 
