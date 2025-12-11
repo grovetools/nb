@@ -1394,7 +1394,7 @@ func (m *Model) setCollapseStateForFocus() {
 		plansParentID := "grp:plans"
 		delete(collapsedNodes, plansParentID)
 	} else {
-		// Leaf workspace focus: expand the workspace, collapse child workspaces and individual plans
+		// Leaf workspace focus: expand the workspace, collapse child workspaces and all note groups
 		// Ensure the focused workspace itself is expanded
 		wsNodeID := "ws:" + m.focusedWorkspace.Path
 		delete(collapsedNodes, wsNodeID)
@@ -1402,19 +1402,26 @@ func (m *Model) setCollapseStateForFocus() {
 		// Collapse any child workspaces (if this workspace has children)
 		m.collapseChildWorkspaces(m.focusedWorkspace)
 
-		// Collapse individual plan directories within the focused workspace
-		// but keep the "plans" parent group expanded
+		// Collapse ALL note groups within the focused workspace
+		// EXCEPT "in_progress" and "plans" which remain expanded
+		groupsSeen := make(map[string]bool)
 		for _, note := range m.allNotes {
-			if note.Workspace == m.focusedWorkspace.Name {
+			if note.Workspace == m.focusedWorkspace.Name && !groupsSeen[note.Group] {
+				groupNodeID := "grp:" + note.Group
+				// Collapse individual plan directories
 				if strings.HasPrefix(note.Group, "plans/") {
-					groupNodeID := "grp:" + note.Group
+					collapsedNodes[groupNodeID] = true
+				} else if note.Group != "plans" && note.Group != "in_progress" {
+					// Collapse regular groups (inbox, issues, docs, etc.)
+					// but NOT in_progress or plans
 					collapsedNodes[groupNodeID] = true
 				}
+				groupsSeen[note.Group] = true
 			}
 		}
-		// Ensure the "plans" parent group is expanded
-		plansParentID := "grp:plans"
-		delete(collapsedNodes, plansParentID)
+		// Ensure the "plans" and "in_progress" groups are expanded
+		delete(collapsedNodes, "grp:plans")
+		delete(collapsedNodes, "grp:in_progress")
 	}
 
 	m.views.SetCollapseState(collapsedNodes)
