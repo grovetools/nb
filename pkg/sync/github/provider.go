@@ -53,6 +53,53 @@ func (p *GitHubProvider) Sync(config map[string]string, repoPath string) ([]*syn
 	return allItems, nil
 }
 
+// CreateItem creates a new issue or pull request on GitHub.
+func (p *GitHubProvider) CreateItem(item *sync.Item, repoPath string) (*sync.Item, error) {
+	itemType := item.Type
+	if itemType == "pull_request" {
+		itemType = "pr" // gh cli uses 'pr'
+	}
+
+	if itemType != "issue" {
+		return nil, fmt.Errorf("creating items of type '%s' is not supported", itemType)
+	}
+
+	// gh issue create --title "..." --body "..." --label "tag1,tag2"
+	args := []string{
+		"issue", "create",
+		"--title", item.Title,
+		"--body", item.Body,
+	}
+	if len(item.Labels) > 0 {
+		args = append(args, "--label", strings.Join(item.Labels, ","))
+	}
+	if len(item.Assignees) > 0 {
+		args = append(args, "--assignee", strings.Join(item.Assignees, ","))
+	}
+	if item.Milestone != "" {
+		args = append(args, "--milestone", item.Milestone)
+	}
+
+	cmd := exec.Command("gh", args...)
+	cmd.Dir = repoPath
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("gh issue create failed: %w\n%s", err, string(output))
+	}
+
+	// On success, gh prints the URL of the new issue. We need to parse the ID from it.
+	url := strings.TrimSpace(string(output))
+	urlParts := strings.Split(url, "/")
+	if len(urlParts) == 0 {
+		return nil, fmt.Errorf("could not parse issue URL from gh output: %s", url)
+	}
+	issueID := urlParts[len(urlParts)-1]
+
+	// Now that we have the ID, fetch the full item data to return it.
+	return p.fetchSingleItem(itemType, issueID, repoPath)
+}
+
 // AddComment posts a new comment to a GitHub issue or pull request.
 func (p *GitHubProvider) AddComment(itemType, itemID, body, repoPath string) error {
 	if itemType == "pull_request" {

@@ -40,6 +40,13 @@ func NewSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 			for _, report := range reports {
 				fmt.Printf("Synced with %s: %d created, %d updated, %d unchanged, %d failed.\n",
 					report.Provider, report.Created, report.Updated, report.Unchanged, report.Failed)
+				// Show error details if there were any failures
+				if len(report.Errors) > 0 {
+					fmt.Println("Errors:")
+					for _, errMsg := range report.Errors {
+						fmt.Printf("  - %s\n", errMsg)
+					}
+				}
 			}
 
 			return nil

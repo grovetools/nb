@@ -276,10 +276,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		var reportStrings []string
+		var allErrors []string
 		for _, report := range msg.reports {
-			reportStrings = append(reportStrings, fmt.Sprintf("%s: %d created, %d updated", report.Provider, report.Created, report.Updated))
+			parts := []string{}
+			if report.Created > 0 {
+				parts = append(parts, fmt.Sprintf("%d created", report.Created))
+			}
+			if report.Updated > 0 {
+				parts = append(parts, fmt.Sprintf("%d updated", report.Updated))
+			}
+			if report.Unchanged > 0 {
+				parts = append(parts, fmt.Sprintf("%d unchanged", report.Unchanged))
+			}
+			if report.Failed > 0 {
+				parts = append(parts, fmt.Sprintf("%d FAILED", report.Failed))
+			}
+			reportStrings = append(reportStrings, fmt.Sprintf("%s: %s", report.Provider, strings.Join(parts, ", ")))
+			allErrors = append(allErrors, report.Errors...)
 		}
-		m.statusMessage = "Sync complete: " + strings.Join(reportStrings, "; ")
+		statusMsg := "Sync: " + strings.Join(reportStrings, ", ")
+		// If there were errors, show count (run CLI for details)
+		if len(allErrors) > 0 {
+			if len(allErrors) == 1 {
+				statusMsg += " (run 'nb remote sync' for error details)"
+			} else {
+				statusMsg += fmt.Sprintf(" (run 'nb remote sync' for %d error details)", len(allErrors))
+			}
+		}
+		m.statusMessage = statusMsg
 		return m, func() tea.Msg { return refreshMsg{} }
 
 	case refreshMsg:

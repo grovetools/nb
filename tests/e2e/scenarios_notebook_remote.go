@@ -365,6 +365,82 @@ notebooks:
 					return nil
 				},
 			},
+
+			// Step 7: Create a new local note and verify it gets created remotely
+			{
+				Name: "Create local note and verify push-to-create",
+				Func: func(ctx *harness.Context) error {
+					nbBin, err := findProjectBinary()
+					if err != nil {
+						return err
+					}
+					projectDir := ctx.GetString("project_dir")
+					stateDir := ctx.GetString("state_dir")
+
+					// Create a new local note of a syncable type
+					cmd := ctx.Command(nbBin, "new", "-t", "issues", "--no-edit", "A new local issue").Dir(projectDir)
+					result := cmd.Run()
+					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+					if result.Error != nil {
+						return fmt.Errorf("failed to create new local issue note: %w", result.Error)
+					}
+
+					// Find the path of the newly created note by listing files
+					issueNoteDir := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb", "workspaces", "sync-project", "issues")
+					files, err := fs.ListFiles(issueNoteDir)
+					if err != nil {
+						return fmt.Errorf("could not list files in issues directory: %w", err)
+					}
+					var localNotePath string
+					for _, file := range files {
+						fullPath := filepath.Join(issueNoteDir, file)
+						content, err := fs.ReadString(fullPath)
+						if err != nil {
+							continue
+						}
+						if regexp.MustCompile("A new local issue").MatchString(content) {
+							localNotePath = fullPath
+							break
+						}
+					}
+					if localNotePath == "" {
+						return fmt.Errorf("could not find newly created local note with title 'A new local issue'")
+					}
+
+					// Run sync again
+					cmd = ctx.Command(nbBin, "remote", "sync").Dir(projectDir).Env("GH_MOCK_STATE_DIR=" + stateDir)
+					result = cmd.Run()
+					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+					if result.Error != nil {
+						return result.Error
+					}
+
+					// Verify the mock's JSON file was updated
+					issuesJSON, err := fs.ReadString(filepath.Join(stateDir, "issues.json"))
+					if err != nil {
+						return err
+					}
+					if err := assert.Contains(issuesJSON, `"title": "A new local issue"`); err != nil {
+						return fmt.Errorf("new issue was not created in mock data: %w", err)
+					}
+					if err := assert.Contains(issuesJSON, `"number": 103`); err != nil {
+						return fmt.Errorf("new issue did not get the next number: %w", err)
+					}
+
+					// Verify the local note was updated with remote metadata
+					localNoteContent, err := fs.ReadString(localNotePath)
+					if err != nil {
+						return err
+					}
+					if err := assert.Contains(localNoteContent, "remote:"); err != nil {
+						return fmt.Errorf("local note was not updated with remote block: %w", err)
+					}
+					if err := assert.Contains(localNoteContent, "id: 103"); err != nil {
+						return fmt.Errorf("local note was not updated with remote ID: %w", err)
+					}
+					return assert.Contains(localNoteContent, "url: https://github.com/test/repo/issues/103")
+				},
+			},
 		},
 	}
 }

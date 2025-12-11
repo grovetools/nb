@@ -6,9 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/sirupsen/logrus"
 )
 
 const syncMarker = "<!-- nb-sync-marker -->"
@@ -20,6 +22,7 @@ type ProviderFactory func() Provider
 type Syncer struct {
 	svc              *service.Service
 	providerFactories map[string]ProviderFactory
+	logger           *logrus.Entry
 }
 
 // NewSyncer creates a new Syncer.
@@ -27,6 +30,7 @@ func NewSyncer(svc *service.Service) *Syncer {
 	return &Syncer{
 		svc:              svc,
 		providerFactories: make(map[string]ProviderFactory),
+		logger:           logging.NewLogger("nb"),
 	}
 }
 
@@ -129,26 +133,33 @@ func (s *Syncer) syncWithProvider(
 		remoteItemsMap[item.ID] = item
 	}
 
-	// 2. Fetch local notes with remote metadata and map them by ID
-	localNotes, err := s.svc.ListAllNotes(ctx, true, false)
+	// 2. Fetch all local notes and partition them into synced and unsynced
+	allLocalNotes, err := s.svc.ListAllNotes(ctx, true, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list local notes: %w", err)
 	}
-	localNotesMap := make(map[string]*models.Note)
-	allRemoteIDs := make(map[string]bool)
-	for _, note := range localNotes {
+
+	syncedNotesMap := make(map[string]*models.Note)
+	var unsyncedNotes []*models.Note
+	for _, note := range allLocalNotes {
 		if note.Remote != nil && note.Remote.Provider == provider.Name() {
-			localNotesMap[note.Remote.ID] = note
-			allRemoteIDs[note.Remote.ID] = true
+			syncedNotesMap[note.Remote.ID] = note
+		} else {
+			unsyncedNotes = append(unsyncedNotes, note)
 		}
 	}
+
+	// 3. Sync existing items (updates and remote deletions)
+	allSyncedIDs := make(map[string]bool)
 	for id := range remoteItemsMap {
-		allRemoteIDs[id] = true
+		allSyncedIDs[id] = true
+	}
+	for id := range syncedNotesMap {
+		allSyncedIDs[id] = true
 	}
 
-	// 3. Iterate and sync
-	for id := range allRemoteIDs {
-		localNote, localExists := localNotesMap[id]
+	for id := range allSyncedIDs {
+		localNote, localExists := syncedNotesMap[id]
 		remoteItem, remoteExists := remoteItemsMap[id]
 
 		switch {
@@ -251,6 +262,64 @@ func (s *Syncer) syncWithProvider(
 		case localExists && !remoteExists:
 			// For now, we do nothing. Deletion sync is a future feature.
 			report.Unchanged++
+		}
+	}
+
+	// 4. Create new remote items from unsynced local notes
+	for _, note := range unsyncedNotes {
+		// Check if the note is of a type that should be synced for creation
+		var isSyncable bool
+		if note.Type == models.NoteType(config.IssuesType) {
+			isSyncable = true
+		} else if note.Type == models.NoteType(config.PRsType) {
+			// Creating PRs from notes is not supported yet
+			continue
+		}
+
+		if isSyncable {
+			// Convert local note to a sync item
+			syncItem, err := s.noteToSyncItem(note)
+			if err != nil {
+				errMsg := fmt.Sprintf("could not convert note to sync item %s: %v", note.Path, err)
+				report.Errors = append(report.Errors, errMsg)
+				s.logger.WithFields(logrus.Fields{
+					"note_path": note.Path,
+					"note_type": note.Type,
+					"error":     err.Error(),
+				}).Error("Failed to convert note to sync item")
+				report.Failed++
+				continue
+			}
+
+			// Create item on the remote provider
+			createdItem, err := provider.CreateItem(syncItem, repoPath)
+			if err != nil {
+				errMsg := fmt.Sprintf("failed to create remote item for %s: %v", note.Path, err)
+				report.Errors = append(report.Errors, errMsg)
+				s.logger.WithFields(logrus.Fields{
+					"note_path": note.Path,
+					"note_type": note.Type,
+					"title":     syncItem.Title,
+					"error":     err.Error(),
+				}).Error("Failed to create remote item")
+				report.Failed++
+				continue
+			}
+
+			// Update local note with remote metadata
+			if err := s.updateNoteWithRemoteData(note, createdItem); err != nil {
+				errMsg := fmt.Sprintf("failed to update local note with remote data %s: %v", note.Path, err)
+				report.Errors = append(report.Errors, errMsg)
+				s.logger.WithFields(logrus.Fields{
+					"note_path":  note.Path,
+					"remote_id":  createdItem.ID,
+					"remote_url": createdItem.URL,
+					"error":      err.Error(),
+				}).Error("Failed to update note with remote metadata")
+				report.Failed++
+				continue
+			}
+			report.Created++
 		}
 	}
 
@@ -361,49 +430,6 @@ func (s *Syncer) updateNoteFromItemPreserveLocal(note *models.Note, item *Item, 
 	return s.svc.UpdateNoteWithContent(note.Path, fm, newBody)
 }
 
-// noteToSyncItem constructs a sync.Item from a local note file.
-func (s *Syncer) noteToSyncItem(note *models.Note) (*Item, error) {
-	content, err := os.ReadFile(note.Path)
-	if err != nil {
-		return nil, err
-	}
-	fm, body, err := frontmatter.Parse(string(content))
-	if err != nil {
-		return nil, err
-	}
-
-	// Determine type from note metadata
-	itemType := "issue"
-	noteTypeStr := string(note.Type)
-	if strings.Contains(noteTypeStr, "pr") || strings.Contains(noteTypeStr, "pull") {
-		itemType = "pr"
-	}
-
-	// Use freshly parsed frontmatter values to ensure we get the latest changes
-	if fm.Remote == nil {
-		return nil, fmt.Errorf("note does not have remote metadata")
-	}
-
-	state := fm.Remote.State
-	url := fm.Remote.URL
-	labels := fm.Remote.Labels
-	assignees := fm.Remote.Assignees
-	milestone := fm.Remote.Milestone
-
-	return &Item{
-		ID:        note.Remote.ID,
-		Type:      itemType,
-		Title:     fm.Title,
-		Body:      body,
-		State:     state,
-		URL:       url,
-		Labels:    labels,
-		Assignees: assignees,
-		Milestone: milestone,
-		UpdatedAt: note.ModifiedAt,
-	}, nil
-}
-
 // buildFrontmatter creates a Frontmatter struct from a sync.Item.
 func (s *Syncer) buildFrontmatter(item *Item) *frontmatter.Frontmatter {
 	fm := &frontmatter.Frontmatter{
@@ -426,4 +452,96 @@ func (s *Syncer) buildFrontmatter(item *Item) *frontmatter.Frontmatter {
 	// The migration copies existing tags to remote.labels once.
 	// Going forward, `tags` is for local use only.
 	return fm
+}
+
+// updateNoteWithRemoteData updates a local note's frontmatter with data from a newly created remote item.
+func (s *Syncer) updateNoteWithRemoteData(note *models.Note, item *Item) error {
+	content, err := os.ReadFile(note.Path)
+	if err != nil {
+		return fmt.Errorf("could not read existing note content: %w", err)
+	}
+	contentStr := string(content)
+
+	fm, body, err := frontmatter.Parse(contentStr)
+	if err != nil || fm == nil {
+		return fmt.Errorf("could not parse frontmatter for note: %s", note.Path)
+	}
+
+	// Add remote metadata
+	fm.Remote = &frontmatter.RemoteMetadata{
+		Provider:  "github", // Assuming GitHub for now
+		ID:        item.ID,
+		URL:       item.URL,
+		State:     strings.ToLower(item.State),
+		UpdatedAt: item.UpdatedAt.Format(time.RFC3339),
+		Labels:    item.Labels,
+		Assignees: item.Assignees,
+		Milestone: item.Milestone,
+	}
+	// Also update modified timestamp
+	fm.Modified = frontmatter.FormatTimestamp(item.UpdatedAt)
+
+	return s.svc.UpdateNoteWithContent(note.Path, fm, body)
+}
+
+// noteToSyncItem constructs a sync.Item from a local note file.
+// It handles notes both with and without existing remote metadata.
+func (s *Syncer) noteToSyncItem(note *models.Note) (*Item, error) {
+	content, err := os.ReadFile(note.Path)
+	if err != nil {
+		return nil, err
+	}
+	fm, body, err := frontmatter.Parse(string(content))
+	if err != nil || fm == nil {
+		return nil, fmt.Errorf("failed to parse frontmatter from %s", note.Path)
+	}
+
+	// Remove sync marker and any comments from body before pushing
+	if markerIndex := strings.Index(body, syncMarker); markerIndex != -1 {
+		body = body[:markerIndex]
+	}
+	body = strings.TrimSpace(body)
+	// Remove the H1 title from the body if it matches the frontmatter title
+	h1 := fmt.Sprintf("# %s", fm.Title)
+	if strings.HasPrefix(body, h1) {
+		body = strings.TrimSpace(body[len(h1):])
+	}
+
+	itemType := "issue"
+	noteTypeStr := string(note.Type)
+	if strings.Contains(noteTypeStr, "pr") || strings.Contains(noteTypeStr, "pull") {
+		itemType = "pr"
+	}
+
+	// For items with existing remote metadata, use remote labels.
+	// For new items, don't send labels (let users add them on GitHub if needed).
+	// Local tags serve organizational purposes and shouldn't be automatically synced as GitHub labels.
+	var labels []string
+	if note.Remote != nil && len(note.Remote.Labels) > 0 {
+		labels = note.Remote.Labels
+	}
+
+	// Default state for new items is open.
+	state := "open"
+	var remoteID string
+	var assignees []string
+	var milestone string
+	if note.Remote != nil {
+		state = note.Remote.State
+		remoteID = note.Remote.ID
+		assignees = note.Remote.Assignees
+		milestone = note.Remote.Milestone
+	}
+
+	return &Item{
+		ID:        remoteID,
+		Type:      itemType,
+		Title:     fm.Title,
+		Body:      body,
+		State:     state,
+		Labels:    labels,
+		Assignees: assignees,
+		Milestone: milestone,
+		UpdatedAt: note.ModifiedAt,
+	}, nil
 }

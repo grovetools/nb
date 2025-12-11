@@ -246,7 +246,16 @@ func (m Model) View() string {
 	if m.loadingCount > 0 {
 		status = m.spinner.View() + " Loading..."
 	} else if m.statusMessage != "" {
-		status = m.statusMessage
+		// Truncate status message to fit terminal width
+		maxStatusWidth := m.width - 10 // Leave some margin
+		if maxStatusWidth < 50 {
+			maxStatusWidth = 50
+		}
+		if len(m.statusMessage) > maxStatusWidth {
+			status = m.statusMessage[:maxStatusWidth-3] + "..."
+		} else {
+			status = m.statusMessage
+		}
 	} else {
 		// Get note count and selection info from views
 		noteCount, selectedNotes, selectedPlans := m.views.GetCounts()

@@ -64,6 +64,8 @@ func main() {
 		handleStateChange(args, stateDir)
 	case len(args) > 1 && args[1] == "comment":
 		handleComment(args, stateDir)
+	case len(args) > 1 && args[1] == "create":
+		handleCreate(args, stateDir)
 	default:
 		fmt.Fprintf(os.Stderr, "mock gh: unhandled command %v\n", args)
 		os.Exit(1)
@@ -196,6 +198,105 @@ func handleComment(args []string, stateDir string) {
 		}
 		item.Comments = append(item.Comments, newComment)
 	})
+}
+
+func handleCreate(args []string, stateDir string) {
+	itemType := args[0]
+	if itemType != "issue" {
+		fmt.Fprintf(os.Stderr, "mock gh: create is only supported for issues, not %s\n", itemType)
+		os.Exit(1)
+	}
+
+	var title, body string
+	var labels []string
+	for i := 2; i < len(args); i++ {
+		switch args[i] {
+		case "--title":
+			title = args[i+1]
+			i++
+		case "--body":
+			body = args[i+1]
+			i++
+		case "--label":
+			// Split comma-separated labels
+			labelStr := args[i+1]
+			for _, l := range splitLabels(labelStr) {
+				labels = append(labels, l)
+			}
+			i++
+		}
+	}
+
+	var items []ghItem
+	jsonPath := filepath.Join(stateDir, "issues.json")
+	data, err := os.ReadFile(jsonPath)
+	if err == nil {
+		if err := json.Unmarshal(data, &items); err != nil {
+			fmt.Fprintf(os.Stderr, "mock gh: failed to unmarshal issues.json: %v\n", err)
+			os.Exit(1)
+		}
+	} else if !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "mock gh: failed to read issues.json: %v\n", err)
+		os.Exit(1)
+	}
+
+	newNumber := 1
+	if len(items) > 0 {
+		newNumber = items[len(items)-1].Number + 1
+	}
+
+	newItem := ghItem{
+		ID:        fmt.Sprintf("I_%d", newNumber),
+		Number:    newNumber,
+		Title:     title,
+		Body:      body,
+		State:     "OPEN",
+		URL:       fmt.Sprintf("https://github.com/test/repo/issues/%d", newNumber),
+		UpdatedAt: time.Now(),
+		Comments:  []ghComment{},
+	}
+	for _, l := range labels {
+		newItem.Labels = append(newItem.Labels, struct {
+			Name string `json:"name"`
+		}{Name: l})
+	}
+
+	items = append(items, newItem)
+
+	newData, _ := json.MarshalIndent(items, "", "\t")
+	if err := os.WriteFile(jsonPath, newData, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "mock gh: failed to write issues.json: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print the URL to stdout, mimicking real 'gh' behavior
+	fmt.Println(newItem.URL)
+}
+
+// splitLabels splits a comma-separated label string and trims whitespace
+func splitLabels(labelStr string) []string {
+	var result []string
+	for i := 0; i < len(labelStr); {
+		end := i
+		for end < len(labelStr) && labelStr[end] != ',' {
+			end++
+		}
+		label := labelStr[i:end]
+		// Trim spaces
+		start := 0
+		for start < len(label) && label[start] == ' ' {
+			start++
+		}
+		finish := len(label)
+		for finish > start && label[finish-1] == ' ' {
+			finish--
+		}
+		if finish > start {
+			result = append(result, label[start:finish])
+		}
+		i = end + 1
+	}
+	return result
 }
 
 func updateItem(itemType, itemID, stateDir string, updater func(*ghItem)) {

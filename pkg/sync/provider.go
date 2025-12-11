@@ -8,6 +8,8 @@ type Provider interface {
 	Name() string
 	// Sync fetches all relevant items from the remote.
 	Sync(config map[string]string, repoPath string) ([]*Item, error)
+	// CreateItem creates a new item on the remote and returns the created item.
+	CreateItem(item *Item, repoPath string) (*Item, error)
 	// UpdateItem pushes changes for a single item to the remote and returns the updated item.
 	UpdateItem(item *Item, repoPath string) (*Item, error)
 	// AddComment posts a new comment to an item.
@@ -46,4 +48,5 @@ type Report struct {
 	Updated   int
 	Unchanged int
 	Failed    int
+	Errors    []string // Detailed error messages
 }
