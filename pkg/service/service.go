@@ -1044,6 +1044,28 @@ func (s *Service) buildPathsMap(notebookContext *coreworkspace.WorkspaceNode) (m
 		}
 		paths[string(t)] = path
 	}
+
+	// Add plans directory
+	plansPath, err := s.notebookLocator.GetPlansDir(notebookContext)
+	if err != nil {
+		return nil, fmt.Errorf("get plans dir: %w", err)
+	}
+	paths["plans"] = plansPath
+
+	// Add templates directory
+	templatesPath, err := s.notebookLocator.GetTemplatesDir(notebookContext)
+	if err != nil {
+		return nil, fmt.Errorf("get templates dir: %w", err)
+	}
+	paths["templates"] = templatesPath
+
+	// Add recipes directory
+	recipesPath, err := s.notebookLocator.GetRecipesDir(notebookContext)
+	if err != nil {
+		return nil, fmt.Errorf("get recipes dir: %w", err)
+	}
+	paths["recipes"] = recipesPath
+
 	return paths, nil
 }
 
