@@ -202,7 +202,7 @@ Examples:
 				NoBackup:   migrateNoBackup,
 			}
 
-			report, err := migration.Migrate(basePath, options, os.Stdout)
+			report, err := migration.Migrate(basePath, options, os.Stdout, s.Logger)
 			if err != nil {
 				return fmt.Errorf("migration failed: %w", err)
 			}

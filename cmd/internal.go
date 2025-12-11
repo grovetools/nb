@@ -5,25 +5,27 @@ import (
 	"os"
 
 	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
+	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
 // NewInternalCmd creates the root 'internal' command, which is hidden from the user.
-func NewInternalCmd() *cobra.Command {
+func NewInternalCmd(svc **service.Service) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "internal",
 		Short:  "Internal commands for automation (not for direct use)",
 		Hidden: true,
 	}
 
-	cmd.AddCommand(newUpdateNoteCmd())
-	cmd.AddCommand(newUpdateFrontmatterCmd())
+	cmd.AddCommand(newUpdateNoteCmd(svc))
+	cmd.AddCommand(newUpdateFrontmatterCmd(svc))
 
 	return cmd
 }
 
 // newUpdateNoteCmd creates the 'internal update-note' command.
-func newUpdateNoteCmd() *cobra.Command {
+func newUpdateNoteCmd(svc **service.Service) *cobra.Command {
 	var (
 		notePath      string
 		appendContent string
@@ -52,6 +54,7 @@ func newUpdateNoteCmd() *cobra.Command {
 				return fmt.Errorf("failed to append content to note: %w", err)
 			}
 
+			(*svc).Logger.WithField("path", notePath).Info("Appended content to note")
 			fmt.Printf("✓ Content appended to %s\n", notePath)
 			return nil
 		},
@@ -66,7 +69,7 @@ func newUpdateNoteCmd() *cobra.Command {
 }
 
 // newUpdateFrontmatterCmd creates the 'internal update-frontmatter' command.
-func newUpdateFrontmatterCmd() *cobra.Command {
+func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 	var (
 		notePath  string
 		fieldName string
@@ -126,6 +129,11 @@ func newUpdateFrontmatterCmd() *cobra.Command {
 				return fmt.Errorf("failed to write note file: %w", err)
 			}
 
+			(*svc).Logger.WithFields(logrus.Fields{
+				"path":  notePath,
+				"field": fieldName,
+				"value": fieldValue,
+			}).Info("Updated note frontmatter")
 			fmt.Printf("✓ Updated %s in %s\n", fieldName, notePath)
 			return nil
 		},

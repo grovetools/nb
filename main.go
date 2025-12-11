@@ -6,6 +6,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/cli"
 	coreconfig "github.com/mattsolo1/grove-core/config"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-notebook/cmd"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
@@ -27,9 +28,7 @@ func main() {
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		// This runs once before any subcommand
-		logger := logrus.New()
-		logger.SetOutput(os.Stderr)
-		logger.SetLevel(logrus.WarnLevel)
+		logger := logging.NewLogger("nb")
 
 		// 1. Load configuration using grove-core
 		cfg, err := coreconfig.LoadDefault()
@@ -40,7 +39,11 @@ func main() {
 		}
 
 		// 2. Initialize workspace provider
-		discoveryService := workspace.NewDiscoveryService(logger)
+		// Use a muted logger for discovery to avoid noise
+		discoveryLogger := logrus.New()
+		discoveryLogger.SetOutput(os.Stderr)
+		discoveryLogger.SetLevel(logrus.WarnLevel)
+		discoveryService := workspace.NewDiscoveryService(discoveryLogger)
 		result, err := discoveryService.DiscoverAll()
 		if err != nil {
 			return fmt.Errorf("failed to discover workspaces: %w", err)
@@ -52,7 +55,7 @@ func main() {
 		serviceCfg := &service.Config{
 			Editor: os.Getenv("EDITOR"), // A common way to get editor
 		}
-		svc, err = service.New(serviceCfg, provider, cfg)
+		svc, err = service.New(serviceCfg, provider, cfg, logger)
 		if err != nil {
 			return fmt.Errorf("failed to initialize service: %w", err)
 		}
@@ -73,7 +76,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewObsidianCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewVersionCmd())
 	rootCmd.AddCommand(cmd.NewTuiCmd(&svc, &workspaceOverride))
-	rootCmd.AddCommand(cmd.NewInternalCmd())
+	rootCmd.AddCommand(cmd.NewInternalCmd(&svc))
 	rootCmd.AddCommand(cmd.NewTmuxCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewRemoteCmd(&svc, &workspaceOverride))
 

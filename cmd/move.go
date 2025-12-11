@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/mattsolo1/grove-notebook/pkg/migration"
@@ -225,13 +226,22 @@ func moveNote(svc *service.Service, workspaceOverride, sourcePath, destType, des
 		}
 	}
 
+	operation := "move"
 	if copy {
+		operation = "copy"
 		fmt.Printf("Copied note successfully:\n")
 	} else {
 		fmt.Printf("Moved note successfully:\n")
 	}
 	fmt.Printf("  From: %s\n", absSource)
 	fmt.Printf("  To:   %s\n", finalPath)
+
+	svc.Logger.WithFields(logrus.Fields{
+		"operation":    operation,
+		"source_path":  absSource,
+		"dest_path":    finalPath,
+		"migrated":     applyMigrate,
+	}).Info("Move/copy operation completed")
 
 	return nil
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
+	"github.com/sirupsen/logrus"
 )
 
 // CreateNoteWithContent creates a new note programmatically without opening an editor.
@@ -97,10 +98,15 @@ func (s *Service) UpdateNoteWithContent(
 
 // DeleteNotes removes note files from the filesystem.
 func (s *Service) DeleteNotes(paths []string) error {
+	s.Logger.WithField("count", len(paths)).Warn("Deleting notes")
+
 	var errs []string
 	for _, path := range paths {
 		if err := os.Remove(path); err != nil {
+			s.Logger.WithError(err).WithField("path", path).Error("Failed to delete note")
 			errs = append(errs, fmt.Sprintf("failed to delete %s: %v", path, err))
+		} else {
+			s.Logger.WithField("path", path).Warn("Deleted note")
 		}
 	}
 	if len(errs) > 0 {
@@ -121,6 +127,13 @@ func (s *Service) CopyNotes(sourcePaths []string, destWorkspace *coreworkspace.W
 
 // transferNotes is a helper for moving or copying notes.
 func (s *Service) transferNotes(sourcePaths []string, destWorkspace *coreworkspace.WorkspaceNode, destGroup, mode string) ([]string, error) {
+	s.Logger.WithFields(logrus.Fields{
+		"operation":             mode,
+		"count":                 len(sourcePaths),
+		"destination_workspace": destWorkspace.Name,
+		"destination_group":     destGroup,
+	}).Info("Starting note transfer operation")
+
 	var newPaths []string
 	var errs []string
 
@@ -172,8 +185,14 @@ func (s *Service) transferNotes(sourcePaths []string, destWorkspace *coreworkspa
 		// Update frontmatter to match the new location
 		if updateErr := s.updateNoteFrontmatter(destPath, destWorkspace, destGroup, isCopyToSameLocation); updateErr != nil {
 			// Log warning but don't fail the operation
-			fmt.Fprintf(os.Stderr, "Warning: failed to update frontmatter for %s: %v\n", destPath, updateErr)
+			s.Logger.WithError(updateErr).WithField("path", destPath).Warn("Failed to update frontmatter")
 		}
+
+		s.Logger.WithFields(logrus.Fields{
+			"source_path": sourcePath,
+			"dest_path":   destPath,
+			"operation":   mode,
+		}).Debug("Successfully transferred note")
 
 		newPaths = append(newPaths, destPath)
 	}
@@ -283,6 +302,7 @@ type Service struct {
 	notebookLocator   *coreworkspace.NotebookLocator
 	Config            *Config
 	CoreConfig        *coreconfig.Config
+	Logger            *logrus.Entry
 }
 
 // Config holds service configuration
@@ -294,7 +314,7 @@ type Config struct {
 }
 
 // New creates a new note service
-func New(config *Config, provider *coreworkspace.Provider, coreCfg *coreconfig.Config) (*Service, error) {
+func New(config *Config, provider *coreworkspace.Provider, coreCfg *coreconfig.Config, logger *logrus.Entry) (*Service, error) {
 	notebookLocator := coreworkspace.NewNotebookLocator(coreCfg)
 
 	return &Service{
@@ -302,6 +322,7 @@ func New(config *Config, provider *coreworkspace.Provider, coreCfg *coreconfig.C
 		notebookLocator:   notebookLocator,
 		Config:            config,
 		CoreConfig:        coreCfg,
+		Logger:            logger,
 	}, nil
 }
 
@@ -434,9 +455,17 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 	// Open in editor if requested
 	if opts.openEditor && s.Config.Editor != "" {
 		if err := s.openInEditor(notePath); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to open editor: %v\n", err)
+			s.Logger.WithError(err).Warn("Failed to open editor")
 		}
 	}
+
+	s.Logger.WithFields(logrus.Fields{
+		"path":      note.Path,
+		"type":      note.Type,
+		"title":     note.Title,
+		"workspace": note.Workspace,
+		"branch":    note.Branch,
+	}).Info("Created new note")
 
 	return note, nil
 }
@@ -491,6 +520,11 @@ func (s *Service) SearchNotes(ctx *WorkspaceContext, query string, options ...Se
 		args := []string{"--glob", "*.md", "--ignore-case", "-l", query}
 		args = append(args, searchDirs...)
 		cmd = exec.Command(rgPath, args...)
+		s.Logger.WithFields(logrus.Fields{
+			"command": "rg",
+			"args":    args,
+			"query":   query,
+		}).Debug("Executing search command")
 	} else {
 		// Fallback to grep
 		grepPath, err := exec.LookPath("grep")
@@ -500,6 +534,11 @@ func (s *Service) SearchNotes(ctx *WorkspaceContext, query string, options ...Se
 		args := []string{"-rli", "--include=*.md", query}
 		args = append(args, searchDirs...)
 		cmd = exec.Command(grepPath, args...)
+		s.Logger.WithFields(logrus.Fields{
+			"command": "grep",
+			"args":    args,
+			"query":   query,
+		}).Debug("Executing search command")
 	}
 
 	output, err := cmd.Output()
@@ -542,6 +581,11 @@ func (s *Service) SearchNotes(ctx *WorkspaceContext, query string, options ...Se
 	if len(results) > opts.limit {
 		results = results[:opts.limit]
 	}
+
+	s.Logger.WithFields(logrus.Fields{
+		"query":         query,
+		"results_count": len(results),
+	}).Debug("Search completed")
 
 	return results, nil
 }
@@ -742,6 +786,7 @@ func (s *Service) ListGlobalNotes(noteType models.NoteType) ([]*models.Note, err
 
 // ArchiveNotes moves notes to a .archive subdirectory within their current directory.
 func (s *Service) ArchiveNotes(ctx *WorkspaceContext, paths []string) error {
+	s.Logger.WithField("count", len(paths)).Info("Archiving notes")
 	for _, path := range paths {
 		// 1. Get the parent directory of the note file.
 		noteDir := filepath.Dir(path)
@@ -770,8 +815,13 @@ func (s *Service) ArchiveNotes(ctx *WorkspaceContext, paths []string) error {
 
 		// 6. Move the note.
 		if err := os.Rename(path, dest); err != nil {
+			s.Logger.WithError(err).WithField("path", path).Error("Failed to move note to archive")
 			return fmt.Errorf("failed to move %s to archive: %w", path, err)
 		}
+		s.Logger.WithFields(logrus.Fields{
+			"source_path":  path,
+			"archive_path": dest,
+		}).Debug("Archived note")
 	}
 	return nil
 }
@@ -833,12 +883,24 @@ func (s *Service) GetWorkspaceContext(startPath string) (*WorkspaceContext, erro
 		return nil, fmt.Errorf("build paths map: %w", err)
 	}
 
-	return &WorkspaceContext{
+	ctx := &WorkspaceContext{
 		CurrentWorkspace:         currentWorkspace,
 		NotebookContextWorkspace: notebookContextWorkspace,
 		Branch:                   branch,
 		Paths:                    paths,
-	}, nil
+	}
+
+	s.Logger.WithFields(logrus.Fields{
+		"start_path":                 CWD,
+		"current_workspace_name":     ctx.CurrentWorkspace.Name,
+		"current_workspace_path":     ctx.CurrentWorkspace.Path,
+		"current_workspace_kind":     ctx.CurrentWorkspace.Kind,
+		"notebook_context_name":      ctx.NotebookContextWorkspace.Name,
+		"notebook_context_path":      ctx.NotebookContextWorkspace.Path,
+		"notebook_context_notebook":  ctx.NotebookContextWorkspace.NotebookName,
+	}).Debug("Resolved workspace context")
+
+	return ctx, nil
 }
 
 // findNotebookContextNode determines the logical owner of the notebook directory.
@@ -1026,6 +1088,8 @@ func (s *Service) UpdateNoteContent(path string, content string) error {
 	note.Workspace = ws
 	note.Branch = branch
 	note.Type = models.NoteType(noteType)
+
+	s.Logger.WithField("path", path).Info("Updated note content")
 
 	return nil
 }

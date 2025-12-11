@@ -10,6 +10,7 @@ import (
 	coreconfig "github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -653,6 +654,12 @@ func (s *Service) RenameNote(oldPath, newTitle string) (string, error) {
 			return "", fmt.Errorf("remove old file: %w", err)
 		}
 	}
+
+	s.Logger.WithFields(logrus.Fields{
+		"old_path": oldPath,
+		"new_path": newPath,
+		"title":    newTitle,
+	}).Info("Renamed note")
 
 	return newPath, nil
 }

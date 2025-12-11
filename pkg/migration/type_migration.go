@@ -15,7 +15,7 @@ import (
 // and renames them to "inbox", updating the frontmatter of notes within.
 func RenameCurrentToInbox(notebookRoot string, options MigrationOptions, output io.Writer) (*MigrationReport, error) {
 	report := NewMigrationReport()
-	migrator := NewMigrator(options, notebookRoot, output)
+	migrator := NewMigrator(options, notebookRoot, output, nil)
 
 	err := filepath.Walk(notebookRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -198,7 +198,7 @@ func (m *Migrator) conservativelyUpdateTypeAndTags(content, oldType, newType str
 // Also handles converting "current" type to "inbox".
 func EnsureTypeInTags(notebookRoot string, options MigrationOptions, output io.Writer) (*MigrationReport, error) {
 	report := NewMigrationReport()
-	migrator := NewMigrator(options, notebookRoot, output)
+	migrator := NewMigrator(options, notebookRoot, output, nil)
 
 	err := filepath.Walk(notebookRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {

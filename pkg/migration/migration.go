@@ -11,15 +11,16 @@ import (
 	"github.com/mattsolo1/grove-core/fs"
 	coreworkspace "github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
 
-func Migrate(basePath string, options MigrationOptions, output io.Writer) (*MigrationReport, error) {
+func Migrate(basePath string, options MigrationOptions, output io.Writer, logger *logrus.Entry) (*MigrationReport, error) {
 	if output == nil {
 		output = os.Stdout
 	}
 
-	migrator := NewMigrator(options, basePath, output)
+	migrator := NewMigrator(options, basePath, output, logger)
 
 	var paths []string
 
@@ -103,7 +104,7 @@ func MigrateFile(filePath, basePath string, options MigrationOptions, output io.
 		output = os.Stdout
 	}
 
-	migrator := NewMigrator(options, basePath, output)
+	migrator := NewMigrator(options, basePath, output, nil)
 	migrator.report.TotalFiles = 1
 
 	err := migrator.MigrateFile(filePath)

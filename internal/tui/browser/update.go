@@ -18,6 +18,7 @@ import (
 	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/internal/tui/browser/components/confirm"
 	"github.com/mattsolo1/grove-notebook/internal/tui/browser/views"
+	"github.com/sirupsen/logrus"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/mattsolo1/grove-notebook/pkg/sync"
@@ -131,10 +132,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// User confirmed the action in the dialog
 		// We need to know which action was confirmed. A simple way is to check the prompt.
 		if strings.Contains(strings.ToLower(m.confirmDialog.Prompt), "archive") {
+			_, selectedNotes, selectedPlans := m.views.GetCounts()
+			m.service.Logger.WithFields(logrus.Fields{
+				"notes_count": selectedNotes,
+				"plans_count": selectedPlans,
+				"source":      "tui",
+			}).Info("Archiving items")
 			m.statusMessage = "Archiving..."
 			return m, m.archiveSelectedNotesCmd()
 		}
 		if strings.Contains(strings.ToLower(m.confirmDialog.Prompt), "delete") {
+			pathsToDelete := m.views.GetTargetedNotePaths()
+			m.service.Logger.WithFields(logrus.Fields{
+				"count":  len(pathsToDelete),
+				"source": "tui",
+			}).Warn("Deleting items")
 			m.statusMessage = "Deleting..."
 			return m, m.deleteSelectedNotesCmd()
 		}

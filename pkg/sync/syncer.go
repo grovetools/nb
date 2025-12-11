@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
@@ -30,7 +29,7 @@ func NewSyncer(svc *service.Service) *Syncer {
 	return &Syncer{
 		svc:              svc,
 		providerFactories: make(map[string]ProviderFactory),
-		logger:           logging.NewLogger("nb"),
+		logger:           svc.Logger.WithField("sub-component", "syncer"),
 	}
 }
 
@@ -117,6 +116,12 @@ func (s *Syncer) syncWithProvider(
 ) (*Report, error) {
 	report := &Report{Provider: provider.Name()}
 	repoPath := ctx.CurrentWorkspace.Path
+
+	s.logger.WithFields(logrus.Fields{
+		"provider":  provider.Name(),
+		"workspace": ctx.CurrentWorkspace.Name,
+		"repo_path": repoPath,
+	}).Debug("Starting sync with provider")
 
 	providerConfig := map[string]string{
 		"issues_type": config.IssuesType,
@@ -323,6 +328,24 @@ func (s *Syncer) syncWithProvider(
 		}
 	}
 
+	s.logger.WithFields(logrus.Fields{
+		"provider":  provider.Name(),
+		"workspace": ctx.CurrentWorkspace.Name,
+		"created":   report.Created,
+		"updated":   report.Updated,
+		"unchanged": report.Unchanged,
+		"failed":    report.Failed,
+	}).Info("Sync with provider complete")
+
+	if report.Failed > 0 {
+		for _, errMsg := range report.Errors {
+			s.logger.WithFields(logrus.Fields{
+				"provider":  provider.Name(),
+				"workspace": ctx.CurrentWorkspace.Name,
+			}).Warn(errMsg)
+		}
+	}
+
 	return report, nil
 }
 
@@ -339,6 +362,13 @@ func formatComments(comments []*Comment) string {
 
 // createNoteFromItem creates a new note from a sync.Item and returns the note path.
 func (s *Syncer) createNoteFromItem(ctx *service.WorkspaceContext, item *Item, noteType models.NoteType) (string, error) {
+	s.logger.WithFields(logrus.Fields{
+		"remote_id":  item.ID,
+		"remote_url": item.URL,
+		"title":      item.Title,
+		"note_type":  noteType,
+	}).Info("Creating local note from remote item")
+
 	fm := s.buildFrontmatter(item)
 
 	// Build the body with the main content, comments, and sync marker
@@ -426,6 +456,13 @@ func (s *Syncer) updateNoteFromItemPreserveLocal(note *models.Note, item *Item, 
 		fm.Remote.Assignees = item.Assignees
 		fm.Remote.Milestone = item.Milestone
 	}
+
+	s.logger.WithFields(logrus.Fields{
+		"remote_id":    item.ID,
+		"remote_url":   item.URL,
+		"note_path":    note.Path,
+		"new_comments": len(newComments),
+	}).Info("Updating local note from remote item")
 
 	return s.svc.UpdateNoteWithContent(note.Path, fm, newBody)
 }

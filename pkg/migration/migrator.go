@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
+	"github.com/sirupsen/logrus"
 )
 
 type Migrator struct {
@@ -15,14 +16,19 @@ type Migrator struct {
 	analyzer *Analyzer
 	report   *MigrationReport
 	output   io.Writer
+	logger   *logrus.Entry
 }
 
-func NewMigrator(options MigrationOptions, basePath string, output io.Writer) *Migrator {
+func NewMigrator(options MigrationOptions, basePath string, output io.Writer, logger *logrus.Entry) *Migrator {
+	if logger == nil {
+		logger = logrus.NewEntry(logrus.New()) // Fallback to a null logger
+	}
 	return &Migrator{
 		options:  options,
 		analyzer: NewAnalyzer(basePath),
 		report:   NewMigrationReport(),
 		output:   output,
+		logger:   logger.WithField("sub-component", "migrator"),
 	}
 }
 
@@ -37,9 +43,7 @@ func (m *Migrator) MigrateFile(filePath string) error {
 
 	if len(issues) == 0 {
 		m.report.SkippedFiles++
-		if m.options.Verbose {
-			fmt.Fprintf(m.output, "✓ %s (no issues found)\n", filePath)
-		}
+		m.logger.WithField("path", filePath).Debug("No migration issues found, skipping.")
 		return nil
 	}
 
