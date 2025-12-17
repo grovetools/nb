@@ -270,6 +270,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loadingCount--
 		}
 		m.workspaces = msg.workspaces
+
+		// If we have a focused workspace that's not in the provider's list,
+		// add it so the tree builder can display its notes
+		if m.focusedWorkspace != nil {
+			found := false
+			for _, ws := range m.workspaces {
+				if ws.Name == m.focusedWorkspace.Name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				m.workspaces = append(m.workspaces, m.focusedWorkspace)
+			}
+		}
+
 		m.updateViewsState()
 		return m, nil
 

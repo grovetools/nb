@@ -687,8 +687,13 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, incl
 				}
 
 				if err == nil {
-					note.Workspace = ctx.NotebookContextWorkspace.Name
-					note.Branch = ctx.Branch
+					// Enrich with context if not already set by path parsing
+					if note.Workspace == "" {
+						note.Workspace = ctx.NotebookContextWorkspace.Name
+					}
+					if note.Branch == "" {
+						note.Branch = ctx.Branch
+					}
 
 					// Set Group from directory path for grouping in UI
 					relPath, _ := filepath.Rel(contentDir.Path, path)

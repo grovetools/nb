@@ -554,6 +554,33 @@ func CreateNoteContent(noteType models.NoteType, title, workspace, branch, workt
 func GetNoteMetadata(path string) (workspaceIdentifier, branch, noteType string) {
 	parts := strings.Split(filepath.ToSlash(path), "/")
 
+	// New centralized structure: .../workspaces/<workspace>/<type>/.../note.md
+	for i, part := range parts {
+		if part == "workspaces" && i+1 < len(parts) {
+			workspaceIdentifier = parts[i+1]
+			branch = "main" // Centralized notes are not branch-specific in the path
+
+			if i+2 < len(parts) {
+				// Find where the filename starts (contains a known extension)
+				filenameIndex := -1
+				for j := i + 2; j < len(parts); j++ {
+					if strings.HasSuffix(parts[j], ".md") || strings.HasSuffix(parts[j], ".txt") ||
+					   strings.HasSuffix(parts[j], ".json") || strings.Contains(parts[j], ".") {
+						filenameIndex = j
+						break
+					}
+				}
+
+				if filenameIndex != -1 && filenameIndex > i+2 {
+					noteType = strings.Join(parts[i+2:filenameIndex], "/")
+					return workspaceIdentifier, branch, noteType
+				}
+			}
+			return workspaceIdentifier, branch, "" // Note directly in workspace dir
+		}
+	}
+
+	// Legacy structures
 	for i, part := range parts {
 		if part == "nb" && i+1 < len(parts) {
 			if parts[i+1] == globalWorkspace {
