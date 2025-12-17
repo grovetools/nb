@@ -336,24 +336,31 @@ func (s *Service) GetNotebookLocator() *coreworkspace.NotebookLocator {
 	return s.notebookLocator
 }
 
-// ListNoteTypes returns a list of all configured note types.
+// ListNoteTypes discovers note types by scanning directories within the notes path.
 // It ensures 'inbox' is always included as the default.
-func (s *Service) ListNoteTypes() ([]models.NoteType, error) {
+func (s *Service) ListNoteTypes(notebookContext *coreworkspace.WorkspaceNode) ([]models.NoteType, error) {
 	types := make(map[models.NoteType]bool)
 	types["inbox"] = true // Always include inbox
 
-	if s.CoreConfig != nil && s.CoreConfig.Notebooks != nil && s.CoreConfig.Notebooks.Definitions != nil {
-		// Get the default notebook name
-		defaultNotebookName := "default"
-		if s.CoreConfig.Notebooks.Rules != nil && s.CoreConfig.Notebooks.Rules.Default != "" {
-			defaultNotebookName = s.CoreConfig.Notebooks.Rules.Default
-		}
+	// The locator's GetNotesDir with an empty type gives us the root directory for notes.
+	notesRootDir, err := s.notebookLocator.GetNotesDir(notebookContext, "")
+	if err != nil {
+		// If we can't get the root, return the default. This can happen for new workspaces.
+		return []models.NoteType{"inbox"}, nil
+	}
 
-		// Get types from the default notebook definition
-		if notebook, ok := s.CoreConfig.Notebooks.Definitions[defaultNotebookName]; ok && notebook != nil && notebook.Types != nil {
-			for typeName := range notebook.Types {
-				types[models.NoteType(typeName)] = true
-			}
+	entries, err := os.ReadDir(notesRootDir)
+	if err != nil {
+		// Directory might not exist yet, which is fine. Return the default.
+		if os.IsNotExist(err) {
+			return []models.NoteType{"inbox"}, nil
+		}
+		return nil, fmt.Errorf("could not read notes directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			types[models.NoteType(entry.Name())] = true
 		}
 	}
 
@@ -664,99 +671,74 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, incl
 				}
 			}
 
+			// Ignore common dotfiles, but not special dot-directories like .archive
+			if !info.IsDir() && strings.HasPrefix(info.Name(), ".") {
+				return nil
+			}
+
 			if !info.IsDir() {
+				var note *models.Note
+				var err error
 				if strings.HasSuffix(path, ".md") {
-					note, err := ParseNote(path)
-					if err == nil {
-						note.Workspace = ctx.NotebookContextWorkspace.Name
-						note.Branch = ctx.Branch
+					note, err = ParseNote(path)
+				} else {
+					// Handle non-markdown files as generic file notes
+					note, err = ParseGenericFile(path)
+				}
 
-						// Set Group from directory path for grouping in UI
-						relPath, _ := filepath.Rel(contentDir.Path, path)
-						parts := strings.Split(filepath.ToSlash(relPath), "/")
+				if err == nil {
+					note.Workspace = ctx.NotebookContextWorkspace.Name
+					note.Branch = ctx.Branch
 
-						switch contentDir.Type {
-						case "plans":
-							if len(parts) > 2 {
-								// This is inside a nested subdirectory: "plans/<dir>/<subdir>"
-								// Preserve the full path for archived plans like "plans/.archive/planname"
-								note.Group = "plans/" + filepath.Join(parts[0], parts[1])
-							} else if len(parts) > 1 {
-								// This is inside a plan subdirectory: "plans/<planname>"
-								note.Group = "plans/" + parts[0]
-							} else {
-								// This is a top-level plan file (shouldn't happen but handle it)
-								note.Group = "plans"
-							}
-							// Set Type as plan
-							if note.Type == "" {
-								note.Type = "plan"
-							}
+					// Set Group from directory path for grouping in UI
+					relPath, _ := filepath.Rel(contentDir.Path, path)
+					parts := strings.Split(filepath.ToSlash(relPath), "/")
 
-						case "chats":
-							if len(parts) > 2 {
-								// This is inside a nested subdirectory: "chats/<dir>/<subdir>"
-								note.Group = "chats/" + filepath.Join(parts[0], parts[1])
-							} else if len(parts) > 1 {
-								// This is inside a chat subdirectory: "chats/<chatname>"
-								note.Group = "chats/" + parts[0]
-							} else {
-								note.Group = "chats"
-							}
-							if note.Type == "" {
-								note.Type = "chat"
-							}
-
-						case "notes":
-							if len(parts) > 1 {
-								note.Group = strings.Join(parts[:len(parts)-1], "/")
-							} else if len(parts) == 1 {
-								note.Group = "quick"
-							}
-							// Set Type from directory if not already set from frontmatter (for backwards compatibility)
-							if note.Type == "" {
-								note.Type = models.NoteType(note.Group)
-							}
+					switch contentDir.Type {
+					case "plans":
+						if len(parts) > 2 {
+							// This is inside a nested subdirectory: "plans/<dir>/<subdir>"
+							// Preserve the full path for archived plans like "plans/.archive/planname"
+							note.Group = "plans/" + filepath.Join(parts[0], parts[1])
+						} else if len(parts) > 1 {
+							// This is inside a plan subdirectory: "plans/<planname>"
+							note.Group = "plans/" + parts[0]
+						} else {
+							// This is a top-level plan file (shouldn't happen but handle it)
+							note.Group = "plans"
+						}
+						// Set Type as plan
+						if note.Type == "" {
+							note.Type = "plan"
 						}
 
-						notes = append(notes, note)
-					}
-				} else if includeArtifacts && strings.Contains(path, "/.artifacts/") && strings.HasSuffix(path, ".xml") {
-					artifact, err := ParseArtifact(path)
-					if err == nil {
-						artifact.Workspace = ctx.NotebookContextWorkspace.Name
-						artifact.Branch = ctx.Branch
-
-						// Set Group from directory path, matching the structure used for regular notes
-						relPath, _ := filepath.Rel(contentDir.Path, path)
-						parts := strings.Split(filepath.ToSlash(relPath), "/")
-
-						switch contentDir.Type {
-						case "plans":
-							if len(parts) > 2 {
-								// e.g., "binary-test/.artifacts/file.xml" -> "plans/binary-test/.artifacts"
-								artifact.Group = "plans/" + filepath.Join(parts[:len(parts)-1]...)
-							} else if len(parts) > 1 {
-								artifact.Group = "plans/" + parts[0]
-							} else {
-								artifact.Group = "plans"
-							}
-						case "chats":
-							if len(parts) > 2 {
-								artifact.Group = "chats/" + filepath.Join(parts[:len(parts)-1]...)
-							} else if len(parts) > 1 {
-								artifact.Group = "chats/" + parts[0]
-							} else {
-								artifact.Group = "chats"
-							}
-						case "notes":
-							if len(parts) > 1 {
-								artifact.Group = strings.Join(parts[:len(parts)-1], "/")
-							}
+					case "chats":
+						if len(parts) > 2 {
+							// This is inside a nested subdirectory: "chats/<dir>/<subdir>"
+							note.Group = "chats/" + filepath.Join(parts[0], parts[1])
+						} else if len(parts) > 1 {
+							// This is inside a chat subdirectory: "chats/<chatname>"
+							note.Group = "chats/" + parts[0]
+						} else {
+							note.Group = "chats"
+						}
+						if note.Type == "" {
+							note.Type = "chat"
 						}
 
-						notes = append(notes, artifact)
+					case "notes":
+						if len(parts) > 1 {
+							note.Group = strings.Join(parts[:len(parts)-1], "/")
+						} else if len(parts) == 1 {
+							note.Group = "quick"
+						}
+						// Set Type from directory if not already set from frontmatter (for backwards compatibility)
+						if note.Type == "" {
+							note.Type = models.NoteType(note.Group)
+						}
 					}
+
+					notes = append(notes, note)
 				}
 			}
 			return nil
@@ -1031,7 +1013,7 @@ func (s *Service) buildPathsMap(notebookContext *coreworkspace.WorkspaceNode) (m
 	paths := make(map[string]string)
 
 	// Get configured note types
-	noteTypes, err := s.ListNoteTypes()
+	noteTypes, err := s.ListNoteTypes(notebookContext)
 	if err != nil {
 		// Fallback to a basic set if there's an error
 		noteTypes = []models.NoteType{"inbox", "quick", "learn"}

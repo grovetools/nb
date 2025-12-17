@@ -75,7 +75,12 @@ func (m *Model) createPlanCmd(note *models.Note) tea.Cmd {
 		}
 	}
 	// Sanitize the note title to create a valid directory name for the plan
-	planName := sanitizeForFilename(note.Title)
+	var planName string
+	if note.FrontmatterTitle != "" {
+		planName = sanitizeForFilename(note.FrontmatterTitle)
+	} else {
+		planName = sanitizeForFilename(note.Title)
+	}
 
 	args := []string{
 		"plan", "init", planName,
@@ -822,7 +827,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if node != nil && node.IsNote {
 				m.isRenamingNote = true
 				m.noteToRename = node.Note
-				m.renameInput.SetValue(node.Note.Title)
+				m.renameInput.SetValue(node.Note.FrontmatterTitle)
 				m.renameInput.Focus()
 				return m, textinput.Blink
 			}

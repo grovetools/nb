@@ -662,7 +662,7 @@ func getNoteIcon(noteType string) string {
 	case "artifact":
 		return theme.IconDocs
 	default:
-		return theme.IconNote // Default to a generic note icon
+		return theme.IconDocs // Default to a generic file icon
 	}
 }
 
@@ -698,7 +698,7 @@ func getGroupIcon(groupName string) string {
 	case ".artifacts":
 		return theme.IconDocs
 	default:
-		return "" // No icon for unknown groups
+		return theme.IconArchive // Use as a generic folder icon
 	}
 }
 

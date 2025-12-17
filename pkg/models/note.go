@@ -19,9 +19,10 @@ type RemoteMetadata struct {
 
 // Note represents a note file
 type Note struct {
-	Path       string    `json:"path"`
-	Title      string    `json:"title"`
-	Type       NoteType  `json:"type"`          // Note type from frontmatter (chat, interactive_agent, etc.)
+	Path             string   `json:"path"`
+	Title            string   `json:"title"` // Filename
+	FrontmatterTitle string   `json:"frontmatter_title,omitempty"`
+	Type             NoteType `json:"type"` // Note type from frontmatter (chat, interactive_agent, etc.)
 	Group      string    `json:"group"`         // Directory grouping (current, plans/name, etc.)
 	Content    string    `json:"content,omitempty"`
 	Workspace  string    `json:"workspace"`

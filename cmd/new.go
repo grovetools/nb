@@ -122,7 +122,25 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&noteType, "type", "t", "inbox", "Note type (defaults to 'inbox', others can be configured in grove.yml)")
+	cmd.Flags().StringVarP(&noteType, "type", "t", "inbox", "Note type (a directory in your notes folder, e.g., 'inbox', 'meetings')")
+	_ = cmd.RegisterFlagCompletionFunc("type", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		s := *svc
+		ctx, err := s.GetWorkspaceContext(*workspaceOverride)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+
+		types, err := s.ListNoteTypes(ctx.NotebookContextWorkspace)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+
+		var typeNames []string
+		for _, t := range types {
+			typeNames = append(typeNames, string(t))
+		}
+		return typeNames, cobra.ShellCompDirectiveNoFileComp
+	})
 	cmd.Flags().StringVarP(&noteName, "name", "n", "", "Note name/title")
 	cmd.Flags().BoolVar(&noEdit, "no-edit", false, "Don't open editor after creating")
 	cmd.Flags().BoolVarP(&globalNote, "global", "g", false, "Create note in global workspace")

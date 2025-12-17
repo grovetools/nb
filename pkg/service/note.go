@@ -80,7 +80,7 @@ func ParseNote(path string) (*models.Note, error) {
 
 	note := &models.Note{
 		Path:       path,
-		Title:      extractTitle(contentStr),
+		Title:      filepath.Base(path), // Title is now the filename
 		Type:       models.NoteType(noteType),
 		Workspace:  workspace,
 		Branch:     branch,
@@ -95,7 +95,10 @@ func ParseNote(path string) (*models.Note, error) {
 	// If frontmatter was successfully parsed, use its data
 	if fm != nil {
 		if fm.Title != "" {
-			note.Title = fm.Title
+			note.FrontmatterTitle = fm.Title
+		} else {
+			// fallback to H1
+			note.FrontmatterTitle = extractTitle(contentStr)
 		}
 		if fm.ID != "" {
 			note.ID = fm.ID
@@ -150,6 +153,31 @@ func ParseNote(path string) (*models.Note, error) {
 				note.ModifiedAt = t
 			}
 		}
+	}
+
+	return note, nil
+}
+
+// ParseGenericFile creates a Note model for a non-Markdown file.
+func ParseGenericFile(path string) (*models.Note, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	workspace, branch, _ := GetNoteMetadata(path)
+	ext := strings.TrimPrefix(filepath.Ext(path), ".")
+
+	note := &models.Note{
+		Path:             path,
+		Title:            filepath.Base(path), // Filename is the title
+		FrontmatterTitle: filepath.Base(path), // Use filename as fallback semantic title
+		Type:             models.NoteType(ext),
+		Workspace:        workspace,
+		Branch:           branch,
+		CreatedAt:        info.ModTime(),
+		ModifiedAt:       info.ModTime(),
+		IsArchived:       strings.Contains(path, "/archive/") || strings.Contains(path, "/.archive/"),
 	}
 
 	return note, nil

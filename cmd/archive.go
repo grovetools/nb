@@ -79,7 +79,7 @@ Examples:
 				}
 			} else if olderThan > 0 {
 				// Find old notes to archive across all note types
-				noteTypes, err := s.ListNoteTypes()
+				noteTypes, err := s.ListNoteTypes(ctx.NotebookContextWorkspace)
 				if err != nil {
 					return fmt.Errorf("could not list note types: %w", err)
 				}

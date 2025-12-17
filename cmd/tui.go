@@ -57,7 +57,7 @@ This view provides a workspace-centric way to explore your entire notebook.`,
 			}
 
 			// Create and run TUI with initial focus
-			model := browser.New(s, initialFocus)
+			model := browser.New(s, initialFocus, ctx)
 			p := tea.NewProgram(model, tea.WithAltScreen())
 
 			if _, err := p.Run(); err != nil {

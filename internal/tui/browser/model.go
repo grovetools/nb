@@ -125,7 +125,7 @@ type refreshMsg struct{}
 type quitPopupMsg struct{}
 
 // New creates a new TUI model.
-func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
+func New(svc *service.Service, initialFocus *workspace.WorkspaceNode, ctx *service.WorkspaceContext) Model {
 	helpModel := help.NewBuilder().
 		WithKeys(keys).
 		WithTitle("Notebook Browser - Help").
@@ -148,7 +148,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode) Model {
 	noteTitleInput.Width = 60
 
 	// Get note types dynamically from the service
-	configuredTypes, err := svc.ListNoteTypes()
+	configuredTypes, err := svc.ListNoteTypes(ctx.NotebookContextWorkspace)
 	if err != nil {
 		// Fallback on error
 		configuredTypes = []models.NoteType{"inbox", "quick", "learn"}
