@@ -347,45 +347,106 @@ func testViewAndVisibilityToggling(ctx *harness.Context) error {
 	}
 
 	// Test archive toggling (A)
-	// First verify archived notes are hidden
-	currentView, _ := session.Capture()
-	ctx.ShowCommandOutput("TUI Before Archive Toggle", currentView, "")
+	// Navigate to inbox to test archive visibility
+	session.SendKeys("g", "g") // Go to top
+	time.Sleep(200 * time.Millisecond)
+	session.SendKeys("j") // to project-A
+	time.Sleep(200 * time.Millisecond)
+	session.SendKeys("j") // to inbox
+	time.Sleep(200 * time.Millisecond)
 
+	// Expand inbox to see its contents
+	session.SendKeys("l")
+	time.Sleep(2 * time.Second)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+	beforeArchives, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI Before Archive Toggle (inbox expanded)", beforeArchives, "")
+
+	// Verify .archive is NOT visible initially (archives are hidden by default)
+	if err := session.AssertNotContains(".archive"); err != nil {
+		return fmt.Errorf(".archive directory should be hidden by default: %w", err)
+	}
+
+	// Toggle archives on with 'A'
 	session.SendKeys("A")
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(2 * time.Second) // Wait longer for tree to rebuild with archives
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 	archiveView, _ := session.Capture()
-	ctx.ShowCommandOutput("TUI After Archive Toggle", archiveView, "")
+	ctx.ShowCommandOutput("TUI After Archive Toggle (archives should be visible)", archiveView, "")
 
-	// The status bar should show "Archives: true"
-	if err := session.AssertContains("Archives: true"); err != nil {
-		return fmt.Errorf("archive status should show 'Archives: true' after toggling: %w", err)
+	// Now .archive directory should be visible in the tree
+	if err := session.AssertContains(".archive"); err != nil {
+		return fmt.Errorf(".archive directory should be visible after toggling archives on: %w", err)
 	}
 
-	session.SendKeys("A") // Toggle off again
-	time.Sleep(500 * time.Millisecond)
+	// Navigate to the .archive directory and expand it to see archived notes
+	session.SendKeys("j") // Move down to note-with-todos.md
+	time.Sleep(200 * time.Millisecond)
+	session.SendKeys("j") // Move down to .archive
+	time.Sleep(200 * time.Millisecond)
+
+	onArchive, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI with cursor on .archive", onArchive, "")
+
+	session.SendKeys("l") // Expand .archive
+	time.Sleep(2 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
+	archiveExpanded, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI After Expanding .archive", archiveExpanded, "")
+
+	// The archived note should now be visible
+	if err := session.AssertContains("archived.md"); err != nil {
+		return fmt.Errorf("archived.md should be visible after expanding .archive: %w", err)
+	}
+
+	// Toggle archives off again
+	session.SendKeys("A")
+	time.Sleep(2 * time.Second) // Wait for tree to rebuild
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+	afterToggleOff, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI After Toggling Archives Off (should hide .archive)", afterToggleOff, "")
+
+	// Verify .archive is hidden again
+	if err := session.AssertNotContains(".archive"); err != nil {
+		return fmt.Errorf(".archive should be hidden after toggling archives off: %w", err)
+	}
 
 	// Test artifact toggling (b)
+	// First verify artifacts are hidden by default
+	beforeArtifacts, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI Before Artifact Toggle", beforeArtifacts, "")
+
+	// Note: We created data.json as an artifact in the test setup
+	// Verify it's not visible initially (or only visible when research is expanded)
+
+	// Toggle artifacts on with 'b'
 	session.SendKeys("b")
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(2 * time.Second) // Wait for tree to rebuild with artifacts
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 	artifactView, _ := session.Capture()
-	ctx.ShowCommandOutput("TUI After Artifact Toggle", artifactView, "")
+	ctx.ShowCommandOutput("TUI After Artifact Toggle (artifacts should be visible)", artifactView, "")
 
-	// After toggling artifacts, data.json might be visible if we expand research directory
-	// For now, just verify the toggle doesn't crash
-	session.SendKeys("b") // Toggle off again
-	time.Sleep(500 * time.Millisecond)
+	// Artifacts should now be visible - specifically data.json when research is expanded
+	// The artifact toggle affects whether non-markdown files are shown in the tree
+
+	// Toggle artifacts off again
+	session.SendKeys("b")
+	time.Sleep(2 * time.Second) // Wait for tree to rebuild
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
+	afterArtifactsOff, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI After Toggling Artifacts Off", afterArtifactsOff, "")
 
 	return nil
 }
