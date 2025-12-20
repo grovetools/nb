@@ -20,6 +20,7 @@ func main() {
 		NotebookRemoteSyncScenario(),
 		NotebookFileBrowserScenario(),
 		NotebookTUIScenario(),
+		NotebookTUIComprehensiveScenario(),
 	}
 
 	// Setup signal handling for graceful shutdown.
