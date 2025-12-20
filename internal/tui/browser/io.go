@@ -5,38 +5,38 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/mattsolo1/grove-notebook/pkg/tree"
 )
 
 type workspacesLoadedMsg struct {
 	workspaces []*workspace.WorkspaceNode
 }
 
-type notesLoadedMsg struct {
-	notes []*models.Note
+type itemsLoadedMsg struct {
+	items []*tree.Item
 }
 
-func fetchFocusedNotesCmd(svc *service.Service, focusedWS *workspace.WorkspaceNode, showArtifacts bool) tea.Cmd {
+func fetchFocusedItemsCmd(svc *service.Service, focusedWS *workspace.WorkspaceNode, showArtifacts bool) tea.Cmd {
 	return func() tea.Msg {
-		var notesToLoad []*workspace.WorkspaceNode
-		notesToLoad = append(notesToLoad, focusedWS)
+		var itemsToLoad []*workspace.WorkspaceNode
+		itemsToLoad = append(itemsToLoad, focusedWS)
 
-		// If focused on an ecosystem, also load notes from its direct children
+		// If focused on an ecosystem, also load items from its direct children
 		if focusedWS.IsEcosystem() {
 			allWorkspaces := svc.GetWorkspaceProvider().All()
 			for _, ws := range allWorkspaces {
 				if ws.IsChildOf(focusedWS.Path) {
-					notesToLoad = append(notesToLoad, ws)
+					itemsToLoad = append(itemsToLoad, ws)
 				}
 			}
 		}
 
-		var allNotes []*models.Note
-		// Use a map to deduplicate notes by path
-		seenNotes := make(map[string]bool)
+		var allItems []*tree.Item
+		// Use a map to deduplicate items by path
+		seenItems := make(map[string]bool)
 
-		for _, wsNode := range notesToLoad {
+		for _, wsNode := range itemsToLoad {
 			// Get context for the workspace
 			wsCtx, err := svc.GetWorkspaceContext(wsNode.Path)
 			if err != nil {
@@ -44,34 +44,34 @@ func fetchFocusedNotesCmd(svc *service.Service, focusedWS *workspace.WorkspaceNo
 				continue
 			}
 
-			// Fetch notes for the workspace (including archived)
-			notes, err := svc.ListAllNotes(wsCtx, true, showArtifacts)
+			// Fetch items for the workspace (including archived)
+			items, err := svc.ListAllItems(wsCtx, true, showArtifacts)
 			if err == nil {
-				for _, note := range notes {
-					if !seenNotes[note.Path] {
-						allNotes = append(allNotes, note)
-						seenNotes[note.Path] = true
+				for _, item := range items {
+					if !seenItems[item.Path] {
+						allItems = append(allItems, item)
+						seenItems[item.Path] = true
 					}
 				}
 			}
 		}
 
-		// Also fetch global notes explicitly (including archived)
-		globalNotes, err := svc.ListAllGlobalNotes(true, showArtifacts)
+		// Also fetch global items explicitly (including archived)
+		globalItems, err := svc.ListAllGlobalItems(true, showArtifacts)
 		if err == nil {
-			for _, note := range globalNotes {
-				if !seenNotes[note.Path] {
-					allNotes = append(allNotes, note)
-					seenNotes[note.Path] = true
+			for _, item := range globalItems {
+				if !seenItems[item.Path] {
+					allItems = append(allItems, item)
+					seenItems[item.Path] = true
 				}
 			}
 		}
 
 		// Combine and sort
-		sort.Slice(allNotes, func(i, j int) bool {
-			return allNotes[i].ModifiedAt.After(allNotes[j].ModifiedAt)
+		sort.Slice(allItems, func(i, j int) bool {
+			return allItems[i].ModTime.After(allItems[j].ModTime)
 		})
-		return notesLoadedMsg{notes: allNotes}
+		return itemsLoadedMsg{items: allItems}
 	}
 }
 
@@ -96,26 +96,26 @@ func fetchWorkspacesCmd(provider *workspace.Provider) tea.Cmd {
 	}
 }
 
-func fetchAllNotesCmd(svc *service.Service, showArtifacts bool) tea.Cmd {
+func fetchAllItemsCmd(svc *service.Service, showArtifacts bool) tea.Cmd {
 	return func() tea.Msg {
-		// Fetch notes from all provider-known workspaces (including archived)
-		notes, err := svc.ListNotesFromAllWorkspaces(true, showArtifacts)
+		// Fetch items from all provider-known workspaces (including archived)
+		items, err := svc.ListItemsFromAllWorkspaces(true, showArtifacts)
 		if err != nil {
 			// In a real app, we'd return an error message.
 			// For now, we return an empty list.
-			return notesLoadedMsg{notes: []*models.Note{}}
+			return itemsLoadedMsg{items: []*tree.Item{}}
 		}
 
-		// Also fetch global notes explicitly and append them (including archived)
-		globalNotes, err := svc.ListAllGlobalNotes(true, showArtifacts)
+		// Also fetch global items explicitly and append them (including archived)
+		globalItems, err := svc.ListAllGlobalItems(true, showArtifacts)
 		if err == nil {
-			notes = append(notes, globalNotes...)
+			items = append(items, globalItems...)
 		}
 
 		// Sort by modified date descending by default
-		sort.Slice(notes, func(i, j int) bool {
-			return notes[i].ModifiedAt.After(notes[j].ModifiedAt)
+		sort.Slice(items, func(i, j int) bool {
+			return items[i].ModTime.After(items[j].ModTime)
 		})
-		return notesLoadedMsg{notes: notes}
+		return itemsLoadedMsg{items: items}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
+	"github.com/mattsolo1/grove-notebook/pkg/tree"
 )
 
 // nodeRenderInfo holds the unstyled components of a display node for rendering.
@@ -157,16 +158,26 @@ func (m *Model) renderTableView() string {
 		}
 
 		var typeCol, statusCol, tagsCol, createdCol, modifiedCol, workspaceCol, pathCol string
-		if node.IsNote {
-			typeCol = string(node.Note.Type)
-			statusCol = getNoteStatus(node.Note)
-			tagsCol = strings.Join(node.Note.Tags, ", ")
-			workspaceCol = node.Note.Workspace
-			createdCol = node.Note.CreatedAt.Format("2006-01-02 15:04")
-			modifiedCol = node.Note.ModifiedAt.Format("2006-01-02 15:04")
+		if node.IsNote() {
+			// Extract type from metadata
+			if noteType, ok := node.Item.Metadata["Type"].(string); ok {
+				typeCol = noteType
+			}
+			statusCol = getNoteStatus(ItemToNote(node.Item))
+			if tags, ok := node.Item.Metadata["Tags"].([]string); ok {
+				tagsCol = strings.Join(tags, ", ")
+			}
+			if ws, ok := node.Item.Metadata["Workspace"].(string); ok {
+				workspaceCol = ws
+			}
+			if created, ok := node.Item.Metadata["CreatedAt"].(time.Time); ok {
+				createdCol = created.Format("2006-01-02 15:04")
+			}
+			modifiedCol = node.Item.ModTime.Format("2006-01-02 15:04")
 			pathCol = node.RelativePath
 		} else if info.isPlan {
-			statusCol = m.GetPlanStatus(node.WorkspaceName, node.GroupName)
+			wsName, _ := node.Item.Metadata["Workspace"].(string)
+			statusCol = m.GetPlanStatus(wsName, node.Item.Name)
 		}
 
 		// --- Build Name Column using new helpers ---
@@ -226,7 +237,7 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		prefix: node.Prefix,
 	}
 
-	if node.IsSeparator {
+	if node.IsSeparator() {
 		info.isSeparator = true
 		return info
 	}
@@ -240,31 +251,34 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		}
 	}
 
-	if node.IsWorkspace {
+	if node.IsWorkspace() {
 		info.isWorkspace = true
-		info.workspace = node.Workspace
-		info.name = node.Workspace.Name
-	} else if node.IsGroup {
+		if ws, ok := node.Item.Metadata["Workspace"].(*workspace.WorkspaceNode); ok {
+			info.workspace = ws
+			info.name = ws.Name
+		}
+	} else if node.IsGroup() {
 		info.isGroup = true
-		info.name = node.GroupName
-		info.isArchived = strings.Contains(node.GroupName, "/.archive") || strings.Contains(node.GroupName, "/.closed")
-		info.isArtifact = strings.Contains(node.GroupName, "/.artifacts")
+		groupName := node.Item.Name
+		info.name = groupName
+		info.isArchived = strings.Contains(groupName, "/.archive") || strings.Contains(groupName, "/.closed")
+		info.isArtifact = strings.Contains(groupName, "/.artifacts")
 
 		// For archive parent nodes (e.g., "current/.archive" or "plans/.archive"), display just ".archive"
-		if strings.HasSuffix(node.GroupName, "/.archive") {
+		if strings.HasSuffix(groupName, "/.archive") {
 			info.name = ".archive"
 			icon := getGroupIcon(".archive")
 			if icon != "" {
 				info.indicator = icon
 			}
-		} else if strings.HasSuffix(node.GroupName, "/.closed") {
+		} else if strings.HasSuffix(groupName, "/.closed") {
 			// For closed parent nodes (e.g., "github-issues/.closed"), display just ".closed"
 			info.name = ".closed"
 			icon := getGroupIcon(".closed")
 			if icon != "" {
 				info.indicator = icon
 			}
-		} else if strings.HasSuffix(node.GroupName, "/.artifacts") {
+		} else if strings.HasSuffix(groupName, "/.artifacts") {
 			// For artifact parent nodes, display just ".artifacts"
 			info.name = ".artifacts"
 			icon := getGroupIcon(".artifacts")
@@ -274,18 +288,19 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		} else if node.IsPlan() {
 			// Handle plan nodes (but not archive nodes that start with "plans/")
 			info.isPlan = true
-			info.name = strings.TrimPrefix(node.GroupName, "plans/") // Display plan name without "plans/"
+			info.name = strings.TrimPrefix(groupName, "plans/") // Display plan name without "plans/"
 			info.name = strings.TrimPrefix(info.name, ".archive/")   // Also remove ".archive/" prefix for archived plans
 			groupKey := m.getGroupKey(node)
 			if _, ok := m.selectedGroups[groupKey]; ok {
 				info.indicator = "■ " // Selected indicator
 			} else {
-				planStatus := m.GetPlanStatus(node.WorkspaceName, node.GroupName)
+				wsName, _ := node.Item.Metadata["Workspace"].(string)
+				planStatus := m.GetPlanStatus(wsName, groupName)
 				info.indicator = getPlanStatusIcon(planStatus) + " "
 			}
 		} else {
 			// Regular note groups - add their icons
-			icon := getGroupIcon(node.GroupName)
+			icon := getGroupIcon(groupName)
 			if icon != "" {
 				info.indicator = icon
 			}
@@ -293,33 +308,39 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		if node.ChildCount > 0 {
 			info.count = fmt.Sprintf(" (%d)", node.ChildCount)
 		}
-	} else if node.IsNote {
-		info.note = node.Note
-		info.name = node.Note.Title
-		info.isArchived = strings.Contains(node.Note.Path, "/.archive/") || strings.Contains(node.Note.Path, "/.closed/")
-		info.isArtifact = node.Note.IsArtifact
-		if _, ok := m.selected[node.Note.Path]; ok {
+	} else if node.IsNote() {
+		// Convert Item to Note for compatibility
+		note := ItemToNote(node.Item)
+		info.note = note
+		info.name = note.Title
+		info.isArchived = strings.Contains(node.Item.Path, "/.archive/") || strings.Contains(node.Item.Path, "/.closed/")
+		info.isArtifact = node.Item.Type == tree.TypeArtifact
+		if _, ok := m.selected[node.Item.Path]; ok {
 			info.indicator = "■" // Selected indicator
 		} else {
-			info.indicator = getNoteIcon(string(node.Note.Type))
+			noteType := ""
+			if nt, ok := node.Item.Metadata["Type"].(string); ok {
+				noteType = nt
+			}
+			info.indicator = getNoteIcon(noteType)
 		}
 	}
 
-	// Add link suffix if the node is linked
-	if node.LinkedNode != nil {
-		if node.IsNote {
-			// Note -> Plan: [plan: → plan-name]
-			planName := strings.TrimPrefix(node.LinkedNode.GroupName, "plans/")
-			italicStyle := lipgloss.NewStyle().Italic(true)
-			prefix := italicStyle.Render("plan:")
-			info.suffix = fmt.Sprintf(" [%s → %s]", prefix, planName)
-		} else if node.IsPlan() {
-			// Plan -> Note: [note: ← Note Title]
-			italicStyle := lipgloss.NewStyle().Italic(true)
-			prefix := italicStyle.Render("note:")
-			info.suffix = fmt.Sprintf(" [%s ← %s]", prefix, node.LinkedNode.Note.Title)
-		}
-	}
+	// TODO: Add link suffix if the node is linked (LinkedNode field needs to be added to DisplayNode)
+	// if node.LinkedNode != nil {
+	// 	if node.IsNote() {
+	// 		// Note -> Plan: [plan: → plan-name]
+	// 		planName := strings.TrimPrefix(node.LinkedNode.GroupName, "plans/")
+	// 		italicStyle := lipgloss.NewStyle().Italic(true)
+	// 		prefix := italicStyle.Render("plan:")
+	// 		info.suffix = fmt.Sprintf(" [%s → %s]", prefix, planName)
+	// 	} else if node.IsPlan() {
+	// 		// Plan -> Note: [note: ← Note Title]
+	// 		italicStyle := lipgloss.NewStyle().Italic(true)
+	// 		prefix := italicStyle.Render("note:")
+	// 		info.suffix = fmt.Sprintf(" [%s ← %s]", prefix, node.LinkedNode.Note.Title)
+	// 	}
+	// }
 
 	return info
 }
@@ -461,13 +482,17 @@ func (m *Model) calculateTableColumnWidths() [8]int {
 
 	// Scan through all display nodes to find max widths
 	for _, node := range m.displayNodes {
-		if node.IsWorkspace {
-			nameLen := lipgloss.Width(fmt.Sprintf("%s%s", node.Prefix, node.Workspace.Name)) + 4 // +4 for fold indicator
+		if node.IsWorkspace() {
+			wsName := ""
+			if ws, ok := node.Item.Metadata["Workspace"].(*workspace.WorkspaceNode); ok {
+				wsName = ws.Name
+			}
+			nameLen := lipgloss.Width(fmt.Sprintf("%s%s", node.Prefix, wsName)) + 4 // +4 for fold indicator
 			if nameLen > maxName {
 				maxName = nameLen
 			}
-		} else if node.IsGroup {
-			displayName := node.GroupName
+		} else if node.IsGroup() {
+			displayName := node.Item.Name
 			if node.IsPlan() {
 				displayName = strings.TrimPrefix(displayName, "plans/")
 			}
@@ -476,30 +501,40 @@ func (m *Model) calculateTableColumnWidths() [8]int {
 				maxName = nameLen
 			}
 			if node.IsPlan() {
-				status := m.GetPlanStatus(node.WorkspaceName, node.GroupName)
+				wsName, _ := node.Item.Metadata["Workspace"].(string)
+				status := m.GetPlanStatus(wsName, node.Item.Name)
 				if len(status) > maxStatus {
 					maxStatus = len(status)
 				}
 			}
-		} else if node.IsNote {
-			nameLen := lipgloss.Width(fmt.Sprintf("%s%s %s", node.Prefix, getNoteIcon(string(node.Note.Type)), node.Note.Title))
+		} else if node.IsNote() {
+			noteType := ""
+			title := ""
+			if nt, ok := node.Item.Metadata["Type"].(string); ok {
+				noteType = nt
+			}
+			if t, ok := node.Item.Metadata["Title"].(string); ok {
+				title = t
+			}
+			nameLen := lipgloss.Width(fmt.Sprintf("%s%s %s", node.Prefix, getNoteIcon(noteType), title))
 			if nameLen > maxName {
 				maxName = nameLen
 			}
-			typeLen := len(string(node.Note.Type))
+			typeLen := len(noteType)
 			if typeLen > maxType {
 				maxType = typeLen
 			}
-			status := getNoteStatus(node.Note)
+			note := ItemToNote(node.Item)
+			status := getNoteStatus(note)
 			if len(status) > maxStatus {
 				maxStatus = len(status)
 			}
-			tagsLen := len(strings.Join(node.Note.Tags, ", "))
+			tagsLen := len(strings.Join(note.Tags, ", "))
 			if tagsLen > maxTags {
 				maxTags = tagsLen
 			}
-			if len(node.Note.Workspace) > maxWorkspace {
-				maxWorkspace = len(node.Note.Workspace)
+			if len(note.Workspace) > maxWorkspace {
+				maxWorkspace = len(note.Workspace)
 			}
 			if len(node.RelativePath) > maxPath {
 				maxPath = len(node.RelativePath)
@@ -801,7 +836,12 @@ func (m *Model) getViewportHeight() int {
 
 // getGroupKey returns a unique key for a group node (workspace:groupName)
 func (m *Model) getGroupKey(node *DisplayNode) string {
-	return node.WorkspaceName + ":" + node.GroupName
+	if node.Item.Type == tree.TypeGroup || node.Item.Type == tree.TypePlan {
+		if wsName, ok := node.Item.Metadata["Workspace"].(string); ok {
+			return wsName + ":" + node.Item.Name
+		}
+	}
+	return ""
 }
 
 // formatRelativeTime formats a time as a relative string

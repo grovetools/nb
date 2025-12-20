@@ -15,6 +15,7 @@ import (
 	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
+	"github.com/mattsolo1/grove-notebook/pkg/tree"
 	"github.com/sirupsen/logrus"
 )
 
@@ -753,6 +754,82 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, incl
 	return notes, nil
 }
 
+// ListAllItems lists all files as generic Items in the specified workspace context.
+func (s *Service) ListAllItems(ctx *WorkspaceContext, includeArchived bool, includeArtifacts bool) ([]*tree.Item, error) {
+	// Get all content directories for this workspace
+	contentDirs, err := s.notebookLocator.GetAllContentDirs(ctx.NotebookContextWorkspace)
+	if err != nil {
+		return nil, fmt.Errorf("get content directories: %w", err)
+	}
+
+	var items []*tree.Item
+	processedPaths := make(map[string]struct{})
+
+	// Walk each content directory
+	for _, contentDir := range contentDirs {
+		// Skip if directory doesn't exist
+		if _, err := os.Stat(contentDir.Path); err != nil {
+			continue
+		}
+
+		err = filepath.Walk(contentDir.Path, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil // Skip errors
+			}
+
+			// De-duplication: check if we've already processed this canonical path
+			canonicalPath, err := pathutil.NormalizeForLookup(path)
+			if err != nil {
+				return nil // Skip if we cannot normalize the path
+			}
+			if _, seen := processedPaths[canonicalPath]; seen {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			processedPaths[canonicalPath] = struct{}{}
+
+			// Skip archive directories if not requested
+			if !includeArchived && (info.Name() == ".archive" || info.Name() == "archive") {
+				return filepath.SkipDir
+			}
+			// Skip artifacts directories if not requested
+			if !includeArtifacts && info.Name() == ".artifacts" {
+				return filepath.SkipDir
+			}
+
+			// Ignore common dotfiles
+			if !info.IsDir() && strings.HasPrefix(info.Name(), ".") {
+				return nil
+			}
+
+			if !info.IsDir() {
+				item, err := s.newItemFromFile(path, info)
+				if err == nil {
+					// Enrich item with workspace context
+					item.Metadata["Workspace"] = ctx.NotebookContextWorkspace.Name
+					item.Metadata["Branch"] = ctx.Branch
+
+					// Set Group from directory path for grouping in UI
+					relPath, _ := filepath.Rel(contentDir.Path, path)
+					parts := strings.Split(filepath.ToSlash(relPath), "/")
+					group := ""
+					if len(parts) > 1 {
+						group = strings.Join(parts[:len(parts)-1], "/")
+					}
+					item.Metadata["Group"] = group
+
+					items = append(items, item)
+				}
+			}
+			return nil
+		})
+	}
+
+	return items, nil
+}
+
 // ListAllGlobalNotes lists all notes in the global workspace (all directories)
 func (s *Service) ListAllGlobalNotes(includeArchived bool, includeArtifacts bool) ([]*models.Note, error) {
 	ctx, err := s.GetWorkspaceContext("global")
@@ -760,6 +837,15 @@ func (s *Service) ListAllGlobalNotes(includeArchived bool, includeArtifacts bool
 		return nil, fmt.Errorf("get global workspace context: %w", err)
 	}
 	return s.ListAllNotes(ctx, includeArchived, includeArtifacts)
+}
+
+// ListAllGlobalItems lists all items in the global workspace (all directories)
+func (s *Service) ListAllGlobalItems(includeArchived bool, includeArtifacts bool) ([]*tree.Item, error) {
+	ctx, err := s.GetWorkspaceContext("global")
+	if err != nil {
+		return nil, fmt.Errorf("get global workspace context: %w", err)
+	}
+	return s.ListAllItems(ctx, includeArchived, includeArtifacts)
 }
 
 // ListGlobalNotes lists notes in the global workspace

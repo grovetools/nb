@@ -1,11 +1,9 @@
 package views
 
 import (
-	"strings"
-
 	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/mattsolo1/grove-notebook/pkg/tree"
 )
 
 // ViewMode defines the different ways to display notes.
@@ -18,51 +16,64 @@ const (
 
 // DisplayNode represents a single line in the hierarchical TUI view.
 type DisplayNode struct {
-	IsWorkspace bool
-	IsGroup     bool
-	IsNote      bool
-	IsSeparator bool
-
-	Workspace     *workspace.WorkspaceNode
-	GroupName     string
-	WorkspaceName string // For groups, tracks which workspace they belong to
-	Note          *models.Note
+	Item *tree.Item
 
 	// Pre-calculated for rendering
 	Prefix       string
 	Depth        int
 	JumpKey      rune
-	ChildCount   int          // For groups: number of notes/plans in the group
-	RelativePath string       // For notes, the path relative to their workspace
-	LinkedNode   *DisplayNode // For notes, points to the plan node; for plans, points to the note node
+	ChildCount   int    // For groups: number of child items
+	RelativePath string // Shortened display path for notes
 }
 
 // NodeID returns a unique identifier for this node (for tracking collapsed state).
 func (n *DisplayNode) NodeID() string {
-	if n.IsWorkspace {
-		return "ws:" + n.Workspace.Path
-	} else if n.IsGroup {
-		return "grp:" + n.GroupName
+	if n.Item.IsDir {
+		return "dir:" + n.Item.Path
 	}
-	return ""
+	return "file:" + n.Item.Path
 }
 
 // IsFoldable returns true if this node can be collapsed/expanded.
 func (n *DisplayNode) IsFoldable() bool {
-	return n.IsWorkspace || n.IsGroup
+	return n.Item.IsDir
 }
 
 // GroupKey returns a unique key for this group (for selection tracking).
 func (n *DisplayNode) GroupKey() string {
-	if n.IsGroup {
-		return n.WorkspaceName + ":" + n.GroupName
+	if n.Item.Type == tree.TypeGroup || n.Item.Type == tree.TypePlan {
+		if wsName, ok := n.Item.Metadata["Workspace"].(string); ok {
+			return wsName + ":" + n.Item.Name
+		}
 	}
 	return ""
 }
 
-// IsPlan returns true if this group represents a plan directory.
+// IsPlan returns true if this item represents a plan directory.
 func (n *DisplayNode) IsPlan() bool {
-	return n.IsGroup && strings.HasPrefix(n.GroupName, "plans/")
+	return n.Item.Type == tree.TypePlan
+}
+
+// Helper methods for backward compatibility during refactoring
+
+// IsNote returns true if this is a note (file, not directory).
+func (n *DisplayNode) IsNote() bool {
+	return n.Item != nil && !n.Item.IsDir
+}
+
+// IsGroup returns true if this is a group or plan directory.
+func (n *DisplayNode) IsGroup() bool {
+	return n.Item != nil && n.Item.IsDir && (n.Item.Type == tree.TypeGroup || n.Item.Type == tree.TypePlan)
+}
+
+// IsWorkspace returns true if this is a workspace node.
+func (n *DisplayNode) IsWorkspace() bool {
+	return n.Item != nil && n.Item.Type == tree.TypeWorkspace
+}
+
+// IsSeparator returns true if this is a separator node (no Item).
+func (n *DisplayNode) IsSeparator() bool {
+	return n.Item == nil
 }
 
 // Model encapsulates the state for rendering and navigating the note list.
@@ -85,7 +96,7 @@ type Model struct {
 
 	// References to parent (browser) state for rendering
 	service             *service.Service
-	allNotes            []*models.Note
+	allItems            []*tree.Item
 	workspaces          []*workspace.WorkspaceNode
 	focusedWorkspace    *workspace.WorkspaceNode
 	ecosystemPickerMode bool
@@ -124,7 +135,7 @@ func (m *Model) SetSize(w, h int) {
 // SetParentState provides the view with necessary data from the parent controller.
 func (m *Model) SetParentState(
 	service *service.Service,
-	allNotes []*models.Note,
+	allItems []*tree.Item,
 	workspaces []*workspace.WorkspaceNode,
 	focused *workspace.WorkspaceNode,
 	filterValue string,
@@ -134,7 +145,7 @@ func (m *Model) SetParentState(
 	ecoPickerMode, hideGlobal, showArchives, showArtifacts, showOnHold, recentNotesMode bool,
 ) {
 	m.service = service
-	m.allNotes = allNotes
+	m.allItems = allItems
 	m.workspaces = workspaces
 	m.focusedWorkspace = focused
 	m.filterValue = filterValue
@@ -195,16 +206,23 @@ func (m *Model) GetTargetedNotePaths() []string {
 
 	if m.cursor < len(m.displayNodes) {
 		node := m.displayNodes[m.cursor]
-		if node.IsNote {
-			return []string{node.Note.Path}
+		// Check if it's a note (file, not directory)
+		if !node.Item.IsDir {
+			return []string{node.Item.Path}
 		}
 		// If on a group, collect all notes within that group
-		if node.IsGroup {
+		if node.Item.Type == tree.TypeGroup || node.Item.Type == tree.TypePlan {
 			var paths []string
+			wsName, _ := node.Item.Metadata["Workspace"].(string)
+			groupName := node.Item.Name
 			// Find all notes belonging to this group
-			for _, n := range m.allNotes {
-				if n.Workspace == node.WorkspaceName && n.Group == node.GroupName {
-					paths = append(paths, n.Path)
+			for _, item := range m.allItems {
+				if !item.IsDir {
+					itemWs, _ := item.Metadata["Workspace"].(string)
+					itemGroup, _ := item.Metadata["Group"].(string)
+					if itemWs == wsName && itemGroup == groupName {
+						paths = append(paths, item.Path)
+					}
 				}
 			}
 			return paths
@@ -287,9 +305,9 @@ func (m *Model) clampCursor() {
 
 // GetCounts returns note count and selection counts for display.
 func (m *Model) GetCounts() (noteCount, selectedNotes, selectedPlans int) {
-	// Count notes in display nodes
+	// Count notes in display nodes (files, not directories)
 	for _, node := range m.displayNodes {
-		if node.IsNote {
+		if !node.Item.IsDir {
 			noteCount++
 		}
 	}

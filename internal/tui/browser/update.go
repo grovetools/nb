@@ -12,9 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/internal/tui/browser/components/confirm"
 	"github.com/mattsolo1/grove-notebook/internal/tui/browser/views"
@@ -23,13 +21,14 @@ import (
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/mattsolo1/grove-notebook/pkg/sync"
 	"github.com/mattsolo1/grove-notebook/pkg/sync/github"
+	"github.com/mattsolo1/grove-notebook/pkg/tree"
 )
 
 // updateViewsState synchronizes the view state with the browser model
 func (m *Model) updateViewsState() {
 	m.views.SetParentState(
 		m.service,
-		m.allNotes,
+		m.allItems,
 		m.workspaces,
 		m.focusedWorkspace,
 		m.filterInput.Value(),
@@ -166,24 +165,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMessage = fmt.Sprintf("Error loading %s", filepath.Base(msg.path))
 			}
 		} else {
-			// Check for a linked item to enhance the preview
-			var infoBox string
-			node := m.views.GetCurrentNode()
-			if node != nil && node.LinkedNode != nil {
-				style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).BorderForeground(theme.DefaultTheme.Colors.MutedText)
-				var title, body string
-				if node.IsNote {
-					title = "🔗 Linked Plan"
-					planStatus := m.views.GetPlanStatus(node.LinkedNode.WorkspaceName, node.LinkedNode.GroupName)
-					planName := strings.TrimPrefix(node.LinkedNode.GroupName, "plans/")
-					body = fmt.Sprintf("%s\nStatus: %s", planName, planStatus)
-				} else if node.IsPlan() {
-					title = "🔗 Linked Note"
-					body = node.LinkedNode.Note.Title
-				}
-				infoBox = style.Render(fmt.Sprintf("%s\n%s", title, body)) + "\n\n"
-			}
-			m.previewContent = infoBox + msg.content
+			m.previewContent = msg.content
 			if m.previewVisible {
 				m.statusMessage = fmt.Sprintf("Previewing %s", filepath.Base(msg.path))
 			}
@@ -289,18 +271,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateViewsState()
 		return m, nil
 
-	case notesLoadedMsg:
+	case itemsLoadedMsg:
 		if m.loadingCount > 0 {
 			m.loadingCount--
 		}
-		m.allNotes = msg.notes
+		m.allItems = msg.items
 		// Only reset collapse state if focus just changed
 		if m.focusChanged {
 			m.setCollapseStateForFocus()
 			m.focusChanged = false
 		}
 		m.updateViewsState()
-		m.findAndApplyLinks() // Detect and apply links between visible nodes
 		return m, m.updatePreviewContent()
 
 	case syncFinishedMsg:
@@ -344,9 +325,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		var notesCmd tea.Cmd
 		if m.focusedWorkspace != nil {
-			notesCmd = fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts)
+			notesCmd = fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts)
 		} else {
-			notesCmd = fetchAllNotesCmd(m.service, m.showArtifacts)
+			notesCmd = fetchAllItemsCmd(m.service, m.showArtifacts)
 		}
 
 		return m, tea.Batch(
@@ -365,14 +346,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, path := range msg.deletedPaths {
 			deletedMap[path] = true
 		}
-		// Filter out deleted notes
-		newAllNotes := make([]*models.Note, 0, len(m.allNotes))
-		for _, note := range m.allNotes {
-			if !deletedMap[note.Path] {
-				newAllNotes = append(newAllNotes, note)
+		// Filter out deleted items
+		newAllItems := make([]*tree.Item, 0, len(m.allItems))
+		for _, item := range m.allItems {
+			if !deletedMap[item.Path] {
+				newAllItems = append(newAllItems, item)
 			}
 		}
-		m.allNotes = newAllNotes
+		m.allItems = newAllItems
 		// Clear selections
 		m.views.ClearSelections()
 		// Rebuild display
@@ -395,9 +376,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh notes to show the new locations
 		m.loadingCount++
 		if m.focusedWorkspace != nil {
-			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
+			return m, tea.Batch(fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 		}
-		return m, tea.Batch(fetchAllNotesCmd(m.service, m.showArtifacts), m.spinner.Tick)
+		return m, tea.Batch(fetchAllItemsCmd(m.service, m.showArtifacts), m.spinner.Tick)
 
 	case notesArchivedMsg:
 		if msg.err != nil {
@@ -411,14 +392,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			archivedMap[path] = true
 		}
 
-		// Filter out archived notes from allNotes
-		newAllNotes := make([]*models.Note, 0)
-		for _, note := range m.allNotes {
-			if !archivedMap[note.Path] {
-				newAllNotes = append(newAllNotes, note)
+		// Filter out archived items from allItems
+		newAllItems := make([]*tree.Item, 0)
+		for _, item := range m.allItems {
+			if !archivedMap[item.Path] {
+				newAllItems = append(newAllItems, item)
 			}
 		}
-		m.allNotes = newAllNotes
+		m.allItems = newAllItems
 
 		// Clear selections
 		m.views.ClearSelections()
@@ -435,9 +416,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh notes to show the updated archive structure
 		m.loadingCount++
 		if m.focusedWorkspace != nil {
-			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
+			return m, tea.Batch(fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 		}
-		return m, tea.Batch(fetchAllNotesCmd(m.service, m.showArtifacts), m.spinner.Tick)
+		return m, tea.Batch(fetchAllItemsCmd(m.service, m.showArtifacts), m.spinner.Tick)
 
 	case noteCreatedMsg:
 		m.isCreatingNote = false
@@ -451,9 +432,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh notes to show the new one
 		m.loadingCount++
 		if m.focusedWorkspace != nil {
-			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
+			return m, tea.Batch(fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 		}
-		return m, tea.Batch(fetchAllNotesCmd(m.service, m.showArtifacts), m.spinner.Tick)
+		return m, tea.Batch(fetchAllItemsCmd(m.service, m.showArtifacts), m.spinner.Tick)
 
 	case noteRenamedMsg:
 		m.isRenamingNote = false
@@ -468,9 +449,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh notes to show the updated name
 		m.loadingCount++
 		if m.focusedWorkspace != nil {
-			return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
+			return m, tea.Batch(fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 		}
-		return m, tea.Batch(fetchAllNotesCmd(m.service, m.showArtifacts), m.spinner.Tick)
+		return m, tea.Batch(fetchAllItemsCmd(m.service, m.showArtifacts), m.spinner.Tick)
 
 	case tea.KeyMsg:
 		if m.help.ShowAll {
@@ -615,8 +596,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastKey = "" // Reset after zA sequence
 			}
 			m.views, cmd = m.views.Update(msg)
-			// After any view update that could change the cursor, reapply links and update the preview.
-			m.findAndApplyLinks()
+			// After any view update that could change the cursor, update the preview.
 			return m, tea.Batch(cmd, m.updatePreviewContent())
 		}
 
@@ -638,7 +618,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ecosystemPickerMode = false
 				m.focusChanged = true
 				// Re-fetch all notes for the global view
-				return m, tea.Batch(fetchAllNotesCmd(m.service, m.showArtifacts), m.spinner.Tick)
+				return m, tea.Batch(fetchAllItemsCmd(m.service, m.showArtifacts), m.spinner.Tick)
 			}
 		case key.Matches(msg, m.keys.FocusParent):
 			if m.focusedWorkspace != nil {
@@ -677,20 +657,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focusChanged = true
 				// Re-fetch notes for the new focus level
 				if m.focusedWorkspace != nil {
-					return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
+					return m, tea.Batch(fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 				} else {
-					return m, tea.Batch(fetchAllNotesCmd(m.service, m.showArtifacts), m.spinner.Tick)
+					return m, tea.Batch(fetchAllItemsCmd(m.service, m.showArtifacts), m.spinner.Tick)
 				}
 			}
 		case key.Matches(msg, m.keys.FocusSelected):
 			node := m.views.GetCurrentNode()
-			if node != nil && node.IsWorkspace {
+			if node != nil && node.IsWorkspace() {
 				m.loadingCount++
-				m.focusedWorkspace = node.Workspace
+				if ws, ok := node.Item.Metadata["Workspace"].(*workspace.WorkspaceNode); ok {
+					m.focusedWorkspace = ws
+				}
 				m.ecosystemPickerMode = false // Focusing on a workspace exits picker mode
 				m.focusChanged = true
 				// Re-fetch notes for the newly focused workspace
-				return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
+				return m, tea.Batch(fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 			}
 		case key.Matches(msg, m.keys.ToggleView):
 			m.views.ToggleViewMode()
@@ -756,7 +738,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.views.ToggleSortOrder()
 		case key.Matches(msg, m.keys.ToggleArchives):
 			m.showArchives = !m.showArchives
-			m.statusMessage = fmt.Sprintf("Archives: %v (Found %d notes)", m.showArchives, len(m.allNotes))
+			m.statusMessage = fmt.Sprintf("Archives: %v (Found %d notes)", m.showArchives, len(m.allItems))
 			m.updateViewsState()
 		case key.Matches(msg, m.keys.ToggleArtifacts):
 			m.showArtifacts = !m.showArtifacts
@@ -764,9 +746,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Refetch notes with new artifact visibility setting
 			var notesCmd tea.Cmd
 			if m.focusedWorkspace != nil {
-				notesCmd = fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts)
+				notesCmd = fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts)
 			} else {
-				notesCmd = fetchAllNotesCmd(m.service, m.showArtifacts)
+				notesCmd = fetchAllItemsCmd(m.service, m.showArtifacts)
 			}
 			return m, tea.Batch(notesCmd, m.spinner.Tick)
 		case key.Matches(msg, m.keys.ToggleHold):
@@ -840,19 +822,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Rename):
 			// Rename note: only works when cursor is on a note
 			node := m.views.GetCurrentNode()
-			if node != nil && node.IsNote {
+			if node != nil && node.IsNote() {
 				m.isRenamingNote = true
-				m.noteToRename = node.Note
-				m.renameInput.SetValue(node.Note.FrontmatterTitle)
+				m.noteToRename = views.ItemToNote(node.Item)
+				if title, ok := node.Item.Metadata["FrontmatterTitle"].(string); ok {
+					m.renameInput.SetValue(title)
+				}
 				m.renameInput.Focus()
 				return m, textinput.Blink
 			}
 		case key.Matches(msg, m.keys.CreatePlan):
 			node := m.views.GetCurrentNode()
-			if node != nil && node.IsNote {
-				m.statusMessage = fmt.Sprintf("Promoting note '%s' to a new plan...", node.Note.Title)
+			if node != nil && node.IsNote() {
+				note := views.ItemToNote(node.Item)
+				title := node.Item.Name
+				if t, ok := node.Item.Metadata["Title"].(string); ok {
+					title = t
+				}
+				m.statusMessage = fmt.Sprintf("Promoting note '%s' to a new plan...", title)
 				// This command will take over the terminal to launch the flow TUI
-				return m, m.createPlanCmd(node.Note)
+				return m, m.createPlanCmd(note)
 			}
 			return m, nil
 		case key.Matches(msg, m.keys.Archive):
@@ -873,20 +862,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Confirm):
 			if m.ecosystemPickerMode {
 				node := m.views.GetCurrentNode()
-				if node != nil && node.IsWorkspace && node.Workspace.IsEcosystem() {
-					m.loadingCount++
-					m.focusedWorkspace = node.Workspace
-					m.ecosystemPickerMode = false
-					m.focusChanged = true
-					// Re-fetch notes for the selected ecosystem
-					return m, tea.Batch(fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
+				if node != nil && node.IsWorkspace() {
+					if ws, ok := node.Item.Metadata["Workspace"].(*workspace.WorkspaceNode); ok && ws.IsEcosystem() {
+						m.loadingCount++
+						m.focusedWorkspace = ws
+						m.ecosystemPickerMode = false
+						m.focusChanged = true
+						// Re-fetch notes for the selected ecosystem
+						return m, tea.Batch(fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
+					}
 				}
 			} else {
 				var noteToOpen *models.Note
 				node := m.views.GetCurrentNode()
 				if node != nil {
-					if node.IsNote {
-						noteToOpen = node.Note
+					if node.IsNote() {
+						noteToOpen = views.ItemToNote(node.Item)
 					} else if node.IsFoldable() {
 						// Toggle fold on workspaces and groups
 						m.views.ToggleFold()
@@ -996,15 +987,23 @@ func (m *Model) pasteNotesCmd() tea.Cmd {
 
 	node := m.views.GetCurrentNode()
 	if node != nil {
-		if node.IsWorkspace {
-			destWorkspace = node.Workspace
+		if node.IsWorkspace() {
+			if ws, ok := node.Item.Metadata["Workspace"].(*workspace.WorkspaceNode); ok {
+				destWorkspace = ws
+			}
 			destGroup = "inbox" // Default group when pasting on a workspace
-		} else if node.IsGroup {
-			destWorkspace, _ = m.findWorkspaceNodeByName(node.WorkspaceName)
-			destGroup = node.GroupName
-		} else if node.IsNote {
-			destWorkspace, _ = m.findWorkspaceNodeByName(node.Note.Workspace)
-			destGroup = node.Note.Group
+		} else if node.IsGroup() {
+			if wsName, ok := node.Item.Metadata["Workspace"].(string); ok {
+				destWorkspace, _ = m.findWorkspaceNodeByName(wsName)
+			}
+			destGroup = node.Item.Name
+		} else if node.IsNote() {
+			if wsName, ok := node.Item.Metadata["Workspace"].(string); ok {
+				destWorkspace, _ = m.findWorkspaceNodeByName(wsName)
+			}
+			if group, ok := node.Item.Metadata["Group"].(string); ok {
+				destGroup = group
+			}
 		}
 	}
 
@@ -1089,23 +1088,31 @@ func (m *Model) createNoteCmd() tea.Cmd {
 			node := displayNodes[m.noteCreationCursor]
 			var wsPath string
 
-			if node.IsWorkspace {
-				wsPath = node.Workspace.Path
+			if node.IsWorkspace() {
+				if ws, ok := node.Item.Metadata["Workspace"].(*workspace.WorkspaceNode); ok {
+					wsPath = ws.Path
+				}
 				noteType = "inbox" // Default to inbox for workspace
-			} else if node.IsGroup {
+			} else if node.IsGroup() {
 				// Find workspace by name to get its path
-				ws, found := m.findWorkspaceNodeByName(node.WorkspaceName)
-				if found {
-					wsPath = ws.Path
+				if wsName, ok := node.Item.Metadata["Workspace"].(string); ok {
+					ws, found := m.findWorkspaceNodeByName(wsName)
+					if found {
+						wsPath = ws.Path
+					}
 				}
-				noteType = models.NoteType(node.GroupName)
-			} else if node.IsNote {
+				noteType = models.NoteType(node.Item.Name)
+			} else if node.IsNote() {
 				// Find workspace by name to get its path
-				ws, found := m.findWorkspaceNodeByName(node.Note.Workspace)
-				if found {
-					wsPath = ws.Path
+				if wsName, ok := node.Item.Metadata["Workspace"].(string); ok {
+					ws, found := m.findWorkspaceNodeByName(wsName)
+					if found {
+						wsPath = ws.Path
+					}
 				}
-				noteType = models.NoteType(node.Note.Group)
+				if group, ok := node.Item.Metadata["Group"].(string); ok {
+					noteType = models.NoteType(group)
+				}
 			}
 
 			if wsPath != "" {
@@ -1216,9 +1223,9 @@ func (m *Model) archivePlanDirectory(ctx *service.WorkspaceContext, planGroup st
 
 	// Collect paths of notes in this plan directory
 	var notePaths []string
-	for _, note := range m.allNotes {
-		if strings.HasPrefix(note.Path, sourcePath+string(filepath.Separator)) {
-			notePaths = append(notePaths, note.Path)
+	for _, item := range m.allItems {
+		if strings.HasPrefix(item.Path, sourcePath+string(filepath.Separator)) {
+			notePaths = append(notePaths, item.Path)
 		}
 	}
 
@@ -1250,7 +1257,7 @@ func (m *Model) archivePlanDirectory(ctx *service.WorkspaceContext, planGroup st
 func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
 	return func() tea.Msg {
 		// Group notes by workspace
-		notesByWorkspace := make(map[string][]*models.Note)
+		notesByWorkspace := make(map[string][]*tree.Item)
 		selectedNotes := m.views.GetSelected()
 		selectedGroups := m.views.GetSelectedGroups()
 
@@ -1264,9 +1271,11 @@ func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
 		}
 
 		// Populate notesByWorkspace from selected notes
-		for _, note := range m.allNotes {
-			if _, ok := selectedNotes[note.Path]; ok {
-				notesByWorkspace[note.Workspace] = append(notesByWorkspace[note.Workspace], note)
+		for _, item := range m.allItems {
+			if _, ok := selectedNotes[item.Path]; ok {
+				if wsName, ok := item.Metadata["Workspace"].(string); ok {
+					notesByWorkspace[wsName] = append(notesByWorkspace[wsName], item)
+				}
 			}
 		}
 
@@ -1275,7 +1284,7 @@ func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
 		var archiveErr error
 
 		// Archive notes workspace by workspace
-		for workspaceName, notes := range notesByWorkspace {
+		for workspaceName, items := range notesByWorkspace {
 			// Get workspace context - need to resolve name to path
 			var wsCtx *service.WorkspaceContext
 			var err error
@@ -1296,10 +1305,10 @@ func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
 				break
 			}
 
-			// Extract paths from notes
-			paths := make([]string, len(notes))
-			for i, note := range notes {
-				paths[i] = note.Path
+			// Extract paths from items
+			paths := make([]string, len(items))
+			for i, item := range items {
+				paths[i] = item.Path
 			}
 
 			// Archive the notes
@@ -1434,17 +1443,19 @@ func (m *Model) setCollapseStateForFocus() {
 		// Collapse ALL note groups within the focused ecosystem
 		// (inbox, learn, quick, etc.) BUT keep "plans" parent expanded
 		groupsSeen := make(map[string]bool)
-		for _, note := range m.allNotes {
-			if note.Workspace == m.focusedWorkspace.Name && !groupsSeen[note.Group] {
-				groupNodeID := "grp:" + note.Group
+		for _, item := range m.allItems {
+			wsName, _ := item.Metadata["Workspace"].(string)
+			groupName, _ := item.Metadata["Group"].(string)
+			if wsName == m.focusedWorkspace.Name && !groupsSeen[groupName] {
+				groupNodeID := "grp:" + groupName
 				// Collapse individual plan directories but not other top-level groups
-				if strings.HasPrefix(note.Group, "plans/") {
+				if strings.HasPrefix(groupName, "plans/") {
 					collapsedNodes[groupNodeID] = true
-				} else if note.Group != "plans" {
+				} else if groupName != "plans" {
 					// Collapse regular groups (inbox, learn, quick, etc.)
 					collapsedNodes[groupNodeID] = true
 				}
-				groupsSeen[note.Group] = true
+				groupsSeen[groupName] = true
 			}
 		}
 		// Ensure the "plans" parent group is expanded
@@ -1462,18 +1473,20 @@ func (m *Model) setCollapseStateForFocus() {
 		// Collapse ALL note groups within the focused workspace
 		// EXCEPT "in_progress" and "plans" which remain expanded
 		groupsSeen := make(map[string]bool)
-		for _, note := range m.allNotes {
-			if note.Workspace == m.focusedWorkspace.Name && !groupsSeen[note.Group] {
-				groupNodeID := "grp:" + note.Group
+		for _, item := range m.allItems {
+			wsName, _ := item.Metadata["Workspace"].(string)
+			groupName, _ := item.Metadata["Group"].(string)
+			if wsName == m.focusedWorkspace.Name && !groupsSeen[groupName] {
+				groupNodeID := "grp:" + groupName
 				// Collapse individual plan directories
-				if strings.HasPrefix(note.Group, "plans/") {
+				if strings.HasPrefix(groupName, "plans/") {
 					collapsedNodes[groupNodeID] = true
-				} else if note.Group != "plans" && note.Group != "in_progress" {
+				} else if groupName != "plans" && groupName != "in_progress" {
 					// Collapse regular groups (inbox, issues, docs, etc.)
 					// but NOT in_progress or plans
 					collapsedNodes[groupNodeID] = true
 				}
-				groupsSeen[note.Group] = true
+				groupsSeen[groupName] = true
 			}
 		}
 		// Ensure the "plans" and "in_progress" groups are expanded
@@ -1489,33 +1502,3 @@ func (m *Model) applyGrepFilter() {
 	m.views.ApplyGrepFilter()
 }
 
-// findAndApplyLinks iterates through the visible display nodes to find and link notes with their corresponding plans.
-func (m *Model) findAndApplyLinks() {
-	notesWithPlanRef := make(map[string]*views.DisplayNode)
-	planNodes := make(map[string]*views.DisplayNode)
-	displayNodes := m.views.GetDisplayNodes()
-
-	// First pass: collect all notes with plan references and all plan nodes.
-	for _, node := range displayNodes {
-		// Reset any previous links
-		node.LinkedNode = nil
-		if node.IsNote && node.Note.PlanRef != "" {
-			// Key by workspace + plan_ref for uniqueness
-			key := fmt.Sprintf("%s:%s", node.Note.Workspace, node.Note.PlanRef)
-			notesWithPlanRef[key] = node
-		} else if node.IsPlan() {
-			// Key by workspace + group_name
-			key := fmt.Sprintf("%s:%s", node.WorkspaceName, node.GroupName)
-			planNodes[key] = node
-		}
-	}
-
-	// Second pass: connect the notes and plans.
-	for key, noteNode := range notesWithPlanRef {
-		if planNode, ok := planNodes[key]; ok {
-			// Found a match, create the bidirectional link.
-			noteNode.LinkedNode = planNode
-			planNode.LinkedNode = noteNode
-		}
-	}
-}

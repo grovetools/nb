@@ -6,6 +6,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
+	"github.com/mattsolo1/grove-notebook/pkg/tree"
 )
 
 // ListNotesFromAllWorkspaces returns notes from all registered workspaces
@@ -58,4 +59,56 @@ func (s *Service) ListNotesFromAllWorkspaces(includeArchived bool, includeArtifa
 		}
 	}
 	return allNotes, nil
+}
+
+// ListItemsFromAllWorkspaces returns generic items from all registered workspaces
+func (s *Service) ListItemsFromAllWorkspaces(includeArchived bool, includeArtifacts bool) ([]*tree.Item, error) {
+	allItems := []*tree.Item{}
+	allWorkspaces := s.workspaceProvider.All()
+
+	// Use a map to avoid processing the same notebook context twice (for worktrees)
+	seenContexts := make(map[string]bool)
+
+	// Use a map to deduplicate items by canonical path across all workspaces
+	seenNotePaths := make(map[string]bool)
+
+	for _, ws := range allWorkspaces {
+		contextNode, err := s.findNotebookContextNode(ws)
+		if err != nil {
+			continue // skip if we can't find context
+		}
+		if seenContexts[contextNode.Path] {
+			continue
+		}
+		seenContexts[contextNode.Path] = true
+
+		// create a dummy context for ListAllItems
+		wsCtx := &WorkspaceContext{
+			CurrentWorkspace:         ws,
+			NotebookContextWorkspace: contextNode,
+		}
+
+		items, err := s.ListAllItems(wsCtx, includeArchived, includeArtifacts)
+		if err != nil {
+			// don't fail, just log and continue
+			fmt.Fprintf(os.Stderr, "Warning: could not list items for workspace %s: %v\n", ws.Name, err)
+			continue
+		}
+
+		// Deduplicate items across workspaces by canonical path
+		for _, item := range items {
+			canonicalPath, err := pathutil.NormalizeForLookup(item.Path)
+			if err != nil {
+				// Skip items we can't normalize
+				continue
+			}
+			if seenNotePaths[canonicalPath] {
+				// Skip duplicate item
+				continue
+			}
+			seenNotePaths[canonicalPath] = true
+			allItems = append(allItems, item)
+		}
+	}
+	return allItems, nil
 }

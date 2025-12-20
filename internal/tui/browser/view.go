@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
 )
 
@@ -28,12 +29,18 @@ func (m Model) getNoteCreationContext() string {
 		return "global/inbox"
 	}
 
-	if node.IsWorkspace {
-		return fmt.Sprintf("%s/inbox", node.Workspace.Name)
-	} else if node.IsGroup {
-		return fmt.Sprintf("%s/%s", node.WorkspaceName, node.GroupName)
-	} else if node.IsNote {
-		return fmt.Sprintf("%s/%s", node.Note.Workspace, node.Note.Group)
+	if node.IsWorkspace() {
+		if ws, ok := node.Item.Metadata["Workspace"].(*workspace.WorkspaceNode); ok {
+			return fmt.Sprintf("%s/inbox", ws.Name)
+		}
+	} else if node.IsGroup() {
+		if wsName, ok := node.Item.Metadata["Workspace"].(string); ok {
+			return fmt.Sprintf("%s/%s", wsName, node.Item.Name)
+		}
+	} else if node.IsNote() {
+		wsName, _ := node.Item.Metadata["Workspace"].(string)
+		groupName, _ := node.Item.Metadata["Group"].(string)
+		return fmt.Sprintf("%s/%s", wsName, groupName)
 	}
 
 	return "global/inbox"

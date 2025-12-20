@@ -26,13 +26,14 @@ import (
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/mattsolo1/grove-notebook/pkg/sync"
+	"github.com/mattsolo1/grove-notebook/pkg/tree"
 )
 
 // Model is the main model for the notebook browser TUI
 type Model struct {
-	service   *service.Service
+	service    *service.Service
 	workspaces []*workspace.WorkspaceNode
-	allNotes   []*models.Note
+	allItems   []*tree.Item
 	keys       KeyMap
 	help       help.Model
 	width      int
@@ -276,17 +277,20 @@ func (m *Model) populateTagPicker() {
 	tagCounts := make(map[string]int)
 
 	// Count occurrences of each tag
-	for _, note := range m.allNotes {
-		// Skip archived and closed notes unless showArchives is true
-		if !m.showArchives && filepath.Dir(note.Path) != "" {
-			if strings.Contains(note.Path, string(filepath.Separator)+".archive"+string(filepath.Separator)) ||
-				strings.Contains(note.Path, string(filepath.Separator)+".closed"+string(filepath.Separator)) {
+	for _, item := range m.allItems {
+		// Skip archived and closed items unless showArchives is true
+		if !m.showArchives && filepath.Dir(item.Path) != "" {
+			if strings.Contains(item.Path, string(filepath.Separator)+".archive"+string(filepath.Separator)) ||
+				strings.Contains(item.Path, string(filepath.Separator)+".closed"+string(filepath.Separator)) {
 				continue
 			}
 		}
 
-		for _, tag := range note.Tags {
-			tagCounts[tag]++
+		// Extract tags from metadata
+		if tags, ok := item.Metadata["Tags"].([]string); ok {
+			for _, tag := range tags {
+				tagCounts[tag]++
+			}
 		}
 	}
 
@@ -328,9 +332,9 @@ func (m *Model) populateTagPicker() {
 func (m Model) Init() tea.Cmd {
 	var notesCmd tea.Cmd
 	if m.focusedWorkspace != nil {
-		notesCmd = fetchFocusedNotesCmd(m.service, m.focusedWorkspace, m.showArtifacts)
+		notesCmd = fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts)
 	} else {
-		notesCmd = fetchAllNotesCmd(m.service, m.showArtifacts)
+		notesCmd = fetchAllItemsCmd(m.service, m.showArtifacts)
 	}
 	return tea.Batch(
 		fetchWorkspacesCmd(m.service.GetWorkspaceProvider()),
@@ -343,16 +347,16 @@ func (m Model) Init() tea.Cmd {
 // updatePreviewContent checks if the preview needs to be updated and returns a command to load the file.
 func (m *Model) updatePreviewContent() tea.Cmd {
 	node := m.views.GetCurrentNode()
-	if node != nil && node.IsNote {
+	if node != nil && node.IsNote() {
 		// If the file in preview is already the selected one, do nothing.
-		if m.previewFile == node.Note.Path {
+		if m.previewFile == node.Item.Path {
 			return nil
 		}
 		// Otherwise, load the new file.
 		if m.previewVisible {
-			m.statusMessage = fmt.Sprintf("Loading %s...", filepath.Base(node.Note.Path))
+			m.statusMessage = fmt.Sprintf("Loading %s...", filepath.Base(node.Item.Path))
 		}
-		return loadFileContentCmd(node.Note.Path)
+		return loadFileContentCmd(node.Item.Path)
 	}
 
 	// If not on a note, clear the preview.
