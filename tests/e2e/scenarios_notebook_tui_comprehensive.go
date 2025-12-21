@@ -35,13 +35,16 @@ func setupComprehensiveTUIEnvironment(ctx *harness.Context) error {
 	notebookRoot := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb")
 	globalYAML := fmt.Sprintf(`
 version: "1.0"
+groves:
+  e2e-projects:
+    path: "%s"
 notebooks:
   rules:
     default: "main"
   definitions:
     main:
       root_dir: "%s"
-`, notebookRoot)
+`, ctx.RootDir, notebookRoot)
 	globalConfigDir := filepath.Join(ctx.HomeDir(), ".config", "grove")
 	if err := fs.CreateDir(globalConfigDir); err != nil {
 		return err
@@ -59,7 +62,11 @@ notebooks:
 	if err := fs.WriteString(filepath.Join(projectADir, "grove.yml"), "name: project-A\nversion: '1.0'"); err != nil {
 		return err
 	}
-	if _, err := git.SetupTestRepo(projectADir); err != nil {
+	repoA, err := git.SetupTestRepo(projectADir)
+	if err != nil {
+		return err
+	}
+	if err := repoA.AddCommit("initial commit for project A"); err != nil {
 		return err
 	}
 	projectARoot := filepath.Join(notebookRoot, "workspaces", "project-A")
@@ -84,7 +91,8 @@ notebooks:
 	if err := fs.WriteString(filepath.Join(projectBDir, "grove.yml"), "name: project-B\nworkspaces: ['subproject-C']"); err != nil {
 		return err
 	}
-	if _, err := git.SetupTestRepo(projectBDir); err != nil {
+	repoB, err := git.SetupTestRepo(projectBDir)
+	if err != nil {
 		return err
 	}
 
@@ -93,6 +101,10 @@ notebooks:
 		return err
 	}
 	if err := fs.WriteString(filepath.Join(subprojectCDir, "grove.yml"), "name: subproject-C\nversion: '1.0'"); err != nil {
+		return err
+	}
+	// Add a single commit for the entire ecosystem
+	if err := repoB.AddCommit("initial commit for project B ecosystem"); err != nil {
 		return err
 	}
 	subprojectCRoot := filepath.Join(notebookRoot, "workspaces", "subproject-C")
@@ -168,8 +180,7 @@ func launchAndVerifyInitialState(ctx *harness.Context) error {
 	}
 	ctx.Set("tui_session", session)
 
-	// Wait for TUI to load - look for the directory tree structure
-	// Try waiting for "inbox" which should appear in the tree view
+	// Wait for TUI to actually start by checking for expected content
 	if err := session.WaitForText("inbox", 10*time.Second); err != nil {
 		// If that fails, capture what we see for debugging
 		view, _ := session.Capture()
@@ -177,8 +188,11 @@ func launchAndVerifyInitialState(ctx *harness.Context) error {
 		return fmt.Errorf("timeout waiting for TUI to start (looking for 'inbox'): %w", err)
 	}
 
-	// Give it a moment to fully render
-	time.Sleep(500 * time.Millisecond)
+	// Wait for UI to stabilize after async loading
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
 	initialView, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI Initial View", initialView, "")
 
@@ -205,47 +219,35 @@ func launchAndVerifyInitialState(ctx *harness.Context) error {
 func testNavigationAndFoldingComprehensive(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
-	// Test navigation
-	session.SendKeys("j", "j", "k") // Down, Down, Up
-	time.Sleep(300 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
+	// Test navigation - Type() sends all keys and waits once for UI to stabilize
+	if err := session.Type("j", "j", "k"); err != nil {
 		return err
 	}
 
-	// Test go to top/bottom
-	session.SendKeys("G") // Go to bottom
-	time.Sleep(200 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
+	// Test go to bottom
+	if err := session.Type("G"); err != nil {
 		return err
 	}
-	session.SendKeys("g")
-	time.Sleep(100 * time.Millisecond) // Wait for 'gg' chord
-	session.SendKeys("g")
-	time.Sleep(200 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
+
+	// Test go to top (vim chord - Type handles this correctly)
+	if err := session.Type("g", "g"); err != nil {
 		return err
 	}
 
 	// Test expanding a note group to see individual notes
-	// Navigate to inbox and try to expand it
-
-	// First, go to top and navigate down step by step to inbox
-	session.SendKeys("g", "g")
-	time.Sleep(200 * time.Millisecond)
-
-	// Move down: global -> project-A -> inbox
-	session.SendKeys("j") // to project-A
-	time.Sleep(200 * time.Millisecond)
-	session.SendKeys("j") // to inbox
-	time.Sleep(200 * time.Millisecond)
+	// Navigate to inbox (go to top, then down to project-A, then inbox)
+	if err := session.Type("g", "g"); err != nil {
+		return err
+	}
+	if err := session.Type("j", "j"); err != nil {
+		return err
+	}
 
 	beforeExpand, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI with cursor on inbox (before expand)", beforeExpand, "")
 
 	// Press 'l' to expand inbox and see the note inside
-	session.SendKeys("l")
-	time.Sleep(2 * time.Second) // Wait longer for tree to rebuild
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("l"); err != nil {
 		return err
 	}
 
@@ -254,13 +256,12 @@ func testNavigationAndFoldingComprehensive(ctx *harness.Context) error {
 
 	// Now check if the note is visible (shows as filename in tree)
 	if err := session.AssertContains("note-with-todos.md"); err != nil {
-		return fmt.Errorf("should see 'note-with-todos.md' after expanding inbox: %w", err)
+		content, _ := session.Capture()
+		return fmt.Errorf("should see 'note-with-todos.md' after expanding inbox: %w\nContent:\n%s", err, content)
 	}
 
 	// Collapse inbox back with 'h'
-	session.SendKeys("h")
-	time.Sleep(1 * time.Second)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("h"); err != nil {
 		return err
 	}
 
@@ -269,20 +270,20 @@ func testNavigationAndFoldingComprehensive(ctx *harness.Context) error {
 
 	// Verify the note is hidden after collapse
 	if err := session.AssertNotContains("note-with-todos.md"); err != nil {
-		return fmt.Errorf("note-with-todos.md should be hidden after collapsing inbox: %w", err)
+		content, _ := session.Capture()
+		return fmt.Errorf("note-with-todos.md should be hidden after collapsing inbox: %w\nContent:\n%s", err, content)
 	}
 
 	// Also try research which has 2 notes
-	session.SendKeys("j") // Move down to research
-	time.Sleep(200 * time.Millisecond)
+	if err := session.Type("j"); err != nil { // Move down to research
+		return err
+	}
 
 	onResearch, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI with cursor on research (before expand)", onResearch, "")
 
 	// Expand research
-	session.SendKeys("l")
-	time.Sleep(2 * time.Second)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("l"); err != nil {
 		return err
 	}
 
@@ -291,7 +292,8 @@ func testNavigationAndFoldingComprehensive(ctx *harness.Context) error {
 
 	// Look for the note files in the tree (filenames, not titles)
 	if err := session.AssertContains("tagged-note.md"); err != nil {
-		return fmt.Errorf("should see 'tagged-note.md' after expanding research: %w", err)
+		content, _ := session.Capture()
+		return fmt.Errorf("should see 'tagged-note.md' after expanding research: %w\nContent:\n%s", err, content)
 	}
 	// Note: data.json (artifact) also shows when group is expanded
 
@@ -303,22 +305,19 @@ func testNavigationAndFoldingComprehensive(ctx *harness.Context) error {
 	// From the previous test, research should be expanded showing notes
 	// Verify we have some expanded content
 	if err := session.AssertContains("tagged-note.md"); err != nil {
-		return fmt.Errorf("research should be expanded before zM: %w", err)
+		content, _ := session.Capture()
+		return fmt.Errorf("research should be expanded before zM: %w\nContent:\n%s", err, content)
 	}
 
-	// Test zM - Close all folds
-	session.SendKeys("z", "M")
-	time.Sleep(2 * time.Second) // Wait for tree to rebuild
-	if err := session.WaitStable(); err != nil {
+	// Test zM - Close all folds (vim chord)
+	if err := session.Type("z", "M"); err != nil {
 		return err
 	}
 	afterZM, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI After zM (close all) - BUG: doesn't work", afterZM, "")
 
-	// Test zR - Open all folds
-	session.SendKeys("z", "R")
-	time.Sleep(2 * time.Second) // Wait for tree to rebuild
-	if err := session.WaitStable(); err != nil {
+	// Test zR - Open all folds (vim chord)
+	if err := session.Type("z", "R"); err != nil {
 		return err
 	}
 	afterZR, _ := session.Capture()
@@ -332,7 +331,8 @@ func testNavigationAndFoldingComprehensive(ctx *harness.Context) error {
 
 	// Verify the TUI is still functional after these commands
 	if err := session.AssertContains("research"); err != nil {
-		return fmt.Errorf("TUI should still be functional after zM/zR: %w", err)
+		content, _ := session.Capture()
+		return fmt.Errorf("TUI should still be functional after zM/zR: %w\nContent:\n%s", err, content)
 	}
 
 	return nil
@@ -343,9 +343,7 @@ func testViewAndVisibilityToggling(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	// Test view toggling (t) - switch between tree and table views
-	session.SendKeys("t")
-	time.Sleep(500 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("t"); err != nil {
 		return err
 	}
 	tableView, _ := session.Capture()
@@ -353,29 +351,24 @@ func testViewAndVisibilityToggling(ctx *harness.Context) error {
 
 	// Check for table view indicators (column headers or different layout)
 	// The exact text may vary, so just verify the toggle worked without crashing
-	session.SendKeys("t") // Toggle back to tree view
-	time.Sleep(500 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("t"); err != nil { // Toggle back to tree view
 		return err
 	}
 
 	// Test preview pane toggling (v)
-	session.SendKeys("v") // Show preview
-	time.Sleep(300 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("v"); err != nil { // Show preview
 		return err
 	}
 	previewView, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI With Preview", previewView, "")
 
-	session.SendKeys("v") // Hide preview
-	time.Sleep(300 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("v"); err != nil { // Hide preview
 		return err
 	}
 
 	// Test archive toggling (A)
 	// Navigate to inbox to test archive visibility
+	// SPECIAL CASE: Archive toggle is timing-sensitive, use SendKeys pattern
 	session.SendKeys("g", "g") // Go to top
 	time.Sleep(200 * time.Millisecond)
 	session.SendKeys("j") // to project-A
@@ -385,44 +378,48 @@ func testViewAndVisibilityToggling(ctx *harness.Context) error {
 
 	// Expand inbox to see its contents
 	session.SendKeys("l")
-	time.Sleep(2 * time.Second)
+	time.Sleep(2 * time.Second) // Wait for tree to rebuild
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
+
 	beforeArchives, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI Before Archive Toggle (inbox expanded)", beforeArchives, "")
 
 	// Verify .archive is NOT visible initially (archives are hidden by default)
 	if err := session.AssertNotContains(".archive"); err != nil {
-		return fmt.Errorf(".archive directory should be hidden by default: %w", err)
+		content, _ := session.Capture()
+		return fmt.Errorf(".archive directory should be hidden by default: %w\nContent:\n%s", err, content)
 	}
 
 	// Toggle archives on with 'A'
+	// SPECIAL CASE: Archive toggle triggers async tree rebuild that takes time
+	// Type() with WaitStable() returns too quickly before tree refreshes
+	// Using SendKeys + sleep + WaitStable to match original working behavior
 	session.SendKeys("A")
-	time.Sleep(2 * time.Second) // Wait longer for tree to rebuild with archives
+	time.Sleep(2 * time.Second) //  Wait for tree to rebuild with archives
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
+
 	archiveView, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI After Archive Toggle (archives should be visible)", archiveView, "")
 
 	// Now .archive directory should be visible in the tree
 	if err := session.AssertContains(".archive"); err != nil {
-		return fmt.Errorf(".archive directory should be visible after toggling archives on: %w", err)
+		content, _ := session.Capture()
+		return fmt.Errorf(".archive directory should be visible after toggling archives on: %w\nContent:\n%s", err, content)
 	}
 
 	// Navigate to the .archive directory and expand it to see archived notes
-	session.SendKeys("j") // Move down to note-with-todos.md
-	time.Sleep(200 * time.Millisecond)
-	session.SendKeys("j") // Move down to .archive
-	time.Sleep(200 * time.Millisecond)
+	if err := session.Type("j", "j"); err != nil { // Move down to note-with-todos.md, then .archive
+		return err
+	}
 
 	onArchive, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI with cursor on .archive", onArchive, "")
 
-	session.SendKeys("l") // Expand .archive
-	time.Sleep(2 * time.Second)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("l"); err != nil { // Expand .archive
 		return err
 	}
 	archiveExpanded, _ := session.Capture()
@@ -430,10 +427,12 @@ func testViewAndVisibilityToggling(ctx *harness.Context) error {
 
 	// The archived note should now be visible
 	if err := session.AssertContains("archived.md"); err != nil {
-		return fmt.Errorf("archived.md should be visible after expanding .archive: %w", err)
+		content, _ := session.Capture()
+		return fmt.Errorf("archived.md should be visible after expanding .archive: %w\nContent:\n%s", err, content)
 	}
 
 	// Toggle archives off again
+	// SPECIAL CASE: Same as toggle on - async tree rebuild needs time
 	session.SendKeys("A")
 	time.Sleep(2 * time.Second) // Wait for tree to rebuild
 	if err := session.WaitStable(); err != nil {
@@ -444,30 +443,21 @@ func testViewAndVisibilityToggling(ctx *harness.Context) error {
 
 	// Verify .archive is hidden again
 	if err := session.AssertNotContains(".archive"); err != nil {
-		return fmt.Errorf(".archive should be hidden after toggling archives off: %w", err)
+		content, _ := session.Capture()
+		return fmt.Errorf(".archive should be hidden after toggling archives off: %w\nContent:\n%s", err, content)
 	}
 
 	// Test artifact toggling (b) - verifies .artifacts directories (briefings) become visible
 	// We'll use the simpler approach of testing with data.json in the research directory
 	// which is a non-markdown artifact file in project-A
 
-	// Navigate back to project-A research directory
-	session.SendKeys("g", "g") // Go to top
-	time.Sleep(200 * time.Millisecond)
-	session.SendKeys("j") // to project-A
-	time.Sleep(200 * time.Millisecond)
-
-	// Find research (skip global and inbox)
-	// Navigate down until we find research
-	for i := 0; i < 5; i++ {
-		session.SendKeys("j")
-		time.Sleep(200 * time.Millisecond)
+	// Navigate to research directory using semantic navigation
+	if err := session.NavigateToText("research"); err != nil {
+		return err
 	}
 
 	// Expand research to see its contents
-	session.SendKeys("l")
-	time.Sleep(2 * time.Second)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("l"); err != nil {
 		return err
 	}
 
@@ -482,18 +472,14 @@ func testViewAndVisibilityToggling(ctx *harness.Context) error {
 	// The actual behavior of artifact filtering may vary - document what we observe
 
 	// Toggle artifacts on with 'b'
-	session.SendKeys("b")
-	time.Sleep(2 * time.Second) // Wait for tree to rebuild
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("b"); err != nil {
 		return err
 	}
 	afterArtifactsOn, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI After Artifact Toggle On", afterArtifactsOn, "")
 
 	// Toggle artifacts back off
-	session.SendKeys("b")
-	time.Sleep(2 * time.Second) // Wait for tree to rebuild
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("b"); err != nil {
 		return err
 	}
 	afterArtifactsOff, _ := session.Capture()
@@ -512,19 +498,24 @@ func testPlanNoteLinking(ctx *harness.Context) error {
 
 	// Navigate to see subproject-C which has the linked plan and note
 	// Since we're in project-A context, we need to clear focus to see all workspaces
-	session.SendKeys("\x07") // Ctrl+G to clear focus
-	time.Sleep(1 * time.Second)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("C-g"); err != nil { // Ctrl+G to clear focus
 		return err
 	}
 
 	clearedFocus, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI after clearing focus", clearedFocus, "")
 
+	// Verify we can see project-B in the global view
+	if err := session.AssertContains("project-B"); err != nil {
+		content, _ := session.Capture()
+		return fmt.Errorf("project-B should be visible after clearing focus: %w\nContent:\n%s", err, content)
+	}
+
 	// Navigate to find subproject-C
 	// Go to top first
-	session.SendKeys("g", "g")
-	time.Sleep(200 * time.Millisecond)
+	if err := session.Type("g", "g"); err != nil {
+		return err
+	}
 
 	// Navigate down to find subproject-C (after global, project-A, project-B)
 	// Note: The exact number of steps may vary based on tree structure
@@ -533,8 +524,9 @@ func testPlanNoteLinking(ctx *harness.Context) error {
 		if strings.Contains(current, "subproject-C") {
 			break
 		}
-		session.SendKeys("j")
-		time.Sleep(200 * time.Millisecond)
+		if err := session.Type("j"); err != nil {
+			return err
+		}
 	}
 
 	beforeExpand, _ := session.Capture()
@@ -542,16 +534,12 @@ func testPlanNoteLinking(ctx *harness.Context) error {
 
 	// Verify we can see subproject-C
 	if err := session.AssertContains("subproject-C"); err != nil {
-		// If we can't see it, the test environment may not have it visible
-		// Document this and return - this is environment-dependent
-		ctx.ShowCommandOutput("NOTE: subproject-C not visible, skipping link test", beforeExpand, "")
-		return nil
+		content, _ := session.Capture()
+		return fmt.Errorf("subproject-C not visible in global view: %w\nContent:\n%s", err, content)
 	}
 
 	// Expand subproject-C to see in_progress and plans
-	session.SendKeys("l")
-	time.Sleep(2 * time.Second)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("l"); err != nil {
 		return err
 	}
 
@@ -584,20 +572,18 @@ func testCreateNote(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	// Navigate to inbox group to create a note there
-	session.SendKeys("g", "g") // Go to top
-	time.Sleep(200 * time.Millisecond)
-	session.SendKeys("j") // to project-A
-	time.Sleep(200 * time.Millisecond)
-	session.SendKeys("j") // to inbox
-	time.Sleep(200 * time.Millisecond)
+	if err := session.Type("g", "g"); err != nil {
+		return err
+	}
+	if err := session.Type("j", "j"); err != nil {
+		return err
+	}
 
 	beforeCreate, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI before creating note (on inbox)", beforeCreate, "")
 
 	// Press 'n' to create a new note
-	session.SendKeys("n")
-	time.Sleep(1 * time.Second)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("n"); err != nil {
 		return err
 	}
 
@@ -606,16 +592,15 @@ func testCreateNote(ctx *harness.Context) error {
 
 	// Type the note title
 	noteTitle := "Test Note From TUI"
-	session.SendKeys(noteTitle)
-	time.Sleep(500 * time.Millisecond)
+	if err := session.Type(noteTitle); err != nil {
+		return err
+	}
 
 	withTitle, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI after typing title", withTitle, "")
 
 	// Press Enter to confirm
-	session.SendKeys("enter")
-	time.Sleep(2 * time.Second) // Wait for note to be created and tree to rebuild
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("enter"); err != nil {
 		return err
 	}
 
@@ -627,7 +612,8 @@ func testCreateNote(ctx *harness.Context) error {
 	if err := session.AssertContains("test-note-from-tui.md"); err != nil {
 		// It might also show with a date prefix, so try a shorter match
 		if err := session.AssertContains("test-note-from-tui"); err != nil {
-			return fmt.Errorf("new note should appear in tree after creation: %w", err)
+			content, _ := session.Capture()
+			return fmt.Errorf("new note should appear in tree after creation: %w\nContent:\n%s", err, content)
 		}
 	}
 
@@ -635,16 +621,15 @@ func testCreateNote(ctx *harness.Context) error {
 	// 'i' shows a note type picker first, then asks for title
 
 	// Navigate to research group to create a note there
-	session.SendKeys("j") // Move down to research
-	time.Sleep(200 * time.Millisecond)
+	if err := session.Type("j"); err != nil { // Move down to research
+		return err
+	}
 
 	beforeCreateI, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI before creating note with 'i' (on research)", beforeCreateI, "")
 
 	// Press 'i' to create a new note (opens note type picker)
-	session.SendKeys("i")
-	time.Sleep(1 * time.Second)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("i"); err != nil {
 		return err
 	}
 
@@ -658,9 +643,7 @@ func testCreateNote(ctx *harness.Context) error {
 	}
 
 	// Select first note type (press Enter to select highlighted option)
-	session.SendKeys("enter")
-	time.Sleep(1 * time.Second)
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("enter"); err != nil {
 		return err
 	}
 
@@ -669,16 +652,15 @@ func testCreateNote(ctx *harness.Context) error {
 
 	// Type the note title
 	noteTitleI := "Note Via I Key"
-	session.SendKeys(noteTitleI)
-	time.Sleep(500 * time.Millisecond)
+	if err := session.Type(noteTitleI); err != nil {
+		return err
+	}
 
 	withTitleI, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI after typing title for 'i' note", withTitleI, "")
 
 	// Press Enter to confirm creation
-	session.SendKeys("enter")
-	time.Sleep(2 * time.Second) // Wait for note to be created and tree to rebuild
-	if err := session.WaitStable(); err != nil {
+	if err := session.Type("enter"); err != nil {
 		return err
 	}
 
@@ -689,12 +671,11 @@ func testCreateNote(ctx *harness.Context) error {
 	if err := session.AssertContains("note-via-i-key.md"); err != nil {
 		// Try a shorter match
 		if err := session.AssertContains("note-via-i-key"); err != nil {
-			return fmt.Errorf("note created with 'i' should appear in tree: %w", err)
+			content, _ := session.Capture()
+			return fmt.Errorf("note created with 'i' should appear in tree: %w\nContent:\n%s", err, content)
 		}
 	}
 
 	// Quit TUI
-	session.SendKeys("q")
-	time.Sleep(200 * time.Millisecond)
-	return nil
+	return session.Type("q")
 }
