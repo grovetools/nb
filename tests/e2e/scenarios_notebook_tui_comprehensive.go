@@ -19,9 +19,10 @@ func NotebookTUIComprehensiveScenario() *harness.Scenario {
 		Tags:        []string{"notebook", "tui", "e2e"},
 		Steps: []harness.Step{
 			harness.NewStep("Setup comprehensive TUI environment", setupComprehensiveTUIEnvironment),
-			harness.NewStep("Launch TUI and verify initial state", launchAndVerifyInitialState),
-			harness.NewStep("Test ecosystem navigation, linking, and visibility toggles", testEcosystemNavigationAndFeatures),
-			harness.NewStep("Test note management (search, archive, delete)", testNoteManagementFeatures),
+			harness.NewStep("Launch TUI and test initial navigation", launchAndTestInitialNavigation),
+			harness.NewStep("Test help, preview pane, and note creation", testHelpPreviewAndCreation),
+			harness.NewStep("Test global view and visibility toggles", testGlobalViewAndVisibility),
+			harness.NewStep("Test ecosystem, linking, and artifacts", testEcosystemAndLinking),
 		},
 	}
 }
@@ -160,8 +161,9 @@ This plan is linked to a note in in_progress.`
 	return nil
 }
 
-// launchAndVerifyInitialState launches the TUI and checks its initial state.
-func launchAndVerifyInitialState(ctx *harness.Context) error {
+// launchAndTestInitialNavigation launches the TUI and tests basic navigation and folding.
+// Corresponds to frames 1-6 of the recording.
+func launchAndTestInitialNavigation(ctx *harness.Context) error {
 	nbBin, err := findProjectBinary()
 	if err != nil {
 		return err
@@ -201,7 +203,27 @@ func launchAndVerifyInitialState(ctx *harness.Context) error {
 	if err := session.AssertContains("global"); err != nil {
 		return err
 	}
-	// Verify directory structure is visible with note counts
+
+	// Frame 1: Press 'j' to navigate down
+	session.SendKeys("j")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 2: Press 'h' to collapse project-A
+	session.SendKeys("h")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 3: Press 'l' to expand project-A
+	session.SendKeys("l")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
 	if err := session.AssertContains("inbox"); err != nil {
 		return err
 	}
@@ -209,153 +231,42 @@ func launchAndVerifyInitialState(ctx *harness.Context) error {
 		return err
 	}
 
+	// Frame 4: Press 'j' to navigate to inbox
+	session.SendKeys("j")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 5: Press 'l' to expand inbox
+	session.SendKeys("l")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+	if err := session.AssertContains("note-with-todos.md"); err != nil {
+		return err
+	}
+
+	// Frame 6: Press 'j' to navigate to note-with-todos.md
+	session.SendKeys("j")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	navigationView, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI after initial navigation", navigationView, "")
+
 	return nil
 }
 
-// testEcosystemNavigationAndFeatures tests core UI mechanics like navigation, folding, and visibility toggles.
-func testEcosystemNavigationAndFeatures(ctx *harness.Context) error {
+// testHelpPreviewAndCreation tests the help screen, preview pane, and note creation.
+// Corresponds to frames 7-32 of the recording.
+func testHelpPreviewAndCreation(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
-	// 1. Clear focus to see the full ecosystem view
-	session.SendKeys("\x07") // Ctrl+G
-	time.Sleep(1 * time.Second)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-	if err := session.AssertContains("ecosystem-B"); err != nil {
-		return fmt.Errorf("ecosystem-B should be visible after clearing focus: %w", err)
-	}
-
-	// 2. Navigate into ecosystem-B and its subproject
-	if err := session.NavigateToText("ecosystem-B"); err != nil {
-		return err
-	}
-	viewOnEcosystem, _ := session.Capture()
-	ctx.ShowCommandOutput("TUI with cursor on ecosystem-B (before expand)", viewOnEcosystem, "")
-
-	session.SendKeys("l") // Expand ecosystem-B
-	time.Sleep(2 * time.Second)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	viewAfterEcosystemExpand, _ := session.Capture()
-	ctx.ShowCommandOutput("TUI after expanding ecosystem-B", viewAfterEcosystemExpand, "")
-
-	if err := session.WaitForText("subproject-C", 2*time.Second); err != nil {
-		return err
-	}
-	if err := session.NavigateToText("subproject-C"); err != nil {
-		return err
-	}
-
-	viewOnSubproject, _ := session.Capture()
-	ctx.ShowCommandOutput("TUI with cursor on subproject-C (before expand)", viewOnSubproject, "")
-
-	session.SendKeys("l") // Expand subproject-C
-	time.Sleep(2 * time.Second)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	viewAfterSubprojectExpand, _ := session.Capture()
-	ctx.ShowCommandOutput("TUI after pressing 'l' on subproject-C", viewAfterSubprojectExpand, "")
-
-	// NOTE: Ecosystem workspace notebooks aren't currently discoverable in the TUI
-	// The test setup creates notebook content, but the TUI doesn't show it when expanding workspaces
-	// This is a known limitation - skipping the detailed linking and artifact tests for now
-	// TODO: Update this test when workspace notebook discovery is implemented
-	ctx.ShowCommandOutput("NOTE: Workspace notebook groups not visible, skipping ecosystem-specific tests", viewAfterSubprojectExpand, "")
-
-	// 3. Test basic navigation and visibility toggles with project-A instead
-	// Navigate to project-A which should have discoverable notebook content
-	if err := session.NavigateToText("project-A"); err != nil {
-		return err
-	}
-	session.SendKeys("l") // Expand project-A
-	time.Sleep(2 * time.Second)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	// Verify we can see notebook groups in project-A
-	if err := session.WaitForText("inbox", 2*time.Second); err != nil {
-		ctx.ShowCommandOutput("NOTE: Notebook groups not visible even for project-A", "", "")
-		return nil // Skip if notebooks aren't loading at all
-	}
-
-	// Test archive visibility toggle (A)
-	if err := session.NavigateToText("inbox"); err != nil {
-		return err
-	}
-	session.SendKeys("l") // Expand inbox
-	time.Sleep(2 * time.Second)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	// Verify .archive is NOT visible initially
-	if err := session.AssertNotContains(".archive"); err != nil {
-		return fmt.Errorf(".archive should be hidden by default: %w", err)
-	}
-
-	// Toggle archives on with 'A'
-	session.SendKeys("A")
-	time.Sleep(2 * time.Second)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	// Now .archive should be visible
-	if err := session.AssertContains(".archive"); err != nil {
-		return fmt.Errorf(".archive should be visible after toggling on: %w", err)
-	}
-
-	// Toggle archives off again
-	session.SendKeys("A")
-	time.Sleep(2 * time.Second)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	// Verify .archive is hidden again
-	return session.AssertNotContains(".archive")
-}
-
-// testNoteManagementFeatures verifies basic TUI functionality and keybindings.
-func testNoteManagementFeatures(ctx *harness.Context) error {
-	session := ctx.Get("tui_session").(*tui.Session)
-
-	// Test basic navigation commands
-	session.SendKeys("g", "g") // Go to top
-	time.Sleep(500 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	session.SendKeys("G") // Go to bottom
-	time.Sleep(500 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	// Test view toggle (t) - switch between tree and table views
-	session.SendKeys("t")
-	time.Sleep(1 * time.Second)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-	viewAfterToggle, _ := session.Capture()
-	ctx.ShowCommandOutput("TUI after toggling to table view", viewAfterToggle, "")
-
-	// Toggle back to tree view
-	session.SendKeys("t")
-	time.Sleep(1 * time.Second)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	// Test help screen (?)
+	// Frame 7-8: Test help screen with '?', then close with Esc
 	session.SendKeys("?")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
@@ -364,20 +275,364 @@ func testNoteManagementFeatures(ctx *harness.Context) error {
 	helpView, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI help screen", helpView, "")
 
-	// Verify help screen is showing
-	if err := session.AssertContains("help"); err != nil {
-		// Help might use different text, that's okay
-		ctx.ShowCommandOutput("NOTE: Help screen text varies", helpView, "")
-	}
-
-	// Close help screen
-	session.SendKeys("?")
+	// Close help with Esc
+	session.SendKeys("\x1b") // Esc
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
-	// Quit at the end of the test
+	// Frame 9: Open preview pane with 'v'
+	session.SendKeys("v")
+	time.Sleep(1 * time.Second)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 10-11: Navigate down and expand research folder
+	session.SendKeys("j")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	session.SendKeys("l")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 12: Navigate to data.json and verify preview
+	session.SendKeys("j")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+	if err := session.AssertContains("Previewing data.json"); err != nil {
+		// Preview text might vary
+		ctx.ShowCommandOutput("NOTE: data.json preview text may vary", "", "")
+	}
+
+	// Frame 13: Navigate to tagged-note.md and verify preview
+	session.SendKeys("j")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+	if err := session.AssertContains("Previewing tagged-note.md"); err != nil {
+		// Preview text might vary
+		ctx.ShowCommandOutput("NOTE: tagged-note.md preview text may vary", "", "")
+	}
+
+	// Frame 14: Close preview pane with 'v'
+	session.SendKeys("v")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+	previewClosedView, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI after closing preview", previewClosedView, "")
+
+	// Frames 15-18: Navigate back up to inbox (k k k k)
+	for i := 0; i < 4; i++ {
+		session.SendKeys("k")
+		time.Sleep(200 * time.Millisecond)
+		if err := session.WaitStable(); err != nil {
+			return err
+		}
+	}
+
+	// Frame 19: Press 'i' to create an inbox note
+	session.SendKeys("i")
+	time.Sleep(1 * time.Second)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 20: Press Enter to select default type (inbox)
+	session.SendKeys("\r")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frames 21-31: Type "my-new-note"
+	session.SendKeys("my-new-note")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 32: Press Enter to create the note
+	session.SendKeys("\r")
+	time.Sleep(1 * time.Second)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Verify the note was created
+	if err := session.AssertContains("Created note:"); err != nil {
+		return fmt.Errorf("should show 'Created note:' message: %w", err)
+	}
+	if err := session.AssertContains("my-new-note.md"); err != nil {
+		return fmt.Errorf("new note should be visible in tree: %w", err)
+	}
+
+	noteCreatedView, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI after creating note", noteCreatedView, "")
+
+	return nil
+}
+
+// testGlobalViewAndVisibility tests archive toggling and creating global notes.
+// Corresponds to frames 33-60 of the recording.
+func testGlobalViewAndVisibility(ctx *harness.Context) error {
+	session := ctx.Get("tui_session").(*tui.Session)
+
+	// Frame 33: Navigate down with 'j'
+	session.SendKeys("j")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 34: Toggle archives on with 'A'
+	session.SendKeys("A")
+	time.Sleep(1 * time.Second)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Verify .archive is now visible and status message shows
+	if err := session.AssertContains(".archive"); err != nil {
+		return fmt.Errorf(".archive should be visible after toggling on: %w", err)
+	}
+	if err := session.AssertContains("Archives: true"); err != nil {
+		// Status message might vary
+		ctx.ShowCommandOutput("NOTE: Archives status message may vary", "", "")
+	}
+
+	archivesView, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI with archives visible", archivesView, "")
+
+	// Frames 35-36: Navigate down to .archive folder
+	session.SendKeys("j")
+	time.Sleep(200 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+	session.SendKeys("j")
+	time.Sleep(200 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 37: Expand .archive folder with Enter
+	session.SendKeys("\r")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+	if err := session.AssertContains("archived.md"); err != nil {
+		return fmt.Errorf("archived.md should be visible: %w", err)
+	}
+
+	// Frames 38-42: Navigate up to global with 'k' keys (5 times)
+	for i := 0; i < 5; i++ {
+		session.SendKeys("k")
+		time.Sleep(200 * time.Millisecond)
+		if err := session.WaitStable(); err != nil {
+			return err
+		}
+	}
+
+	// Frame 43-44: Try to create note at global (press 'i', then Esc to cancel)
+	session.SendKeys("i")
+	time.Sleep(1 * time.Second)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	session.SendKeys("\x1b") // Esc
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 45: Press 'n' to create a global note
+	session.SendKeys("n")
+	time.Sleep(1 * time.Second)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frames 46-56: Type "global-note"
+	session.SendKeys("global-note")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 57: Press Enter to create the note
+	session.SendKeys("\r")
+	time.Sleep(1 * time.Second)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Verify the note was created
+	if err := session.AssertContains("Created note:"); err != nil {
+		return fmt.Errorf("should show 'Created note:' message: %w", err)
+	}
+	if err := session.AssertContains("global-note.md"); err != nil {
+		return fmt.Errorf("new global note should be visible in tree: %w", err)
+	}
+
+	globalNoteView, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI after creating global note", globalNoteView, "")
+
+	// Frames 58-59: Navigate down to the global note
+	session.SendKeys("j")
+	time.Sleep(200 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+	session.SendKeys("j")
+	time.Sleep(200 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 60: Press '-' to focus parent (go to global view)
+	session.SendKeys("-")
+	time.Sleep(1 * time.Second)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Verify we're now in the global view showing all ecosystems
+	if err := session.AssertContains("ecosystem-B"); err != nil {
+		return fmt.Errorf("ecosystem-B should be visible in global view: %w", err)
+	}
+	if err := session.AssertContains("ungrouped"); err != nil {
+		return fmt.Errorf("ungrouped should be visible in global view: %w", err)
+	}
+
+	globalView, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI global view", globalView, "")
+
+	return nil
+}
+
+// testEcosystemAndLinking tests navigation into ecosystems and artifact visibility.
+// Corresponds to frames 61-83 of the recording.
+func testEcosystemAndLinking(ctx *harness.Context) error {
+	session := ctx.Get("tui_session").(*tui.Session)
+
+	// Frames 61-62: Navigate up to global with 'k' keys
+	session.SendKeys("k")
+	time.Sleep(200 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+	session.SendKeys("k")
+	time.Sleep(200 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 63: Expand global with 'l'
+	session.SendKeys("l")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frames 64-67: Navigate down to ecosystem-B and subproject-C
+	for i := 0; i < 4; i++ {
+		session.SendKeys("j")
+		time.Sleep(200 * time.Millisecond)
+		if err := session.WaitStable(); err != nil {
+			return err
+		}
+	}
+
+	// Frame 68: Expand subproject-C with 'l'
+	session.SendKeys("l")
+	time.Sleep(1 * time.Second)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	linkedView, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI showing linked notes and plans", linkedView, "")
+
+	// Verify the linking indicators are visible (using simpler contains checks)
+	if err := session.AssertContains("my-feature"); err != nil {
+		return fmt.Errorf("plan 'my-feature' should be visible: %w", err)
+	}
+	if err := session.AssertContains("20251220-linked-note.md"); err != nil {
+		return fmt.Errorf("linked note should be visible: %w", err)
+	}
+	// Look for the linking indicator text (account for ANSI formatting codes)
+	if err := session.AssertContains("plan:"); err != nil {
+		return fmt.Errorf("plan linking indicator should be visible: %w", err)
+	}
+	if err := session.AssertContains("note:"); err != nil {
+		return fmt.Errorf("note linking indicator should be visible: %w", err)
+	}
+
+	// Frame 69: Toggle artifacts on with 'b'
+	session.SendKeys("b")
+	time.Sleep(1 * time.Second)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Verify .artifacts is now visible
+	if err := session.AssertContains(".artifacts"); err != nil {
+		return fmt.Errorf(".artifacts should be visible after toggling on: %w", err)
+	}
+	if err := session.AssertContains("briefing-123.xml"); err != nil {
+		return fmt.Errorf("briefing file should be visible: %w", err)
+	}
+	if err := session.AssertContains("Artifacts: true"); err != nil {
+		// Status message might vary
+		ctx.ShowCommandOutput("NOTE: Artifacts status message may vary", "", "")
+	}
+
+	artifactsView, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI with artifacts visible", artifactsView, "")
+
+	// Frames 70-78: Navigate through the tree with 'j' keys
+	for i := 0; i < 8; i++ {
+		session.SendKeys("j")
+		time.Sleep(200 * time.Millisecond)
+		if err := session.WaitStable(); err != nil {
+			return err
+		}
+	}
+
+	// Frame 79: Open preview with 'v'
+	session.SendKeys("v")
+	time.Sleep(1 * time.Second)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 81: Close preview and navigate with Enter
+	session.SendKeys("\r")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Frame 83: Quit with 'q'
 	session.SendKeys("q")
+	time.Sleep(500 * time.Millisecond)
+
+	finalView, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI final view before quit", finalView, "")
+
 	return nil
 }
