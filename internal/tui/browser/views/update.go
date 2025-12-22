@@ -333,274 +333,7 @@ func (m *Model) BuildDisplayTree() {
 		}
 
 		if noteGroups, ok := notesByWorkspace[wsKey]; ok {
-			// Separate regular groups, archived subgroups, and artifact subgroups
-			// archiveSubgroups maps "parent" -> "child" -> notes
-			// e.g., "plans" -> "test-plan" -> [notes in plans/.archive/test-plan]
-			// artifactSubgroups maps "parent" -> notes
-			// e.g., "plans/binary-test" -> [artifacts in plans/binary-test/.artifacts/]
-			var regularGroups []string
-			planGroups := make(map[string][]*models.Note)
-			holdPlanGroups := make(map[string][]*models.Note)
-			archiveSubgroups := make(map[string]map[string][]*models.Note)
-			closedSubgroups := make(map[string]map[string][]*models.Note)
-			artifactSubgroups := make(map[string][]*models.Note)
-
-			for name, notes := range noteGroups {
-				// Check if this is an archived or closed group - skip if archives are hidden
-				isArchived := strings.Contains(name, "/.archive")
-				isClosed := strings.Contains(name, "/.closed")
-				if (isArchived || isClosed) && !m.showArchives {
-					continue
-				}
-
-				// Check if this is an artifact group - skip if artifacts are hidden
-				isArtifact := strings.Contains(name, "/.artifacts")
-				if isArtifact && !m.showArtifacts {
-					continue
-				}
-
-				// Skip double-nested archives (e.g., plans/.archive/foo/.archive/bar)
-				// Count occurrences of "/.archive" in the path
-				archiveCount := strings.Count(name, "/.archive")
-				if archiveCount > 1 {
-					continue
-				}
-
-				// Skip double-nested closed (e.g., issues/.closed/foo/.closed/bar)
-				closedCount := strings.Count(name, "/.closed")
-				if closedCount > 1 {
-					continue
-				}
-
-				// Check if this matches pattern "<parent>/.archive/<child>"
-				if strings.Contains(name, "/.archive/") {
-					parts := strings.Split(name, "/.archive/")
-					if len(parts) == 2 {
-						parent := parts[0]
-						child := parts[1]
-						if archiveSubgroups[parent] == nil {
-							archiveSubgroups[parent] = make(map[string][]*models.Note)
-						}
-						archiveSubgroups[parent][child] = notes
-						continue
-					}
-				}
-
-				// Check if this matches pattern "<parent>/.archive" (notes directly in .archive folder)
-				if strings.HasSuffix(name, "/.archive") {
-					parent := strings.TrimSuffix(name, "/.archive")
-					if archiveSubgroups[parent] == nil {
-						archiveSubgroups[parent] = make(map[string][]*models.Note)
-					}
-					// Use empty string as key to indicate notes directly in .archive
-					archiveSubgroups[parent][""] = notes
-					continue
-				}
-
-				// Check if this matches pattern "<parent>/.closed/<child>"
-				if strings.Contains(name, "/.closed/") {
-					parts := strings.Split(name, "/.closed/")
-					if len(parts) == 2 {
-						parent := parts[0]
-						child := parts[1]
-						if closedSubgroups[parent] == nil {
-							closedSubgroups[parent] = make(map[string][]*models.Note)
-						}
-						closedSubgroups[parent][child] = notes
-						continue
-					}
-				}
-
-				// Check if this matches pattern "<parent>/.closed" (notes directly in .closed folder)
-				if strings.HasSuffix(name, "/.closed") {
-					parent := strings.TrimSuffix(name, "/.closed")
-					if closedSubgroups[parent] == nil {
-						closedSubgroups[parent] = make(map[string][]*models.Note)
-					}
-					// Use empty string as key to indicate notes directly in .closed
-					closedSubgroups[parent][""] = notes
-					continue
-				}
-
-				// Check if this matches pattern "<parent>/.artifacts" (artifacts directly in .artifacts folder)
-				if strings.HasSuffix(name, "/.artifacts") {
-					parent := strings.TrimSuffix(name, "/.artifacts")
-					artifactSubgroups[parent] = notes
-					continue
-				}
-
-				// Handle plans grouping
-				if strings.HasPrefix(name, "plans/") {
-					planName := strings.TrimPrefix(name, "plans/")
-					// Check plan status to separate on-hold plans
-					planStatus := m.GetPlanStatus(ws.Name, name)
-					if planStatus == "hold" {
-						if !m.showOnHold {
-							// Skip on-hold plans unless showOnHold is true
-							continue
-						}
-						// Add to hold plans group
-						holdPlanGroups[planName] = notes
-					} else {
-						// Add to regular plans group
-						planGroups[planName] = notes
-					}
-				} else {
-					regularGroups = append(regularGroups, name)
-				}
-			}
-			// Custom sort for regular groups
-			groupOrder := map[string]int{
-				"inbox":       1,
-				"issues":      2,
-				"docs":        3,
-				"in_progress": 4,
-				"review":      5,
-			}
-
-			// Extract completed group to render it after plans
-			var completedGroup string
-			var hasCompleted bool
-			var filteredRegularGroups []string
-			for _, name := range regularGroups {
-				if name == "completed" {
-					completedGroup = name
-					hasCompleted = true
-				} else {
-					filteredRegularGroups = append(filteredRegularGroups, name)
-				}
-			}
-			regularGroups = filteredRegularGroups
-
-			sort.Slice(regularGroups, func(i, j int) bool {
-				orderA, okA := groupOrder[regularGroups[i]]
-				if !okA {
-					orderA = 99 // Put unknown groups at the end
-				}
-				orderB, okB := groupOrder[regularGroups[j]]
-				if !okB {
-					orderB = 99
-				}
-				if orderA == orderB {
-					return regularGroups[i] < regularGroups[j] // Alphabetical fallback
-				}
-				return orderA < orderB
-			})
-
-			// Check if we have plans to add a "plans" parent group
-			hasPlans := len(planGroups) > 0 || len(archiveSubgroups["plans"]) > 0
-			hasHoldPlans := len(holdPlanGroups) > 0
-			totalGroups := len(regularGroups)
-			if hasPlans {
-				totalGroups++
-			}
-			if hasHoldPlans {
-				totalGroups++
-			}
-			if hasCompleted {
-				totalGroups++
-			}
-
-			for i, groupName := range regularGroups {
-				isLastGroup := i == len(regularGroups)-1 && !hasPlans && !hasHoldPlans && !hasCompleted
-				notesInGroup := noteGroups[groupName]
-
-				// Sort notes within the group
-				sort.SliceStable(notesInGroup, func(i, j int) bool {
-					if m.sortAscending {
-						return notesInGroup[i].CreatedAt.Before(notesInGroup[j].CreatedAt)
-					}
-					return notesInGroup[i].CreatedAt.After(notesInGroup[j].CreatedAt)
-				})
-
-				// Calculate group prefix
-				var groupPrefix strings.Builder
-				indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
-				indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
-				groupPrefix.WriteString(indentPrefix)
-				if ws.Depth > 0 || ws.TreePrefix != "" {
-					groupPrefix.WriteString("  ")
-				}
-				if isLastGroup {
-					groupPrefix.WriteString("└─ ")
-				} else {
-					groupPrefix.WriteString("├─ ")
-				}
-
-				// Add group node
-				groupNode := &DisplayNode{
-					IsGroup:       true,
-					GroupName:     groupName,
-					WorkspaceName: ws.Name,
-					Prefix:        groupPrefix.String(),
-					Depth:         ws.Depth + 1,
-					ChildCount:    len(notesInGroup),
-				}
-				nodes = append(nodes, groupNode)
-
-				// Skip notes if group is collapsed (unless searching)
-				groupNodeID := groupNode.NodeID()
-				if m.collapsedNodes[groupNodeID] && !hasSearchFilter {
-					continue
-				}
-
-				// Check if this group has archived, closed, or artifact children
-				hasArchives := len(archiveSubgroups[groupName]) > 0 && m.showArchives
-				hasClosed := len(closedSubgroups[groupName]) > 0 && m.showArchives
-				hasArtifacts := len(artifactSubgroups[groupName]) > 0 && m.showArtifacts
-
-				// Add note nodes
-				for j, note := range notesInGroup {
-					isLastNote := j == len(notesInGroup)-1 && !hasArchives && !hasClosed && !hasArtifacts
-					var notePrefix strings.Builder
-					noteIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
-					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
-					notePrefix.WriteString(noteIndent)
-					if isLastNote {
-						notePrefix.WriteString("└─ ")
-					} else {
-						notePrefix.WriteString("├─ ")
-					}
-					nodes = append(nodes, &DisplayNode{
-						IsNote:       true,
-						Note:         note,
-						Prefix:       notePrefix.String(),
-						Depth:        ws.Depth + 2,
-						RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
-					})
-				}
-
-				// Add .archive subgroup if this group has archived children
-				if hasArchives {
-					m.addArchiveSubgroup(&nodes, ws, groupPrefix.String(), archiveSubgroups[groupName], hasSearchFilter, workspacePathMap)
-				}
-
-				// Add .closed subgroup if this group has closed children
-				if hasClosed {
-					m.addClosedSubgroup(&nodes, ws, groupPrefix.String(), closedSubgroups[groupName], hasSearchFilter, workspacePathMap)
-				}
-
-				// Add .artifacts subgroup if this group has artifact children
-				if hasArtifacts {
-					m.addArtifactSubgroup(&nodes, ws, groupPrefix.String(), artifactSubgroups[groupName], hasSearchFilter, workspacePathMap)
-				}
-			}
-
-			// Add "plans" parent group if there are any plans
-			if hasPlans {
-				hasGroupsAfter := hasHoldPlans || hasCompleted
-				m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, artifactSubgroups, hasSearchFilter, workspacePathMap, hasGroupsAfter)
-			}
-
-			// Add ".hold" parent group if there are any on-hold plans
-			if hasHoldPlans {
-				m.addHoldPlansGroup(&nodes, ws, holdPlanGroups, hasSearchFilter, workspacePathMap, hasCompleted)
-			}
-
-			// Add "completed" group if it exists (after plans)
-			if hasCompleted {
-				m.addCompletedGroup(&nodes, ws, noteGroups[completedGroup], archiveSubgroups, hasSearchFilter, workspacePathMap)
-			}
+			m.renderWorkspaceChildren(&nodes, node, noteGroups, hasSearchFilter, workspacePathMap)
 		}
 
 		// Mark that we need a separator before child workspaces
@@ -621,6 +354,278 @@ func (m *Model) BuildDisplayTree() {
 
 	m.displayNodes = nodes
 	m.clampCursor()
+}
+
+func (m *Model) renderWorkspaceChildren(nodes *[]*DisplayNode, wsNode *DisplayNode, noteGroups map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string) {
+	ws := wsNode.Workspace
+	// Separate regular groups, archived subgroups, and artifact subgroups
+	// archiveSubgroups maps "parent" -> "child" -> notes
+	// e.g., "plans" -> "test-plan" -> [notes in plans/.archive/test-plan]
+	// artifactSubgroups maps "parent" -> notes
+	// e.g., "plans/binary-test" -> [artifacts in plans/binary-test/.artifacts/]
+	var regularGroups []string
+	planGroups := make(map[string][]*models.Note)
+	holdPlanGroups := make(map[string][]*models.Note)
+	archiveSubgroups := make(map[string]map[string][]*models.Note)
+	closedSubgroups := make(map[string]map[string][]*models.Note)
+	artifactSubgroups := make(map[string][]*models.Note)
+
+	for name, notes := range noteGroups {
+		// Check if this is an archived or closed group - skip if archives are hidden
+		isArchived := strings.Contains(name, "/.archive")
+		isClosed := strings.Contains(name, "/.closed")
+		if (isArchived || isClosed) && !m.showArchives {
+			continue
+		}
+
+		// Check if this is an artifact group - skip if artifacts are hidden
+		isArtifact := strings.Contains(name, "/.artifacts")
+		if isArtifact && !m.showArtifacts {
+			continue
+		}
+
+		// Skip double-nested archives (e.g., plans/.archive/foo/.archive/bar)
+		// Count occurrences of "/.archive" in the path
+		archiveCount := strings.Count(name, "/.archive")
+		if archiveCount > 1 {
+			continue
+		}
+
+		// Skip double-nested closed (e.g., issues/.closed/foo/.closed/bar)
+		closedCount := strings.Count(name, "/.closed")
+		if closedCount > 1 {
+			continue
+		}
+
+		// Check if this matches pattern "<parent>/.archive/<child>"
+		if strings.Contains(name, "/.archive/") {
+			parts := strings.Split(name, "/.archive/")
+			if len(parts) == 2 {
+				parent := parts[0]
+				child := parts[1]
+				if archiveSubgroups[parent] == nil {
+					archiveSubgroups[parent] = make(map[string][]*models.Note)
+				}
+				archiveSubgroups[parent][child] = notes
+				continue
+			}
+		}
+
+		// Check if this matches pattern "<parent>/.archive" (notes directly in .archive folder)
+		if strings.HasSuffix(name, "/.archive") {
+			parent := strings.TrimSuffix(name, "/.archive")
+			if archiveSubgroups[parent] == nil {
+				archiveSubgroups[parent] = make(map[string][]*models.Note)
+			}
+			// Use empty string as key to indicate notes directly in .archive
+			archiveSubgroups[parent][""] = notes
+			continue
+		}
+
+		// Check if this matches pattern "<parent>/.closed/<child>"
+		if strings.Contains(name, "/.closed/") {
+			parts := strings.Split(name, "/.closed/")
+			if len(parts) == 2 {
+				parent := parts[0]
+				child := parts[1]
+				if closedSubgroups[parent] == nil {
+					closedSubgroups[parent] = make(map[string][]*models.Note)
+				}
+				closedSubgroups[parent][child] = notes
+				continue
+			}
+		}
+
+		// Check if this matches pattern "<parent>/.closed" (notes directly in .closed folder)
+		if strings.HasSuffix(name, "/.closed") {
+			parent := strings.TrimSuffix(name, "/.closed")
+			if closedSubgroups[parent] == nil {
+				closedSubgroups[parent] = make(map[string][]*models.Note)
+			}
+			// Use empty string as key to indicate notes directly in .closed
+			closedSubgroups[parent][""] = notes
+			continue
+		}
+
+		// Check if this matches pattern "<parent>/.artifacts" (artifacts directly in .artifacts folder)
+		if strings.HasSuffix(name, "/.artifacts") {
+			parent := strings.TrimSuffix(name, "/.artifacts")
+			artifactSubgroups[parent] = notes
+			continue
+		}
+
+		// Handle plans grouping
+		if strings.HasPrefix(name, "plans/") {
+			planName := strings.TrimPrefix(name, "plans/")
+			// Check plan status to separate on-hold plans
+			planStatus := m.GetPlanStatus(ws.Name, name)
+			if planStatus == "hold" {
+				if !m.showOnHold {
+					// Skip on-hold plans unless showOnHold is true
+					continue
+				}
+				// Add to hold plans group
+				holdPlanGroups[planName] = notes
+			} else {
+				// Add to regular plans group
+				planGroups[planName] = notes
+			}
+		} else {
+			regularGroups = append(regularGroups, name)
+		}
+	}
+	// Custom sort for regular groups
+	groupOrder := map[string]int{
+		"inbox":       1,
+		"issues":      2,
+		"docs":        3,
+		"in_progress": 4,
+		"review":      5,
+	}
+
+	// Extract completed group to render it after plans
+	var completedGroup string
+	var hasCompleted bool
+	var filteredRegularGroups []string
+	for _, name := range regularGroups {
+		if name == "completed" {
+			completedGroup = name
+			hasCompleted = true
+		} else {
+			filteredRegularGroups = append(filteredRegularGroups, name)
+		}
+	}
+	regularGroups = filteredRegularGroups
+
+	sort.Slice(regularGroups, func(i, j int) bool {
+		orderA, okA := groupOrder[regularGroups[i]]
+		if !okA {
+			orderA = 99 // Put unknown groups at the end
+		}
+		orderB, okB := groupOrder[regularGroups[j]]
+		if !okB {
+			orderB = 99
+		}
+		if orderA == orderB {
+			return regularGroups[i] < regularGroups[j] // Alphabetical fallback
+		}
+		return orderA < orderB
+	})
+
+	// Check if we have plans to add a "plans" parent group
+	hasPlans := len(planGroups) > 0 || len(archiveSubgroups["plans"]) > 0
+	hasHoldPlans := len(holdPlanGroups) > 0
+	totalGroups := len(regularGroups)
+	if hasPlans {
+		totalGroups++
+	}
+	if hasHoldPlans {
+		totalGroups++
+	}
+	if hasCompleted {
+		totalGroups++
+	}
+
+	for i, groupName := range regularGroups {
+		isLastGroup := i == len(regularGroups)-1 && !hasPlans && !hasHoldPlans && !hasCompleted
+		notesInGroup := noteGroups[groupName]
+
+		// Sort notes within the group
+		sort.SliceStable(notesInGroup, func(i, j int) bool {
+			if m.sortAscending {
+				return notesInGroup[i].CreatedAt.Before(notesInGroup[j].CreatedAt)
+			}
+			return notesInGroup[i].CreatedAt.After(notesInGroup[j].CreatedAt)
+		})
+
+		// Calculate group prefix
+		var groupPrefix strings.Builder
+		indentPrefix := strings.ReplaceAll(wsNode.Prefix, "├─", "│ ")
+		indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+		groupPrefix.WriteString(indentPrefix)
+		if wsNode.Depth > 0 || wsNode.Prefix != "" {
+			groupPrefix.WriteString("  ")
+		}
+		if isLastGroup {
+			groupPrefix.WriteString("└─ ")
+		} else {
+			groupPrefix.WriteString("├─ ")
+		}
+
+		// Add group node
+		groupNode := &DisplayNode{
+			IsGroup:       true,
+			GroupName:     groupName,
+			WorkspaceName: ws.Name,
+			Prefix:        groupPrefix.String(),
+			Depth:         wsNode.Depth + 1,
+			ChildCount:    len(notesInGroup),
+		}
+		*nodes = append(*nodes, groupNode)
+
+		// Skip notes if group is collapsed (unless searching)
+		groupNodeID := groupNode.NodeID()
+		if m.collapsedNodes[groupNodeID] && !hasSearchFilter {
+			continue
+		}
+
+		// Check if this group has archived, closed, or artifact children
+		hasArchives := len(archiveSubgroups[groupName]) > 0 && m.showArchives
+		hasClosed := len(closedSubgroups[groupName]) > 0 && m.showArchives
+		hasArtifacts := len(artifactSubgroups[groupName]) > 0 && m.showArtifacts
+
+		// Add note nodes
+		for j, note := range notesInGroup {
+			isLastNote := j == len(notesInGroup)-1 && !hasArchives && !hasClosed && !hasArtifacts
+			var notePrefix strings.Builder
+			noteIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
+			noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+			notePrefix.WriteString(noteIndent)
+			if isLastNote {
+				notePrefix.WriteString("└─ ")
+			} else {
+				notePrefix.WriteString("├─ ")
+			}
+			*nodes = append(*nodes, &DisplayNode{
+				IsNote:       true,
+				Note:         note,
+				Prefix:       notePrefix.String(),
+				Depth:        wsNode.Depth + 2,
+				RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+			})
+		}
+
+		// Add .archive subgroup if this group has archived children
+		if hasArchives {
+			m.addArchiveSubgroup(nodes, ws, groupPrefix.String(), archiveSubgroups[groupName], hasSearchFilter, workspacePathMap)
+		}
+
+		// Add .closed subgroup if this group has closed children
+		if hasClosed {
+			m.addClosedSubgroup(nodes, ws, groupPrefix.String(), closedSubgroups[groupName], hasSearchFilter, workspacePathMap)
+		}
+
+		// Add .artifacts subgroup if this group has artifact children
+		if hasArtifacts {
+			m.addArtifactSubgroup(nodes, ws, groupPrefix.String(), artifactSubgroups[groupName], hasSearchFilter, workspacePathMap)
+		}
+	}
+
+	// Add "plans" parent group if there are any plans
+	if hasPlans {
+		hasGroupsAfter := hasHoldPlans || hasCompleted
+		m.addPlansGroup(nodes, ws, planGroups, archiveSubgroups, artifactSubgroups, hasSearchFilter, workspacePathMap, hasGroupsAfter)
+	}
+
+	// Add ".hold" parent group if there are any on-hold plans
+	if hasHoldPlans {
+		m.addHoldPlansGroup(nodes, ws, holdPlanGroups, hasSearchFilter, workspacePathMap, hasCompleted)
+	}
+
+	// Add "completed" group if it exists (after plans)
+	if hasCompleted {
+		m.addCompletedGroup(nodes, ws, noteGroups[completedGroup], archiveSubgroups, hasSearchFilter, workspacePathMap)
+	}
 }
 
 // buildTagFilteredTree constructs a simplified tree with notes hoisted under their workspace, filtered by a tag.
@@ -1531,9 +1536,10 @@ func (m *Model) addUngroupedSection(nodes *[]*DisplayNode, ungroupedWorkspaces [
 				continue
 			}
 
-			// Render notes for this ungrouped workspace (similar logic to main loop, abbreviated here)
-			// For brevity, this implementation is simplified
-			// In a complete implementation, this would follow the same pattern as the main workspace rendering
+			// Render notes for this ungrouped workspace
+			if noteGroups, ok := notesByWorkspace[wsKey]; ok {
+				m.renderWorkspaceChildren(nodes, node, noteGroups, hasSearchFilter, workspacePathMap)
+			}
 		}
 	}
 }

@@ -415,7 +415,27 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 	archivesView, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI with archives visible", archivesView, "")
 
-	// Frames 35-36: Navigate down to .archive folder
+	// Frames 35-36: Navigate to .archive folder under inbox
+	// After toggling archives and pressing 'j', cursor is on research
+	// Navigate up to inbox, then down to its children to find .archive
+	session.SendKeys("k")
+	time.Sleep(200 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+	// Now cursor is on inbox - expand it if not already expanded
+	session.SendKeys("l")
+	time.Sleep(200 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+	// Navigate down through inbox contents to .archive
+	// inbox has: note-with-todos.md, my-new-note.md, .archive
+	session.SendKeys("j")
+	time.Sleep(200 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
 	session.SendKeys("j")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
@@ -427,8 +447,8 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 		return err
 	}
 
-	// Frame 37: Expand .archive folder with Enter
-	session.SendKeys("\r")
+	// Frame 37: Expand .archive folder
+	session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -520,6 +540,51 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 
 	globalView, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI global view", globalView, "")
+
+	// Navigate to ungrouped section and verify it shows project notes
+	// Find ungrouped in the tree - it should be below ecosystem-B
+	session.SendKeys("j")
+	time.Sleep(200 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Expand ungrouped
+	session.SendKeys("l")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Verify project-A is visible under ungrouped
+	if err := session.AssertContains("project-A"); err != nil {
+		return fmt.Errorf("project-A should be visible under ungrouped: %w", err)
+	}
+
+	// Navigate to project-A
+	session.SendKeys("j")
+	time.Sleep(200 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Expand project-A to verify notes are visible
+	session.SendKeys("l")
+	time.Sleep(500 * time.Millisecond)
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	// Verify that ungrouped project-A shows its note groups
+	if err := session.AssertContains("inbox"); err != nil {
+		return fmt.Errorf("inbox group should be visible under ungrouped project-A: %w", err)
+	}
+	if err := session.AssertContains("research"); err != nil {
+		return fmt.Errorf("research group should be visible under ungrouped project-A: %w", err)
+	}
+
+	ungroupedExpandedView, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI global view with ungrouped project-A expanded", ungroupedExpandedView, "")
 
 	return nil
 }
