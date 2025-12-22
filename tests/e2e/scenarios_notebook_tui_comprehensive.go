@@ -9,6 +9,7 @@ import (
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 	"github.com/mattsolo1/grove-tend/pkg/tui"
+	"github.com/mattsolo1/grove-tend/pkg/verify"
 )
 
 // NotebookTUIComprehensiveScenario tests the primary features of `nb tui`.
@@ -197,10 +198,10 @@ func launchAndTestInitialNavigation(ctx *harness.Context) error {
 
 	// The TUI shows the current project context (project-A) since we launched from there
 	// Verify project-A and global are visible in the tree
-	if err := session.AssertContains("project-A"); err != nil {
-		return err
-	}
-	if err := session.AssertContains("global"); err != nil {
+	if err := ctx.Verify(func(v *verify.Collector) {
+		v.Equal("project-A is visible", nil, session.AssertContains("project-A"))
+		v.Equal("global is visible", nil, session.AssertContains("global"))
+	}); err != nil {
 		return err
 	}
 
@@ -224,10 +225,10 @@ func launchAndTestInitialNavigation(ctx *harness.Context) error {
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
-	if err := session.AssertContains("inbox"); err != nil {
-		return err
-	}
-	if err := session.AssertContains("research"); err != nil {
+	if err := ctx.Verify(func(v *verify.Collector) {
+		v.Equal("inbox folder is visible", nil, session.AssertContains("inbox"))
+		v.Equal("research folder is visible", nil, session.AssertContains("research"))
+	}); err != nil {
 		return err
 	}
 
@@ -244,7 +245,8 @@ func launchAndTestInitialNavigation(ctx *harness.Context) error {
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
-	if err := session.AssertContains("note-with-todos.md"); err != nil {
+	if err := ctx.Check("note-with-todos.md is visible in inbox",
+		session.AssertContains("note-with-todos.md")); err != nil {
 		return err
 	}
 
@@ -371,11 +373,11 @@ func testHelpPreviewAndCreation(ctx *harness.Context) error {
 	}
 
 	// Verify the note was created
-	if err := session.AssertContains("Created note:"); err != nil {
-		return fmt.Errorf("should show 'Created note:' message: %w", err)
-	}
-	if err := session.AssertContains("my-new-note.md"); err != nil {
-		return fmt.Errorf("new note should be visible in tree: %w", err)
+	if err := ctx.Verify(func(v *verify.Collector) {
+		v.Equal("shows 'Created note:' message", nil, session.AssertContains("Created note:"))
+		v.Equal("new note is visible in tree", nil, session.AssertContains("my-new-note.md"))
+	}); err != nil {
+		return err
 	}
 
 	noteCreatedView, _ := session.Capture()
@@ -403,9 +405,10 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 		return err
 	}
 
-	// Verify .archive is now visible and status message shows
-	if err := session.AssertContains(".archive"); err != nil {
-		return fmt.Errorf(".archive should be visible after toggling on: %w", err)
+	// Verify .archive is now visible
+	if err := ctx.Check(".archive is visible after toggling on",
+		session.AssertContains(".archive")); err != nil {
+		return err
 	}
 	if err := session.AssertContains("Archives: true"); err != nil {
 		// Status message might vary
@@ -453,8 +456,9 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
-	if err := session.AssertContains("archived.md"); err != nil {
-		return fmt.Errorf("archived.md should be visible: %w", err)
+	if err := ctx.Check("archived.md is visible in .archive folder",
+		session.AssertContains("archived.md")); err != nil {
+		return err
 	}
 
 	// Frames 38-42: Navigate up to global with 'k' keys (5 times)
@@ -501,11 +505,11 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 	}
 
 	// Verify the note was created
-	if err := session.AssertContains("Created note:"); err != nil {
-		return fmt.Errorf("should show 'Created note:' message: %w", err)
-	}
-	if err := session.AssertContains("global-note.md"); err != nil {
-		return fmt.Errorf("new global note should be visible in tree: %w", err)
+	if err := ctx.Verify(func(v *verify.Collector) {
+		v.Equal("shows 'Created note:' message", nil, session.AssertContains("Created note:"))
+		v.Equal("new global note is visible in tree", nil, session.AssertContains("global-note.md"))
+	}); err != nil {
+		return err
 	}
 
 	globalNoteView, _ := session.Capture()
@@ -531,11 +535,11 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 	}
 
 	// Verify we're now in the global view showing all ecosystems
-	if err := session.AssertContains("ecosystem-B"); err != nil {
-		return fmt.Errorf("ecosystem-B should be visible in global view: %w", err)
-	}
-	if err := session.AssertContains("ungrouped"); err != nil {
-		return fmt.Errorf("ungrouped should be visible in global view: %w", err)
+	if err := ctx.Verify(func(v *verify.Collector) {
+		v.Equal("ecosystem-B is visible in global view", nil, session.AssertContains("ecosystem-B"))
+		v.Equal("ungrouped is visible in global view", nil, session.AssertContains("ungrouped"))
+	}); err != nil {
+		return err
 	}
 
 	globalView, _ := session.Capture()
@@ -557,8 +561,9 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 	}
 
 	// Verify project-A is visible under ungrouped
-	if err := session.AssertContains("project-A"); err != nil {
-		return fmt.Errorf("project-A should be visible under ungrouped: %w", err)
+	if err := ctx.Check("project-A is visible under ungrouped",
+		session.AssertContains("project-A")); err != nil {
+		return err
 	}
 
 	// Navigate to project-A
@@ -576,11 +581,11 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 	}
 
 	// Verify that ungrouped project-A shows its note groups
-	if err := session.AssertContains("inbox"); err != nil {
-		return fmt.Errorf("inbox group should be visible under ungrouped project-A: %w", err)
-	}
-	if err := session.AssertContains("research"); err != nil {
-		return fmt.Errorf("research group should be visible under ungrouped project-A: %w", err)
+	if err := ctx.Verify(func(v *verify.Collector) {
+		v.Equal("inbox group is visible under ungrouped project-A", nil, session.AssertContains("inbox"))
+		v.Equal("research group is visible under ungrouped project-A", nil, session.AssertContains("research"))
+	}); err != nil {
+		return err
 	}
 
 	ungroupedExpandedView, _ := session.Capture()
@@ -632,19 +637,14 @@ func testEcosystemAndLinking(ctx *harness.Context) error {
 	linkedView, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI showing linked notes and plans", linkedView, "")
 
-	// Verify the linking indicators are visible (using simpler contains checks)
-	if err := session.AssertContains("my-feature"); err != nil {
-		return fmt.Errorf("plan 'my-feature' should be visible: %w", err)
-	}
-	if err := session.AssertContains("20251220-linked-note.md"); err != nil {
-		return fmt.Errorf("linked note should be visible: %w", err)
-	}
-	// Look for the linking indicator text (account for ANSI formatting codes)
-	if err := session.AssertContains("plan:"); err != nil {
-		return fmt.Errorf("plan linking indicator should be visible: %w", err)
-	}
-	if err := session.AssertContains("note:"); err != nil {
-		return fmt.Errorf("note linking indicator should be visible: %w", err)
+	// Verify the linking indicators are visible
+	if err := ctx.Verify(func(v *verify.Collector) {
+		v.Equal("plan 'my-feature' is visible", nil, session.AssertContains("my-feature"))
+		v.Equal("linked note is visible", nil, session.AssertContains("20251220-linked-note.md"))
+		v.Equal("plan linking indicator is visible", nil, session.AssertContains("plan:"))
+		v.Equal("note linking indicator is visible", nil, session.AssertContains("note:"))
+	}); err != nil {
+		return err
 	}
 
 	// Frame 69: Toggle artifacts on with 'b'
@@ -655,11 +655,11 @@ func testEcosystemAndLinking(ctx *harness.Context) error {
 	}
 
 	// Verify .artifacts is now visible
-	if err := session.AssertContains(".artifacts"); err != nil {
-		return fmt.Errorf(".artifacts should be visible after toggling on: %w", err)
-	}
-	if err := session.AssertContains("briefing-123.xml"); err != nil {
-		return fmt.Errorf("briefing file should be visible: %w", err)
+	if err := ctx.Verify(func(v *verify.Collector) {
+		v.Equal(".artifacts is visible after toggling on", nil, session.AssertContains(".artifacts"))
+		v.Equal("briefing file is visible", nil, session.AssertContains("briefing-123.xml"))
+	}); err != nil {
+		return err
 	}
 	if err := session.AssertContains("Artifacts: true"); err != nil {
 		// Status message might vary
