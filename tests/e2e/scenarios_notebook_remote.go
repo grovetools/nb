@@ -11,23 +11,22 @@ import (
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
+	"github.com/mattsolo1/grove-tend/pkg/verify"
 )
 
 // NotebookRemoteSyncScenario verifies that 'nb sync' creates and updates notes from a remote source.
 func NotebookRemoteSyncScenario() *harness.Scenario {
-	return &harness.Scenario{
-		Name:        "notebook-remote-sync",
-		Description: "Verifies 'nb sync' creates and updates notes from a remote source.",
-		Tags:        []string{"notebook", "remote", "sync", "github"},
-		Steps: []harness.Step{
+	return harness.NewScenario(
+		"notebook-remote-sync",
+		"Verifies 'nb sync' creates and updates notes from a remote source.",
+		[]string{"notebook", "remote", "sync", "github"},
+		[]harness.Step{
 			// Step 1: Set up mock for 'gh' CLI. tend will compile our Go mock
 			// from tests/e2e/mocks/src/gh and place it on the PATH.
 			harness.SetupMocks(harness.Mock{CommandName: "gh"}),
 
 			// Step 2: Prepare the test environment, project, and initial mock data.
-			{
-				Name: "Setup test environment and initial mock data",
-				Func: func(ctx *harness.Context) error {
+			harness.NewStep("Setup test environment and initial mock data", func(ctx *harness.Context) error {
 					// Create a directory to hold the JSON files our mock 'gh' will read.
 					stateDir := ctx.NewDir("gh_state")
 					ctx.Set("state_dir", stateDir)
@@ -106,22 +105,15 @@ notebooks:
 
 					ctx.Set("project_dir", projectDir)
 					return nil
-				},
-			},
+				}),
 
 			// Step 3: Run the initial sync and verify that notes are created correctly.
-			{
-				Name: "Run initial sync and verify note creation",
-				Func: func(ctx *harness.Context) error {
-					nbBin, err := findProjectBinary()
-					if err != nil {
-						return err
-					}
+			harness.NewStep("Run initial sync and verify note creation", func(ctx *harness.Context) error {
 					projectDir := ctx.GetString("project_dir")
 					stateDir := ctx.GetString("state_dir")
 
 					// Run `nb remote sync` with the environment variable pointing to our mock data.
-					cmd := ctx.Command(nbBin, "remote", "sync").Dir(projectDir).Env("GH_MOCK_STATE_DIR=" + stateDir)
+					cmd := ctx.Bin("remote", "sync").Dir(projectDir).Env("GH_MOCK_STATE_DIR=" + stateDir)
 					result := cmd.Run()
 					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 					if result.Error != nil {
@@ -134,21 +126,13 @@ notebooks:
 					if err != nil {
 						return fmt.Errorf("failed to list issue notes: %w", err)
 					}
-					if err := assert.Equal(1, len(issueFiles), "expected one issue note"); err != nil {
+					if err := ctx.Check("one issue note was created", assert.Equal(1, len(issueFiles))); err != nil {
 						return err
 					}
 					issueNotePath := filepath.Join(issueNoteDir, issueFiles[0])
 					ctx.Set("issue_note_path", issueNotePath) // Save for update test
 
 					issueContent, _ := fs.ReadString(issueNotePath)
-					assert.Contains(issueContent, "remote:")
-					assert.Contains(issueContent, "  id: 101")
-					assert.Contains(issueContent, "title: Initial Issue")
-					assert.Contains(issueContent, "This is the body of the initial issue.")
-					assert.Contains(issueContent, "  labels: [bug, critical]")
-					assert.Contains(issueContent, "  assignees: [user1, user2]")
-					assert.Contains(issueContent, "  milestone: v1.0")
-					assert.Contains(issueContent, "<!-- nb-sync-marker -->")
 
 					// Verify PR note
 					prNoteDir := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb", "workspaces", "sync-project", "prs")
@@ -156,25 +140,31 @@ notebooks:
 					if err != nil {
 						return fmt.Errorf("failed to list pr notes: %w", err)
 					}
-					if err := assert.Equal(1, len(prFiles), "expected one PR note"); err != nil {
+					if err := ctx.Check("one PR note was created", assert.Equal(1, len(prFiles))); err != nil {
 						return err
 					}
 					prNotePath := filepath.Join(prNoteDir, prFiles[0])
 					ctx.Set("pr_note_path", prNotePath) // Save for update test
 
 					prContent, _ := fs.ReadString(prNotePath)
-					if err := assert.Contains(prContent, "remote:"); err != nil {
-						return err
-					}
-					if err := assert.Contains(prContent, "  id: 202"); err != nil {
-						return err
-					}
-					if err := assert.Contains(prContent, "  assignees: [reviewer1]"); err != nil {
-						return err
-					}
-					return assert.Contains(prContent, "  milestone: v1.1")
-				},
-			},
+
+					return ctx.Verify(func(v *verify.Collector) {
+						// Verify issue note
+						v.Contains("issue note has remote block", issueContent, "remote:")
+						v.Contains("issue note has correct remote id", issueContent, "id: 101")
+						v.Contains("issue note has correct title", issueContent, "title: Initial Issue")
+						v.Contains("issue note has correct body", issueContent, "This is the body of the initial issue.")
+						v.Contains("issue note has correct labels", issueContent, "labels: [bug, critical]")
+						v.Contains("issue note has correct assignees", issueContent, "assignees: [user1, user2]")
+						v.Contains("issue note has correct milestone", issueContent, "milestone: v1.0")
+						v.Contains("issue note has sync marker", issueContent, "<!-- nb-sync-marker -->")
+						// Verify PR note
+						v.Contains("pr note has remote block", prContent, "remote:")
+						v.Contains("pr note has correct remote id", prContent, "id: 202")
+						v.Contains("pr note has correct assignees", prContent, "assignees: [reviewer1]")
+						v.Contains("pr note has correct milestone", prContent, "milestone: v1.1")
+					})
+				}),
 
 			// Step 4: Modify a local note and verify changes are pushed
 			// TODO: This test is currently skipped due to test environment issues with file mtime
@@ -246,9 +236,7 @@ notebooks:
 			*/
 
 			// Step 5: Modify the mock data to test the update logic.
-			{
-				Name: "Modify mock data for update test",
-				Func: func(ctx *harness.Context) error {
+			harness.NewStep("Modify mock data for update test", func(ctx *harness.Context) error {
 					stateDir := ctx.GetString("state_dir")
 					prNotePath := ctx.GetString("pr_note_path")
 
@@ -291,23 +279,16 @@ notebooks:
 						}
 					]`, futureTime, futureTime)
 					return fs.WriteString(filepath.Join(stateDir, "issues.json"), updatedIssuesJSON)
-				},
-			},
+				}),
 
 			// Step 6: Run the second sync and verify the update/creation behavior.
-			{
-				Name: "Run second sync and verify update behavior",
-				Func: func(ctx *harness.Context) error {
-					nbBin, err := findProjectBinary()
-					if err != nil {
-						return err
-					}
+			harness.NewStep("Run second sync and verify update behavior", func(ctx *harness.Context) error {
 					projectDir := ctx.GetString("project_dir")
 					stateDir := ctx.GetString("state_dir")
 					originalMtime := ctx.Get("pr_note_mtime").(time.Time)
 
 					// Run `nb remote sync` again.
-					cmd := ctx.Command(nbBin, "remote", "sync").Dir(projectDir).Env("GH_MOCK_STATE_DIR=" + stateDir)
+					cmd := ctx.Bin("remote", "sync").Dir(projectDir).Env("GH_MOCK_STATE_DIR=" + stateDir)
 					result := cmd.Run()
 					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 					if result.Error != nil {
@@ -317,38 +298,32 @@ notebooks:
 					// Verify updated note.
 					issueNotePath := ctx.GetString("issue_note_path")
 					updatedContent, _ := fs.ReadString(issueNotePath)
-					if err := assert.Contains(updatedContent, "title: Updated Issue Title"); err != nil {
-						return fmt.Errorf("issue note title was not updated: %w", err)
-					}
-					if err := assert.Contains(updatedContent, "  state: closed"); err != nil {
-						return fmt.Errorf("issue note state was not updated: %w", err)
-					}
-					if err := assert.NotContains(updatedContent, "critical"); err != nil {
-						return fmt.Errorf("issue note labels were not updated: %w", err)
-					}
-					if err := assert.Contains(updatedContent, "  assignees: [user3]"); err != nil {
-						return fmt.Errorf("issue note assignees were not updated: %w", err)
-					}
-					if err := assert.Contains(updatedContent, "  milestone: v2.0"); err != nil {
-						return fmt.Errorf("issue note milestone was not updated: %w", err)
+					if err := ctx.Verify(func(v *verify.Collector) {
+						v.Contains("issue note title was updated", updatedContent, "title: Updated Issue Title")
+						v.Contains("issue note state was updated", updatedContent, "state: closed")
+						v.NotContains("old issue label was removed", updatedContent, "critical")
+						v.Contains("issue note assignees were updated", updatedContent, "assignees: [user3]")
+						v.Contains("issue note milestone was updated", updatedContent, "milestone: v2.0")
+					}); err != nil {
+						return err
 					}
 
 					// Verify new note was created.
 					issueNoteDir := filepath.Dir(issueNotePath)
 					issueFiles, _ := fs.ListFiles(issueNoteDir)
-					if err := assert.Equal(2, len(issueFiles), "expected two issue notes after second sync"); err != nil {
+					if err := ctx.Check("now two issue notes exist after second sync", assert.Equal(2, len(issueFiles))); err != nil {
 						return err
 					}
 					// Find the new file
 					foundNewFile := false
 					for _, file := range issueFiles {
-						if match, _ := regexp.MatchString(`-a-brand-new-issue.md$`, file); match {
+						if match, _ := regexp.MatchString(`a-brand-new-issue.md$`, file); match {
 							foundNewFile = true
 							break
 						}
 					}
 					if !foundNewFile {
-						return fmt.Errorf("new issue note for 'A Brand New Issue' was not created")
+						return fmt.Errorf("new issue note for 'A Brand New Issue' was not created. Found files: %v", issueFiles)
 					}
 
 
@@ -363,22 +338,15 @@ notebooks:
 					}
 
 					return nil
-				},
-			},
+				}),
 
 			// Step 7: Create a new local note and verify it gets created remotely
-			{
-				Name: "Create local note and verify push-to-create",
-				Func: func(ctx *harness.Context) error {
-					nbBin, err := findProjectBinary()
-					if err != nil {
-						return err
-					}
+			harness.NewStep("Create local note and verify push-to-create", func(ctx *harness.Context) error {
 					projectDir := ctx.GetString("project_dir")
 					stateDir := ctx.GetString("state_dir")
 
 					// Create a new local note of a syncable type
-					cmd := ctx.Command(nbBin, "new", "-t", "issues", "--no-edit", "A new local issue").Dir(projectDir)
+					cmd := ctx.Bin("new", "-t", "issues", "--no-edit", "A new local issue").Dir(projectDir)
 					result := cmd.Run()
 					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 					if result.Error != nil {
@@ -408,7 +376,7 @@ notebooks:
 					}
 
 					// Run sync again
-					cmd = ctx.Command(nbBin, "remote", "sync").Dir(projectDir).Env("GH_MOCK_STATE_DIR=" + stateDir)
+					cmd = ctx.Bin("remote", "sync").Dir(projectDir).Env("GH_MOCK_STATE_DIR=" + stateDir)
 					result = cmd.Run()
 					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 					if result.Error != nil {
@@ -420,11 +388,11 @@ notebooks:
 					if err != nil {
 						return err
 					}
-					if err := assert.Contains(issuesJSON, `"title": "A new local issue"`); err != nil {
-						return fmt.Errorf("new issue was not created in mock data: %w", err)
-					}
-					if err := assert.Contains(issuesJSON, `"number": 103`); err != nil {
-						return fmt.Errorf("new issue did not get the next number: %w", err)
+					if err := ctx.Verify(func(v *verify.Collector) {
+						v.Contains("new issue was created in mock data", issuesJSON, `"title": "A new local issue"`)
+						v.Contains("new issue has correct number in mock data", issuesJSON, `"number": 103`)
+					}); err != nil {
+						return err
 					}
 
 					// Verify the local note was updated with remote metadata
@@ -432,15 +400,12 @@ notebooks:
 					if err != nil {
 						return err
 					}
-					if err := assert.Contains(localNoteContent, "remote:"); err != nil {
-						return fmt.Errorf("local note was not updated with remote block: %w", err)
-					}
-					if err := assert.Contains(localNoteContent, "id: 103"); err != nil {
-						return fmt.Errorf("local note was not updated with remote ID: %w", err)
-					}
-					return assert.Contains(localNoteContent, "url: https://github.com/test/repo/issues/103")
-				},
-			},
+					return ctx.Verify(func(v *verify.Collector) {
+						v.Contains("local note was updated with remote block", localNoteContent, "remote:")
+						v.Contains("local note was updated with remote ID", localNoteContent, "id: 103")
+						v.Contains("local note was updated with remote URL", localNoteContent, "url: https://github.com/test/repo/issues/103")
+					})
+				}),
 		},
-	}
+	)
 }

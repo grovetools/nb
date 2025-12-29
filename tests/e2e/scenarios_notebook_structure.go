@@ -9,18 +9,17 @@ import (
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
+	"github.com/mattsolo1/grove-tend/pkg/verify"
 )
 
 // NotebookCentralizedStructureScenario verifies note creation in a centralized notebook.
 func NotebookCentralizedStructureScenario() *harness.Scenario {
-	return &harness.Scenario{
-		Name:        "notebook-centralized-structure",
-		Description: "Verifies note creation with a centralized notebook configuration.",
-		Tags:        []string{"notebook", "structure", "centralized"},
-		Steps: []harness.Step{
-			{
-				Name: "Setup centralized config, create note, and verify path",
-				Func: func(ctx *harness.Context) error {
+	return harness.NewScenario(
+		"notebook-centralized-structure",
+		"Verifies note creation with a centralized notebook configuration.",
+		[]string{"notebook", "structure", "centralized"},
+		[]harness.Step{
+			harness.NewStep("Setup centralized config, create note, and verify path", func(ctx *harness.Context) error {
 					// 1. Setup global config for centralized notebook
 					globalYAML := `
 version: "1.0"
@@ -49,11 +48,7 @@ notebooks:
 					}
 
 					// 3. Execute 'nb new'
-					nbBin, err := findProjectBinary()
-					if err != nil {
-						return err
-					}
-					cmd := ctx.Command(nbBin, "new", "--no-edit", "my test note").Dir(projectDir)
+					cmd := ctx.Bin("new", "--no-edit", "my test note").Dir(projectDir)
 					result := cmd.Run()
 					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 					if result.Error != nil {
@@ -67,37 +62,34 @@ notebooks:
 					if err != nil {
 						return fmt.Errorf("failed to read expected note directory: %w", err)
 					}
-					if err := assert.Equal(1, len(files), "expected one note file to be created"); err != nil {
+					if err := ctx.Check("one note file was created", assert.Equal(1, len(files))); err != nil {
 						return err
 					}
 					match, _ := regexp.MatchString(`\d{8}-my-test-note.md`, filepath.Base(files[0]))
-					if err := assert.True(match, "note filename should match pattern"); err != nil {
+					if err := ctx.Check("note filename matches pattern", assert.True(match)); err != nil {
 						return err
 					}
 
 					// 5. Assert 'nb context'
-					cmd = ctx.Command(nbBin, "context", "--json").Dir(projectDir)
+					cmd = ctx.Bin("context", "--json").Dir(projectDir)
 					result = cmd.Run()
-					if err := assert.Contains(result.Stdout, `"name": "test-project"`, "context should show correct workspace name"); err != nil {
-						return err
-					}
-					return assert.Contains(result.Stdout, `"inbox":`, "context should have inbox path")
-				},
-			},
+					return ctx.Verify(func(v *verify.Collector) {
+						v.Contains("context shows correct workspace name", result.Stdout, `"name": "test-project"`)
+						v.Contains("context has inbox path", result.Stdout, `"inbox":`)
+					})
+				}),
 		},
-	}
+	)
 }
 
 // NotebookLocalStructureScenario verifies note creation in local mode.
 func NotebookLocalStructureScenario() *harness.Scenario {
-	return &harness.Scenario{
-		Name:        "notebook-local-structure",
-		Description: "Verifies note creation with a local notebook configuration (root_dir: '').",
-		Tags:        []string{"notebook", "structure", "local"},
-		Steps: []harness.Step{
-			{
-				Name: "Setup local config, create note, and verify path",
-				Func: func(ctx *harness.Context) error {
+	return harness.NewScenario(
+		"notebook-local-structure",
+		"Verifies note creation with a local notebook configuration (root_dir: '').",
+		[]string{"notebook", "structure", "local"},
+		[]harness.Step{
+			harness.NewStep("Setup local config, create note, and verify path", func(ctx *harness.Context) error {
 					// 1. Setup test project with local notebook config
 					projectDir := ctx.NewDir("local-project")
 					localYAML := `
@@ -115,11 +107,7 @@ notebooks:
 					}
 
 					// 2. Execute 'nb new'
-					nbBin, err := findProjectBinary()
-					if err != nil {
-						return err
-					}
-					cmd := ctx.Command(nbBin, "new", "--no-edit", "my local note").Dir(projectDir)
+					cmd := ctx.Bin("new", "--no-edit", "my local note").Dir(projectDir)
 					result := cmd.Run()
 					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 					if result.Error != nil {
@@ -136,27 +124,25 @@ notebooks:
 					if err != nil {
 						return err
 					}
-					if err := assert.Equal(1, len(files), "expected one note file"); err != nil {
+					if err := ctx.Check("one note file was created in local notebook", assert.Equal(1, len(files))); err != nil {
 						return err
 					}
+
 					match, _ := regexp.MatchString(`\d{8}-my-local-note.md`, filepath.Base(files[0]))
-					return assert.True(match, "note filename should match pattern")
-				},
-			},
+					return ctx.Check("local note filename matches pattern", assert.True(match))
+				}),
 		},
-	}
+	)
 }
 
 // NotebookWorktreeContextScenario verifies that notes created from a worktree use the main project context.
 func NotebookWorktreeContextScenario() *harness.Scenario {
-	return &harness.Scenario{
-		Name:        "notebook-worktree-context",
-		Description: "Verifies notebook context resolves to the parent project when in a worktree.",
-		Tags:        []string{"notebook", "structure", "worktree"},
-		Steps: []harness.Step{
-			{
-				Name: "Setup worktree, create note, and verify context resolution",
-				Func: func(ctx *harness.Context) error {
+	return harness.NewScenario(
+		"notebook-worktree-context",
+		"Verifies notebook context resolves to the parent project when in a worktree.",
+		[]string{"notebook", "structure", "worktree"},
+		[]harness.Step{
+			harness.NewStep("Setup worktree, create note, and verify context resolution", func(ctx *harness.Context) error {
 					// 1. Setup centralized config
 					globalYAML := `
 version: "1.0"
@@ -194,11 +180,7 @@ notebooks:
 					}
 
 					// 3. Execute 'nb new' from the worktree
-					nbBin, err := findProjectBinary()
-					if err != nil {
-						return err
-					}
-					cmd := ctx.Command(nbBin, "new", "--no-edit", "note from worktree").Dir(worktreeDir)
+					cmd := ctx.Bin("new", "--no-edit", "note from worktree").Dir(worktreeDir)
 					result := cmd.Run()
 					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 					if result.Error != nil {
@@ -211,27 +193,22 @@ notebooks:
 					if err != nil {
 						return fmt.Errorf("failed to read expected note directory: %w", err)
 					}
-					if err := assert.Equal(1, len(files), "expected one note file"); err != nil {
+					if err := ctx.Check("one note file was created from worktree", assert.Equal(1, len(files))); err != nil {
 						return err
 					}
 
 					// 5. Assert 'nb context' from worktree
-					cmd = ctx.Command(nbBin, "context", "--json").Dir(worktreeDir)
+					cmd = ctx.Bin("context", "--json").Dir(worktreeDir)
 					result = cmd.Run()
-					// Check that current workspace is the worktree
-					if err := assert.Contains(result.Stdout, `"current_workspace"`, "should have current_workspace"); err != nil {
-						return err
-					}
-					if err := assert.Contains(result.Stdout, `"name": "feature-branch"`, "current workspace should be worktree"); err != nil {
-						return err
-					}
-					// Check that notebook context workspace is the parent project
-					if err := assert.Contains(result.Stdout, `"notebook_context_workspace"`, "should have notebook_context_workspace"); err != nil {
-						return err
-					}
-					return assert.Contains(result.Stdout, `"name": "worktree-project"`, "notebook context should be parent project")
-				},
-			},
+					return ctx.Verify(func(v *verify.Collector) {
+						// Check that current workspace is the worktree
+						v.Contains("context has current_workspace", result.Stdout, `"current_workspace"`)
+						v.Contains("current workspace is worktree", result.Stdout, `"name": "feature-branch"`)
+						// Check that notebook context workspace is the parent project
+						v.Contains("context has notebook_context_workspace", result.Stdout, `"notebook_context_workspace"`)
+						v.Contains("notebook context is parent project", result.Stdout, `"name": "worktree-project"`)
+					})
+				}),
 		},
-	}
+	)
 }

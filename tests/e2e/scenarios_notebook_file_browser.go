@@ -11,18 +11,17 @@ import (
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
+	"github.com/mattsolo1/grove-tend/pkg/verify"
 )
 
 // NotebookFileBrowserScenario verifies the file-browser-like behavior of `nb`.
 func NotebookFileBrowserScenario() *harness.Scenario {
-	return &harness.Scenario{
-		Name:        "notebook-file-browser-mode",
-		Description: "Verifies dynamic note types and listing of all file types.",
-		Tags:        []string{"notebook", "file-browser", "dynamic-types"},
-		Steps: []harness.Step{
-			{
-				Name: "Setup environment with dynamic note type directory",
-				Func: func(ctx *harness.Context) error {
+	return harness.NewScenario(
+		"notebook-file-browser-mode",
+		"Verifies dynamic note types and listing of all file types.",
+		[]string{"notebook", "file-browser", "dynamic-types"},
+		[]harness.Step{
+			harness.NewStep("Setup environment with dynamic note type directory", func(ctx *harness.Context) error {
 					// Setup centralized notebook config without any defined note types
 					globalYAML := `
 version: "1.0"
@@ -64,18 +63,11 @@ notebooks:
 					}
 
 					return nil
-				},
-			},
-			{
-				Name: "Verify note creation in dynamic type",
-				Func: func(ctx *harness.Context) error {
-					nbBin, err := findProjectBinary()
-					if err != nil {
-						return err
-					}
+				}),
+			harness.NewStep("Verify note creation in dynamic type", func(ctx *harness.Context) error {
 					projectDir := ctx.GetString("project_dir")
 
-					cmd := ctx.Command(nbBin, "new", "--type", "meetings", "--no-edit", "Daily Standup").Dir(projectDir)
+					cmd := ctx.Bin("new", "--type", "meetings", "--no-edit", "Daily Standup").Dir(projectDir)
 					result := cmd.Run()
 					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 					if result.Error != nil {
@@ -88,7 +80,7 @@ notebooks:
 					if err != nil {
 						return err
 					}
-					if err := assert.Equal(1, len(files), "expected one note file in meetings dir"); err != nil {
+					if err := ctx.Check("one note file in meetings dir", assert.Equal(1, len(files))); err != nil {
 						return err
 					}
 
@@ -98,23 +90,15 @@ notebooks:
 						return err
 					}
 
-					// Verify the note has proper frontmatter
-					if err := assert.Contains(content, "title: Daily Standup", "frontmatter should contain the title"); err != nil {
-						return err
-					}
-					return assert.Contains(content, "# Daily Standup", "body should contain the h1 heading")
-				},
-			},
-			{
-				Name: "Verify listing of all file types",
-				Func: func(ctx *harness.Context) error {
-					nbBin, err := findProjectBinary()
-					if err != nil {
-						return err
-					}
+					return ctx.Verify(func(v *verify.Collector) {
+						v.Contains("frontmatter contains the title", content, "title: Daily Standup")
+						v.Contains("body contains the h1 heading", content, "# Daily Standup")
+					})
+				}),
+			harness.NewStep("Verify listing of all file types", func(ctx *harness.Context) error {
 					projectDir := ctx.GetString("project_dir")
 
-					cmd := ctx.Command(nbBin, "list", "--all", "--json").Dir(projectDir)
+					cmd := ctx.Bin("list", "--all", "--json").Dir(projectDir)
 					result := cmd.Run()
 					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 					if result.Error != nil {
@@ -126,7 +110,7 @@ notebooks:
 						return fmt.Errorf("failed to parse json output: %w", err)
 					}
 
-					if err := assert.Equal(2, len(notes), "expected two files to be listed"); err != nil {
+					if err := ctx.Check("two files were listed", assert.Equal(2, len(notes))); err != nil {
 						return err
 					}
 
@@ -148,31 +132,23 @@ notebooks:
 
 					// Assert markdown note properties
 					match, _ := regexp.MatchString(`\d{8}-daily-standup.md`, mdNote["title"].(string))
-					if err := assert.True(match, "markdown note title should be the filename"); err != nil {
+					if err := ctx.Check("markdown note title is the filename", assert.True(match)); err != nil {
 						return err
 					}
-					if err := assert.Equal("Daily Standup", mdNote["frontmatter_title"].(string), "markdown note frontmatter_title is incorrect"); err != nil {
+					if err := ctx.Check("markdown note frontmatter_title is correct", assert.Equal("Daily Standup", mdNote["frontmatter_title"].(string))); err != nil {
 						return err
 					}
 
-					// Assert text file properties
-					if err := assert.Equal("plain.txt", txtNote["title"].(string), "text note title should be filename"); err != nil {
-						return err
-					}
-					return assert.Equal("txt", txtNote["type"].(string), "text note type should be file extension")
-				},
-			},
-			{
-				Name: "Verify shell completion for dynamic types",
-				Func: func(ctx *harness.Context) error {
-					nbBin, err := findProjectBinary()
-					if err != nil {
-						return err
-					}
+					return ctx.Verify(func(v *verify.Collector) {
+						v.Equal("text note title is filename", "plain.txt", txtNote["title"].(string))
+						v.Equal("text note type is file extension", "txt", txtNote["type"].(string))
+					})
+				}),
+			harness.NewStep("Verify shell completion for dynamic types", func(ctx *harness.Context) error {
 					projectDir := ctx.GetString("project_dir")
 
 					// Using cobra's __complete command
-					cmd := ctx.Command(nbBin, "__complete", "new", "--type", "").Dir(projectDir)
+					cmd := ctx.Bin("__complete", "new", "--type", "").Dir(projectDir)
 					result := cmd.Run()
 					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 					if result.Error != nil {
@@ -181,9 +157,8 @@ notebooks:
 
 					// Output contains completions, one per line
 					// The format is just the completion values separated by newlines
-					return assert.Contains(result.Stdout, "meetings", "shell completion should offer 'meetings'")
-				},
-			},
+					return ctx.Check("shell completion offers 'meetings'", assert.Contains(result.Stdout, "meetings"))
+				}),
 		},
-	}
+	)
 }

@@ -102,9 +102,22 @@ build-all:
 # Build the custom tend binary for grove-notebook E2E tests.
 # Run E2E tests. Depends on the main 'nb' binary and the test runner.
 # Pass arguments via ARGS, e.g., make test-e2e ARGS="run -i"
-test-e2e: build
+test-e2e: build build-e2e-mocks
 	@echo "Running E2E tests..."
 	@tend run $(ARGS)
+
+E2E_MOCK_SRC=tests/e2e/mocks/src
+E2E_MOCK_BIN=tests/e2e/tend/mocks/bin
+
+build-e2e-mocks:
+	@echo "Building E2E mocks..."
+	@if [ -d "$(E2E_MOCK_SRC)" ]; then \
+		mkdir -p $(E2E_MOCK_BIN); \
+		for mock in $$(ls $(E2E_MOCK_SRC)); do \
+			echo "  -> Building mock-$$mock..."; \
+			$(GO) build -o $(E2E_MOCK_BIN)/mock-$$mock ./$(E2E_MOCK_SRC)/$$mock; \
+		done; \
+	fi
 
 # Help
 help:
@@ -121,3 +134,4 @@ help:
 	@echo "  make lint           - Run the linter"
 	@echo "  make build-all      - Build for multiple platforms"
 	@echo "  make test-e2e ARGS=...- Run E2E tests (e.g., ARGS=\"run -i notebook-centralized-structure\")"
+	@echo "  make build-e2e-mocks - Build mock binaries for E2E tests"

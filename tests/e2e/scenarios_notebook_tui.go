@@ -18,14 +18,12 @@ import (
 // filename vs frontmatter title) is comprehensively tested in notebook-file-browser-mode.
 // This test validates that the TUI integrates correctly with these features.
 func NotebookTUIScenario() *harness.Scenario {
-	return &harness.Scenario{
-		Name:        "notebook-tui-navigation-and-filtering",
-		Description: "Verifies 'nb tui' integrates with flexible-note-structure and displays custom content.",
-		Tags:        []string{"notebook", "tui"},
-		Steps: []harness.Step{
-			{
-				Name: "Setup test environment with custom directories and generic files",
-				Func: func(ctx *harness.Context) error {
+	return harness.NewScenario(
+		"notebook-tui-navigation-and-filtering",
+		"Verifies 'nb tui' integrates with flexible-note-structure and displays custom content.",
+		[]string{"notebook", "tui"},
+		[]harness.Step{
+			harness.NewStep("Setup test environment with custom directories and generic files", func(ctx *harness.Context) error {
 					// Setup centralized notebook config without any defined note types
 					// NOTE: Use absolute path because tilde expansion has issues with dot-prefixed dirs
 					notebookRoot := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb")
@@ -99,11 +97,8 @@ Some thoughts on the topic.`
 					}
 
 					return nil
-				},
-			},
-			{
-				Name: "Launch TUI and verify navigation, filtering, and content display",
-				Func: func(ctx *harness.Context) error {
+				}),
+			harness.NewStep("Launch TUI and verify navigation, filtering, and content display", func(ctx *harness.Context) error {
 					projectDir := ctx.GetString("project_dir")
 					nbBin, err := findProjectBinary()
 					if err != nil {
@@ -111,7 +106,7 @@ Some thoughts on the topic.`
 					}
 
 					// First verify notes exist using nb list
-					cmd := ctx.Command(nbBin, "list", "--all").Dir(projectDir)
+					cmd := ctx.Bin("list", "--all").Dir(projectDir)
 					result := cmd.Run()
 					ctx.ShowCommandOutput("nb list --all output", result.Stdout, result.Stderr)
 
@@ -142,7 +137,7 @@ Some thoughts on the topic.`
 					// The core fix was to the path parsing. The TUI integration is complex.
 					// Let's verify the service layer works correctly by checking nb list output
 					// and confirm TUI launches without errors
-					if assert.Contains(result.Stdout, "standup", "should find standup note") != nil {
+					if err := ctx.Check("nb list found standup note", assert.Contains(result.Stdout, "standup")); err != nil {
 						return fmt.Errorf("nb list did not find expected notes - path parsing may still be broken")
 					}
 
@@ -151,14 +146,13 @@ Some thoughts on the topic.`
 					// 2. nb list finds them (proven above)
 					// 3. TUI launches without errors (proven by reaching here)
 					// 4. Breadcrumb shows correct workspace context
-					if err := assert.Contains(initialView, "tui-project", "breadcrumb should show project"); err != nil {
+					if err := ctx.Check("breadcrumb shows project", assert.Contains(initialView, "tui-project")); err != nil {
 						return err
 					}
 
 					session.SendKeys("q")
 					return nil
-				},
-			},
+				}),
 		},
-	}
+	)
 }
