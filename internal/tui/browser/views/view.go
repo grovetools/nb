@@ -362,12 +362,68 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 
 // styleNodeContent applies styling to the main content (name/title) of a node.
 func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
-	// Style the indicator (icon) separately
+	// Style the indicator (icon) separately with semantic colors
 	styledIndicator := info.indicator
-	if info.isGroup && !info.isArchived && !info.isArtifact && info.indicator == theme.IconFolder {
-		// Color generic directory icons cyan (light blue)
-		iconStyle := lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Cyan)
-		styledIndicator = iconStyle.Render(info.indicator)
+
+	// Color icons for groups and plans
+	if (info.isGroup || info.isPlan) && !info.isArchived && !info.isArtifact && info.indicator != "" {
+		var iconColor lipgloss.TerminalColor
+		applyColor := false
+
+		switch info.name {
+		case "issues", "github-issues":
+			// Issue groups use red (error color)
+			iconColor = theme.DefaultTheme.Colors.Red
+			applyColor = true
+		case "inbox", "docs", "learn":
+			// Workflow groups use orange (bright yellow in terminal theme)
+			iconColor = theme.DefaultTheme.Colors.Orange
+			applyColor = true
+		case "in_progress":
+			// In progress uses blue like plans (will be italicized below)
+			iconColor = theme.DefaultTheme.Colors.Blue
+			applyColor = true
+		case "review", "github-prs":
+			// Review groups use pink
+			iconColor = theme.DefaultTheme.Colors.Pink
+			applyColor = true
+		case "completed":
+			// Completed uses green
+			iconColor = theme.DefaultTheme.Colors.Green
+			applyColor = true
+		case "plans":
+			// Plans uses blue
+			iconColor = theme.DefaultTheme.Colors.Blue
+			applyColor = true
+		default:
+			if info.isPlan {
+				// Individual plans use blue
+				iconColor = theme.DefaultTheme.Colors.Blue
+				applyColor = true
+			} else if info.indicator == theme.IconFolder {
+				// Generic directory icons use cyan
+				iconColor = theme.DefaultTheme.Colors.Cyan
+				applyColor = true
+			}
+		}
+
+		if applyColor {
+			styledIndicator = lipgloss.NewStyle().Foreground(iconColor).Render(info.indicator)
+		}
+	} else if info.note != nil && info.indicator != "" && info.indicator != "■" {
+		// Color note icons based on their group
+		var iconColor lipgloss.TerminalColor
+		applyColor := false
+
+		// Notes in in_progress that are linked to plans get blue icons
+		if info.note.Group == "in_progress" && info.note.PlanRef != "" {
+			iconColor = theme.DefaultTheme.Colors.Blue
+			applyColor = true
+		}
+
+		if applyColor {
+			styledIndicator = lipgloss.NewStyle().Foreground(iconColor).Render(info.indicator)
+		}
 	}
 
 	// Build base content string with styled indicator
@@ -396,35 +452,24 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 			style = style.Foreground(theme.DefaultTheme.Colors.Violet)
 		}
 	} else if info.isPlan {
-		// Individual plans are blue
-		style = style.Foreground(theme.DefaultTheme.Colors.Blue)
+		// Individual plans are italic with default text color
+		style = style.Italic(true)
 	} else if info.isGroup && info.name == "plans" {
-		// Plans heading is bold blue
-		style = style.Bold(true).Foreground(theme.DefaultTheme.Colors.Blue)
+		// Plans heading is italic with default text color
+		style = style.Italic(true)
+	} else if info.isGroup && info.name == "in_progress" {
+		// In progress heading is italic with default text color
+		style = style.Italic(true)
 	}
 
-	// 3. Apply special group colors
-	if info.isGroup && info.name == "in_progress" {
-		// In progress heading is bold yellow
-		style = style.Bold(true).Foreground(theme.DefaultTheme.Colors.Yellow)
-	} else if info.note != nil && info.note.Group == "in_progress" {
-		// Notes in the in_progress group should also be yellow
-		style = style.Foreground(theme.DefaultTheme.Colors.Yellow)
-	} else if info.isGroup && info.name == "completed" {
-		style = style.Foreground(theme.DefaultTheme.Colors.Green)
-	} else if info.note != nil && info.note.Group == "completed" {
-		// Notes in the completed group should also be green
-		style = style.Foreground(theme.DefaultTheme.Colors.Green)
-	} else if info.isGroup && info.name == "review" {
-		// Review heading is bold magenta
-		style = style.Bold(true).Foreground(theme.DefaultTheme.Colors.Pink)
-	} else if info.note != nil && info.note.Group == "review" {
-		// Notes in the review group should also be pink (magenta)
+	// 3. Apply special group colors (only for text, icons are colored separately)
+	// Note: Icons are already colored in the icon styling section above
+	// Here we only color the group names themselves if needed for special emphasis
+	if info.note != nil && info.note.Group == "review" {
+		// Notes in the review group use pink text
 		style = style.Foreground(theme.DefaultTheme.Colors.Pink)
-	} else if info.isGroup && !info.isArchived && !info.isArtifact && info.indicator == theme.IconFolder {
-		// Generic directory groups use cyan (light blue) for text
-		style = style.Foreground(theme.DefaultTheme.Colors.Cyan)
 	}
+	// Notes in completed group use default text color (only icon is green)
 
 	// 4. Apply state modifiers
 	if info.note != nil {

@@ -498,43 +498,58 @@ func (m *Model) BuildDisplayTree() {
 					regularGroups = append(regularGroups, name)
 				}
 			}
-			// Custom sort for regular groups
-			groupOrder := map[string]int{
-				"inbox":       1,
-				"issues":      2,
-				"docs":        3,
-				"in_progress": 4,
-				"review":      5,
-			}
-
-			// Extract completed group to render it after plans
+			// NEW: Categorize groups for workflow-based sorting
+			var workflowGroups, plainGroups, executionGroups, reviewGroups []string
 			var completedGroup string
 			var hasCompleted bool
-			var filteredRegularGroups []string
+
+			// Separate regular groups from special ones
 			for _, name := range regularGroups {
-				if name == "completed" {
+				switch name {
+				case "inbox", "issues", "github-issues", "docs", "learn":
+					workflowGroups = append(workflowGroups, name)
+				case "in_progress":
+					executionGroups = append(executionGroups, name)
+				case "review", "github-prs":
+					reviewGroups = append(reviewGroups, name)
+				case "completed":
 					completedGroup = name
 					hasCompleted = true
-				} else {
-					filteredRegularGroups = append(filteredRegularGroups, name)
+				default:
+					plainGroups = append(plainGroups, name)
 				}
 			}
-			regularGroups = filteredRegularGroups
 
-			sort.Slice(regularGroups, func(i, j int) bool {
-				orderA, okA := groupOrder[regularGroups[i]]
+			// Sort workflow groups with specific order (intake first, then issue tracking)
+			workflowOrder := map[string]int{
+				"inbox":         1,
+				"issues":        2,
+				"github-issues": 3,
+				"docs":          4,
+				"learn":         5,
+			}
+			sort.Slice(workflowGroups, func(i, j int) bool {
+				orderA, okA := workflowOrder[workflowGroups[i]]
+				orderB, okB := workflowOrder[workflowGroups[j]]
 				if !okA {
-					orderA = 99 // Put unknown groups at the end
+					orderA = 99
 				}
-				orderB, okB := groupOrder[regularGroups[j]]
 				if !okB {
 					orderB = 99
 				}
 				if orderA == orderB {
-					return regularGroups[i] < regularGroups[j] // Alphabetical fallback
+					return workflowGroups[i] < workflowGroups[j]
 				}
 				return orderA < orderB
 			})
+
+			// Sort other categories alphabetically
+			sort.Strings(plainGroups)
+			sort.Strings(executionGroups)
+			sort.Strings(reviewGroups)
+
+			// Combine workflow and plain groups for the first rendering block
+			topLevelGroups := append(workflowGroups, plainGroups...)
 
 			// Check if we have plans to add a "plans" parent group
 			hasPlans := len(planGroups) > 0 || len(archiveSubgroups["plans"]) > 0
@@ -550,47 +565,69 @@ func (m *Model) BuildDisplayTree() {
 				totalGroups++
 			}
 
-			// NEW: Build and render tree for regular groups
-			if len(regularGroups) > 0 {
-				notesRootDir, err := m.service.GetNotebookLocator().GetNotesDir(ws, "")
-				if err == nil { // Proceed only if we can determine the root
-					rootGroupNode := buildGroupTree(noteGroups, regularGroups)
-					hasFollowingTopLevelSiblings := hasPlans || hasHoldPlans || hasCompleted
-
-					var initialPrefix strings.Builder
-					indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
-					indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
-					initialPrefix.WriteString(indentPrefix)
-					if ws.Depth > 0 || ws.TreePrefix != "" {
-						initialPrefix.WriteString("  ")
-					}
-
+			// Render groups in the desired order
+			notesRootDir, err := m.service.GetNotebookLocator().GetNotesDir(ws, "")
+			if err == nil { // Proceed only if we can get the notes root directory
+				// 1. Render Workflow and Plain Groups
+				if len(topLevelGroups) > 0 {
+					rootGroupNode := buildGroupTree(noteGroups, topLevelGroups)
+					hasFollowingTopLevelSiblings := hasPlans || hasHoldPlans || len(executionGroups) > 0 || len(reviewGroups) > 0 || hasCompleted
 					config := treeRenderConfig{
-					itemType:            tree.TypeGroup,
-					groupMetadataPrefix: "",
-					nameUsesPrefix:      false,
-					includeArchives:     true,
-					includeClosed:       true,
-					includeArtifacts:    true,
+						itemType:            tree.TypeGroup,
+						groupMetadataPrefix: "",
+						nameUsesPrefix:      false,
+						includeArchives:     true,
+						includeClosed:       true,
+						includeArtifacts:    true,
+					}
+					m.renderTree(&nodes, ws, rootGroupNode, ws.TreePrefix+"  ", ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, config, hasFollowingTopLevelSiblings, archiveSubgroups, closedSubgroups, artifactSubgroups)
 				}
-				m.renderTree(&nodes, ws, rootGroupNode, initialPrefix.String(), ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, config, hasFollowingTopLevelSiblings, archiveSubgroups, closedSubgroups, artifactSubgroups)
+
+				// 2. Render Plans Group
+				if hasPlans {
+					hasGroupsAfter := hasHoldPlans || len(executionGroups) > 0 || len(reviewGroups) > 0 || hasCompleted
+					m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, artifactSubgroups, hasSearchFilter, workspacePathMap, hasGroupsAfter)
 				}
-			}
 
-			// Add "plans" parent group if there are any plans
-			if hasPlans {
-				hasGroupsAfter := hasHoldPlans || hasCompleted
-				m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, artifactSubgroups, hasSearchFilter, workspacePathMap, hasGroupsAfter)
-			}
+				// 3. Render Execution Groups (in_progress)
+				if len(executionGroups) > 0 {
+					rootGroupNode := buildGroupTree(noteGroups, executionGroups)
+					hasFollowingTopLevelSiblings := hasHoldPlans || len(reviewGroups) > 0 || hasCompleted
+					config := treeRenderConfig{
+						itemType:            tree.TypeGroup,
+						groupMetadataPrefix: "",
+						nameUsesPrefix:      false,
+						includeArchives:     true,
+						includeClosed:       true,
+						includeArtifacts:    true,
+					}
+					m.renderTree(&nodes, ws, rootGroupNode, ws.TreePrefix+"  ", ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, config, hasFollowingTopLevelSiblings, archiveSubgroups, closedSubgroups, artifactSubgroups)
+				}
 
-			// Add ".hold" parent group if there are any on-hold plans
-			if hasHoldPlans {
-				m.addHoldPlansGroup(&nodes, ws, holdPlanGroups, hasSearchFilter, workspacePathMap, hasCompleted)
-			}
+				// 4. Render Review Groups
+				if len(reviewGroups) > 0 {
+					rootGroupNode := buildGroupTree(noteGroups, reviewGroups)
+					hasFollowingTopLevelSiblings := hasHoldPlans || hasCompleted
+					config := treeRenderConfig{
+						itemType:            tree.TypeGroup,
+						groupMetadataPrefix: "",
+						nameUsesPrefix:      false,
+						includeArchives:     true,
+						includeClosed:       true,
+						includeArtifacts:    true,
+					}
+					m.renderTree(&nodes, ws, rootGroupNode, ws.TreePrefix+"  ", ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, config, hasFollowingTopLevelSiblings, archiveSubgroups, closedSubgroups, artifactSubgroups)
+				}
 
-			// Add "completed" group if it exists (after plans)
-			if hasCompleted {
-				m.addCompletedGroup(&nodes, ws, noteGroups[completedGroup], archiveSubgroups, hasSearchFilter, workspacePathMap)
+				// 5. Render On-Hold Plans
+				if hasHoldPlans {
+					m.addHoldPlansGroup(&nodes, ws, holdPlanGroups, hasSearchFilter, workspacePathMap, hasCompleted)
+				}
+
+				// 6. Render Completed Group
+				if hasCompleted {
+					m.addCompletedGroup(&nodes, ws, noteGroups[completedGroup], archiveSubgroups, hasSearchFilter, workspacePathMap)
+				}
 			}
 		}
 
@@ -1617,6 +1654,8 @@ func (m *Model) renderTree(
 }
 
 // buildGroupTree builds an in-memory tree from a flat list of group paths.
+// It preserves the order of top-level groups as passed in regularGroups,
+// but sorts nested children alphabetically.
 func buildGroupTree(noteGroups map[string][]*models.Note, regularGroups []string) *groupTreeNode {
 	root := newGroupTreeNode("", "")
 	for _, groupName := range regularGroups {
@@ -1634,14 +1673,17 @@ func buildGroupTree(noteGroups map[string][]*models.Note, regularGroups []string
 	}
 
 	// Sort child keys at each level for consistent rendering order
-	var sortNodes func(*groupTreeNode)
-	sortNodes = func(n *groupTreeNode) {
-		sort.Strings(n.childKeys)
+	// BUT preserve the top-level order (root.childKeys should not be sorted)
+	var sortNodes func(*groupTreeNode, bool)
+	sortNodes = func(n *groupTreeNode, isRoot bool) {
+		if !isRoot {
+			sort.Strings(n.childKeys)
+		}
 		for _, child := range n.children {
-			sortNodes(child)
+			sortNodes(child, false)
 		}
 	}
-	sortNodes(root)
+	sortNodes(root, true)
 
 	return root
 }

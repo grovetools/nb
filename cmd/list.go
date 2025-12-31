@@ -264,6 +264,8 @@ func getNoteTypeIcon(noteType models.NoteType) string {
 		return theme.IconCalendar
 	case "issues":
 		return theme.IconIssueOpened
+	case "github-prs":
+		return theme.IconPullRequest
 	case "architecture":
 		return theme.IconArchitecture
 	case "todos":
@@ -293,6 +295,8 @@ func getTypeAbbreviation(noteType models.NoteType) string {
 		return "dly"
 	case "issues":
 		return "iss"
+	case "github-prs":
+		return "prs"
 	case "architecture":
 		return "arc"
 	case "todos":
