@@ -40,61 +40,60 @@ func (m *Model) View() string {
 	return m.renderTableView()
 }
 
-// recomputePrefixes recalculates tree prefixes for the currently visible nodes.
-// This ensures the tree lines (│, ├─, └─) are drawn correctly for the current view.
+// recomputePrefixes recalculates tree prefixes to match the neotree style.
 func (m *Model) recomputePrefixes(nodes []*DisplayNode) {
-	if len(nodes) == 0 {
-		return
-	}
-
-	// Track if an ancestor at each depth is the last in its sibling group
-	ancestorIsLast := make(map[int]bool)
+	// A map to track if the node at a given depth is the last in its peer group.
+	lastNodeAtDepth := make(map[int]bool)
 
 	for i, node := range nodes {
-		if node.Item == nil { // Skip separators
+		if node.Item == nil { // Skip separators.
 			continue
 		}
 
-		depth := node.Depth
 		var prefixBuilder strings.Builder
+		depth := node.Depth
 
-		// Build the prefix from │ and spaces based on ancestors' status
+		// Build the prefix from ancestor lines.
 		for d := 0; d < depth; d++ {
-			if ancestorIsLast[d] {
-				prefixBuilder.WriteString("  ") // Ancestor was last, so no vertical line (2 chars)
+			if lastNodeAtDepth[d] {
+				prefixBuilder.WriteString("  ") // Ancestor was last, so no vertical line.
 			} else {
-				prefixBuilder.WriteString("│ ") // Ancestor was not last, draw vertical line (2 chars)
+				prefixBuilder.WriteString("│ ") // Ancestor was not last, so draw vertical line.
 			}
 		}
 
-		// Determine if the current node is the last sibling at its depth
+		// Determine if the current node is the last among its direct siblings.
 		isLast := true
 		for j := i + 1; j < len(nodes); j++ {
 			if nodes[j].Item == nil {
 				continue
 			}
 			if nodes[j].Depth < depth {
-				// We've moved to a shallower depth, so this was the last
-				break
+				break // We've moved to a shallower depth, so this was the last.
 			}
 			if nodes[j].Depth == depth {
-				// Found another node at the same depth
-				isLast = false
+				isLast = false // Found a sibling at the same depth.
 				break
 			}
 		}
 
-		// Add the final branch character
-		if depth > 0 { // Don't add branch characters to root-level nodes
+		// Add the final branch character for the current node itself.
+		if depth > 0 {
 			if isLast {
-				prefixBuilder.WriteString("└ ") // 2 chars (no horizontal dash)
+				prefixBuilder.WriteString("└ ")
 			} else {
-				prefixBuilder.WriteString("├ ") // 2 chars (no horizontal dash)
+				prefixBuilder.WriteString("│ ")
 			}
 		}
 
-		ancestorIsLast[depth] = isLast
 		node.Prefix = prefixBuilder.String()
+
+		// Update the status for the current depth.
+		lastNodeAtDepth[depth] = isLast
+		// Invalidate deeper levels.
+		for d := depth + 1; d < len(lastNodeAtDepth); d++ {
+			delete(lastNodeAtDepth, d)
+		}
 	}
 }
 

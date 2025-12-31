@@ -355,7 +355,7 @@ func (m *Model) BuildDisplayTree() {
 		wsItem := &tree.Item{
 			Path:     ws.Path,
 			Name:     ws.Name,
-			IsDir:    ws.Name != "global", // Global is not a directory, so it won't show folding icon
+			IsDir:    true, // All workspaces, including global, are foldable directories
 			Type:     tree.TypeWorkspace,
 			Metadata: make(map[string]interface{}),
 		}
@@ -1182,7 +1182,7 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 			includeArchives:     false,
 			includeClosed:       false,
 		}
-		m.renderTree(nodes, ws, planTree, plansPrefix.String(), ws.Depth+1, hasSearchFilter, workspacePathMap, plansDir, config, hasPlansArchive, nil, nil, artifactSubgroups)
+		m.renderTree(nodes, ws, planTree, plansPrefix.String(), ws.Depth+2, hasSearchFilter, workspacePathMap, plansDir, config, hasPlansArchive, nil, nil, artifactSubgroups)
 
 		// Add .archive parent group if there are archived children
 		if hasPlansArchive {
