@@ -29,6 +29,9 @@ type DisplayNode struct {
 
 // NodeID returns a unique identifier for this node (for tracking collapsed state).
 func (n *DisplayNode) NodeID() string {
+	if n.Item == nil {
+		return "separator"
+	}
 	if n.Item.IsDir {
 		return "dir:" + n.Item.Path
 	}
@@ -37,12 +40,12 @@ func (n *DisplayNode) NodeID() string {
 
 // IsFoldable returns true if this node can be collapsed/expanded.
 func (n *DisplayNode) IsFoldable() bool {
-	return n.Item.IsDir
+	return n.Item != nil && n.Item.IsDir
 }
 
 // GroupKey returns a unique key for this group (for selection tracking).
 func (n *DisplayNode) GroupKey() string {
-	if n.Item.Type == tree.TypeGroup || n.Item.Type == tree.TypePlan {
+	if n.Item != nil && (n.Item.Type == tree.TypeGroup || n.Item.Type == tree.TypePlan) {
 		if wsName, ok := n.Item.Metadata["Workspace"].(string); ok {
 			return wsName + ":" + n.Item.Name
 		}
@@ -52,7 +55,7 @@ func (n *DisplayNode) GroupKey() string {
 
 // IsPlan returns true if this item represents a plan directory.
 func (n *DisplayNode) IsPlan() bool {
-	return n.Item.Type == tree.TypePlan
+	return n.Item != nil && n.Item.Type == tree.TypePlan
 }
 
 // Helper methods for backward compatibility during refactoring
@@ -308,7 +311,7 @@ func (m *Model) clampCursor() {
 func (m *Model) GetCounts() (noteCount, selectedNotes, selectedPlans int) {
 	// Count notes in display nodes (files, not directories)
 	for _, node := range m.displayNodes {
-		if !node.Item.IsDir {
+		if node.Item != nil && !node.Item.IsDir {
 			noteCount++
 		}
 	}

@@ -135,7 +135,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Toggle selection for the current note or plan group
 			if m.cursor < len(m.displayNodes) {
 				node := m.displayNodes[m.cursor]
-				if !node.Item.IsDir {
+				if node.Item != nil && !node.Item.IsDir {
 					// It's a note (file)
 					if _, ok := m.selected[node.Item.Path]; ok {
 						delete(m.selected, node.Item.Path)
@@ -2218,6 +2218,11 @@ func (m *Model) ApplyLinks() {
 	for _, node := range m.displayNodes {
 		// Reset any previous links
 		node.LinkedNode = nil
+
+		// Skip separator nodes, which have a nil Item.
+		if node.Item == nil {
+			continue
+		}
 
 		if !node.Item.IsDir && node.Item.Type == tree.TypeNote {
 			// Check if this note has a plan_ref
