@@ -184,11 +184,13 @@ func (m *Model) adjustScroll() {
 func (m *Model) BuildDisplayTree() {
 	if m.recentNotesMode {
 		m.buildRecentNotesList()
+		m.ApplyLinks()
 		return
 	}
 
 	if m.isFilteringByTag && m.selectedTag != "" {
 		m.buildTagFilteredTree()
+		m.ApplyLinks()
 		return
 	}
 
@@ -609,6 +611,7 @@ func (m *Model) BuildDisplayTree() {
 	}
 
 	m.displayNodes = nodes
+	m.ApplyLinks()
 	m.clampCursor()
 }
 

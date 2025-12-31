@@ -47,7 +47,6 @@ func (m *Model) updateViewsState() {
 		m.recentNotesMode,
 	)
 	m.views.BuildDisplayTree()
-	m.views.ApplyLinks() // Apply note-plan links to the display tree
 
 	// Apply text filter if present (not grep mode and not tag filter mode)
 	if m.filterInput.Value() != "" && !m.isGrepping && !m.isFilteringByTag {
