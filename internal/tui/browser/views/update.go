@@ -2139,3 +2139,52 @@ func noteToItem(note *models.Note) *tree.Item {
 
 	return item
 }
+
+// ApplyLinks iterates through the display nodes to find and link notes with their corresponding plans.
+func (m *Model) ApplyLinks() {
+	notesWithPlanRef := make(map[string]*DisplayNode)
+	planNodes := make(map[string]*DisplayNode)
+
+	// First pass: collect all notes with plan references and all plan nodes.
+	for _, node := range m.displayNodes {
+		// Reset any previous links
+		node.LinkedNode = nil
+
+		if !node.Item.IsDir && node.Item.Type == tree.TypeNote {
+			// Check if this note has a plan_ref
+			if planRef, ok := node.Item.Metadata["PlanRef"].(string); ok && planRef != "" {
+				// Extract workspace name
+				workspace := ""
+				if ws, ok := node.Item.Metadata["Workspace"].(string); ok {
+					workspace = ws
+				}
+				// Key by workspace + plan_ref for uniqueness
+				key := fmt.Sprintf("%s:%s", workspace, planRef)
+				notesWithPlanRef[key] = node
+			}
+		} else if node.Item.IsDir && node.Item.Type == tree.TypePlan {
+			// This is a plan directory
+			workspace := ""
+			if ws, ok := node.Item.Metadata["Workspace"].(string); ok {
+				workspace = ws
+			}
+			// Extract the group name (e.g., "plans/my-feature")
+			group := ""
+			if g, ok := node.Item.Metadata["Group"].(string); ok {
+				group = g
+			}
+			// Key by workspace + group_name
+			key := fmt.Sprintf("%s:%s", workspace, group)
+			planNodes[key] = node
+		}
+	}
+
+	// Second pass: connect the notes and plans.
+	for key, noteNode := range notesWithPlanRef {
+		if planNode, ok := planNodes[key]; ok {
+			// Found a match, create the bidirectional link.
+			noteNode.LinkedNode = planNode
+			planNode.LinkedNode = noteNode
+		}
+	}
+}

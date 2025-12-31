@@ -814,11 +814,30 @@ func (s *Service) ListAllItems(ctx *WorkspaceContext, includeArchived bool, incl
 					// Set Group from directory path for grouping in UI
 					relPath, _ := filepath.Rel(contentDir.Path, path)
 					parts := strings.Split(filepath.ToSlash(relPath), "/")
-					group := ""
-					if len(parts) > 1 {
-						group = strings.Join(parts[:len(parts)-1], "/")
+
+					switch contentDir.Type {
+					case "plans":
+						var group string
+						if len(parts) > 1 {
+							group = strings.Join(parts[:len(parts)-1], "/")
+						}
+						item.Metadata["Group"] = "plans/" + group
+					case "chats":
+						var group string
+						if len(parts) > 1 {
+							group = strings.Join(parts[:len(parts)-1], "/")
+						}
+						item.Metadata["Group"] = "chats/" + group
+					case "notes":
+						var group string
+						if len(parts) > 1 {
+							group = strings.Join(parts[:len(parts)-1], "/")
+						} else if len(parts) == 1 {
+							// A file at the root of a notes directory is considered 'quick'
+							group = "quick"
+						}
+						item.Metadata["Group"] = group
 					}
-					item.Metadata["Group"] = group
 
 					items = append(items, item)
 				}

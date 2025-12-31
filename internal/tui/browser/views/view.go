@@ -326,21 +326,33 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		}
 	}
 
-	// TODO: Add link suffix if the node is linked (LinkedNode field needs to be added to DisplayNode)
-	// if node.LinkedNode != nil {
-	// 	if node.IsNote() {
-	// 		// Note -> Plan: [plan: → plan-name]
-	// 		planName := strings.TrimPrefix(node.LinkedNode.GroupName, "plans/")
-	// 		italicStyle := lipgloss.NewStyle().Italic(true)
-	// 		prefix := italicStyle.Render("plan:")
-	// 		info.suffix = fmt.Sprintf(" [%s → %s]", prefix, planName)
-	// 	} else if node.IsPlan() {
-	// 		// Plan -> Note: [note: ← Note Title]
-	// 		italicStyle := lipgloss.NewStyle().Italic(true)
-	// 		prefix := italicStyle.Render("note:")
-	// 		info.suffix = fmt.Sprintf(" [%s ← %s]", prefix, node.LinkedNode.Note.Title)
-	// 	}
-	// }
+	// Add link suffix if the node is linked
+	if node.LinkedNode != nil {
+		if node.IsNote() {
+			// Note -> Plan: [plan: → plan-name]
+			linkedGroup := ""
+			if g, ok := node.LinkedNode.Item.Metadata["Group"].(string); ok {
+				linkedGroup = g
+			}
+			planName := strings.TrimPrefix(linkedGroup, "plans/")
+			italicStyle := lipgloss.NewStyle().Italic(true)
+			prefix := italicStyle.Render("plan:")
+			info.suffix = fmt.Sprintf(" [%s → %s]", prefix, planName)
+		} else if node.IsPlan() {
+			// Plan -> Note: [note: ← Note Title]
+			linkedTitle := ""
+			if t, ok := node.LinkedNode.Item.Metadata["Title"].(string); ok {
+				linkedTitle = t
+			}
+			italicStyle := lipgloss.NewStyle().Italic(true)
+			prefix := italicStyle.Render("note:")
+			info.suffix = fmt.Sprintf(" [%s ← %s]", prefix, linkedTitle)
+		}
+	} else if node.IsNote() || node.IsPlan() {
+		// Debug: log when a note/plan has no link
+		// (remove this after debugging)
+		_ = node // suppress unused warning
+	}
 
 	return info
 }

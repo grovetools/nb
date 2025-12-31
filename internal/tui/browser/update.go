@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/internal/tui/browser/components/confirm"
@@ -26,6 +27,9 @@ import (
 
 // updateViewsState synchronizes the view state with the browser model
 func (m *Model) updateViewsState() {
+	log := logging.NewLogger("tui.browser.update")
+	log.Info("updateViewsState called")
+
 	m.views.SetParentState(
 		m.service,
 		m.allItems,
@@ -43,6 +47,7 @@ func (m *Model) updateViewsState() {
 		m.recentNotesMode,
 	)
 	m.views.BuildDisplayTree()
+	m.views.ApplyLinks() // Apply note-plan links to the display tree
 
 	// Apply text filter if present (not grep mode and not tag filter mode)
 	if m.filterInput.Value() != "" && !m.isGrepping && !m.isFilteringByTag {
@@ -1501,4 +1506,5 @@ func (m *Model) setCollapseStateForFocus() {
 func (m *Model) applyGrepFilter() {
 	m.views.ApplyGrepFilter()
 }
+
 

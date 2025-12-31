@@ -22,8 +22,9 @@ type DisplayNode struct {
 	Prefix       string
 	Depth        int
 	JumpKey      rune
-	ChildCount   int    // For groups: number of child items
-	RelativePath string // Shortened display path for notes
+	ChildCount   int           // For groups: number of child items
+	RelativePath string        // Shortened display path for notes
+	LinkedNode   *DisplayNode  // For notes, points to the plan node; for plans, points to the note node
 }
 
 // NodeID returns a unique identifier for this node (for tracking collapsed state).
