@@ -15,6 +15,23 @@ import (
 	"github.com/mattsolo1/grove-notebook/pkg/tree"
 )
 
+// groupTreeNode is a helper struct to build an in-memory tree of group paths.
+type groupTreeNode struct {
+	name      string
+	fullName  string // The full relative path for this node, e.g., "architecture/decisions"
+	children  map[string]*groupTreeNode
+	notes     []*models.Note
+	childKeys []string // For sorted iteration
+}
+
+func newGroupTreeNode(name, fullName string) *groupTreeNode {
+	return &groupTreeNode{
+		name:     name,
+		fullName: fullName,
+		children: make(map[string]*groupTreeNode),
+	}
+}
+
 // Update handles navigation, folding, and selection key events.
 // Returns updated model and any commands. Parent should handle other keys.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -521,94 +538,22 @@ func (m *Model) BuildDisplayTree() {
 				totalGroups++
 			}
 
-			for i, groupName := range regularGroups {
-				isLastGroup := i == len(regularGroups)-1 && !hasPlans && !hasHoldPlans && !hasCompleted
-				notesInGroup := noteGroups[groupName]
+			// NEW: Build and render tree for regular groups
+			if len(regularGroups) > 0 {
+				notesRootDir, err := m.service.GetNotebookLocator().GetNotesDir(ws, "")
+				if err == nil { // Proceed only if we can determine the root
+					rootGroupNode := buildGroupTree(noteGroups, regularGroups)
+					hasFollowingTopLevelSiblings := hasPlans || hasHoldPlans || hasCompleted
 
-				// Sort notes within the group
-				sort.SliceStable(notesInGroup, func(i, j int) bool {
-					if m.sortAscending {
-						return notesInGroup[i].CreatedAt.Before(notesInGroup[j].CreatedAt)
+					var initialPrefix strings.Builder
+					indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
+					indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+					initialPrefix.WriteString(indentPrefix)
+					if ws.Depth > 0 || ws.TreePrefix != "" {
+						initialPrefix.WriteString("  ")
 					}
-					return notesInGroup[i].CreatedAt.After(notesInGroup[j].CreatedAt)
-				})
 
-				// Calculate group prefix
-				var groupPrefix strings.Builder
-				indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
-				indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
-				groupPrefix.WriteString(indentPrefix)
-				if ws.Depth > 0 || ws.TreePrefix != "" {
-					groupPrefix.WriteString("  ")
-				}
-				if isLastGroup {
-					groupPrefix.WriteString("└─ ")
-				} else {
-					groupPrefix.WriteString("├─ ")
-				}
-
-				// Add group node
-				groupItem := &tree.Item{
-					Path:     filepath.Join(ws.Path, groupName),
-					Name:     groupName,
-					IsDir:    true,
-					Type:     tree.TypeGroup,
-					Metadata: make(map[string]interface{}),
-				}
-				groupItem.Metadata["Workspace"] = ws.Name
-				groupItem.Metadata["Group"] = groupName
-				groupNode := &DisplayNode{
-					Item:       groupItem,
-					Prefix:     groupPrefix.String(),
-					Depth:      ws.Depth + 1,
-					ChildCount: len(notesInGroup),
-				}
-				nodes = append(nodes, groupNode)
-
-				// Skip notes if group is collapsed (unless searching)
-				groupNodeID := groupNode.NodeID()
-				if m.collapsedNodes[groupNodeID] && !hasSearchFilter {
-					continue
-				}
-
-				// Check if this group has archived, closed, or artifact children
-				hasArchives := len(archiveSubgroups[groupName]) > 0 && m.showArchives
-				hasClosed := len(closedSubgroups[groupName]) > 0 && m.showArchives
-				hasArtifacts := len(artifactSubgroups[groupName]) > 0 && m.showArtifacts
-
-				// Add note nodes
-				for j, note := range notesInGroup {
-					isLastNote := j == len(notesInGroup)-1 && !hasArchives && !hasClosed && !hasArtifacts
-					var notePrefix strings.Builder
-					noteIndent := strings.ReplaceAll(groupPrefix.String(), "├─", "│ ")
-					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
-					notePrefix.WriteString(noteIndent)
-					if isLastNote {
-						notePrefix.WriteString("└─ ")
-					} else {
-						notePrefix.WriteString("├─ ")
-					}
-					nodes = append(nodes, &DisplayNode{
-						Item:   noteToItem(note),
-						Prefix: notePrefix.String(),
-						Depth:  ws.Depth + 2,
-				RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
-					})
-				}
-
-				// Add .archive subgroup if this group has archived children
-				if hasArchives {
-					m.addArchiveSubgroup(&nodes, ws, groupPrefix.String(), archiveSubgroups[groupName], hasSearchFilter, workspacePathMap)
-				}
-
-				// Add .closed subgroup if this group has closed children
-				if hasClosed {
-					m.addClosedSubgroup(&nodes, ws, groupPrefix.String(), closedSubgroups[groupName], hasSearchFilter, workspacePathMap)
-				}
-
-				// Add .artifacts subgroup if this group has artifact children
-				if hasArtifacts {
-					m.addArtifactSubgroup(&nodes, ws, groupPrefix.String(), artifactSubgroups[groupName], hasSearchFilter, workspacePathMap)
+					m.renderGroupTree(&nodes, ws, rootGroupNode, initialPrefix.String(), ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, archiveSubgroups, closedSubgroups, artifactSubgroups, hasFollowingTopLevelSiblings)
 				}
 			}
 
@@ -1152,84 +1097,21 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 	// Check if plans parent is collapsed (unless searching)
 	plansParentNodeID := plansParentNode.NodeID()
 	if !m.collapsedNodes[plansParentNodeID] || hasSearchFilter {
-		// Sort plan names
+		// Build tree structure for plans (same as regular groups)
 		var planNames []string
 		for planName := range planGroups {
 			planNames = append(planNames, planName)
 		}
-		sort.Strings(planNames)
 
-		// Add individual plan nodes
+		// Build hierarchical tree for plan names
+		planTree := buildGroupTree(planGroups, planNames)
 		hasPlansArchive := len(archiveSubgroups["plans"]) > 0 && m.showArchives
-		for pi, planName := range planNames {
-			isLastPlan := pi == len(planNames)-1 && !hasPlansArchive
-			planNotes := planGroups[planName]
 
-			// Sort notes within the plan
-			sort.SliceStable(planNotes, func(i, j int) bool {
-				if m.sortAscending {
-					return planNotes[i].CreatedAt.Before(planNotes[j].CreatedAt)
-				}
-				return planNotes[i].CreatedAt.After(planNotes[j].CreatedAt)
-			})
+		// Get the plans directory for absolute paths
+		plansDir := filepath.Join(ws.Path, "plans")
 
-			// Calculate plan prefix
-			var planPrefix strings.Builder
-			planIndent := strings.ReplaceAll(plansPrefix.String(), "├─", "│ ")
-			planIndent = strings.ReplaceAll(planIndent, "└─", "  ")
-			planPrefix.WriteString(planIndent)
-			if isLastPlan {
-				planPrefix.WriteString("└─ ")
-			} else {
-				planPrefix.WriteString("├─ ")
-			}
-
-			// Add plan node with status icon
-			planItem := &tree.Item{
-				Path:     filepath.Join(ws.Path, "plans/" + planName),
-				Name:     "plans/" + planName,
-				IsDir:    true,
-				Type:     tree.TypePlan,
-				Metadata: make(map[string]interface{}),
-			}
-			planItem.Metadata["Workspace"] = ws.Name
-			planItem.Metadata["Group"] = "plans/" + planName
-			planNode := &DisplayNode{
-				Item:       planItem,
-				Prefix:     planPrefix.String(),
-				Depth:      ws.Depth + 2,
-				ChildCount: len(planNotes),
-			}
-			*nodes = append(*nodes, planNode)
-
-			// Check if this plan is collapsed (unless searching)
-			planNodeID := planNode.NodeID()
-			if !m.collapsedNodes[planNodeID] || hasSearchFilter {
-				// Check if this plan has artifacts
-				planFullName := "plans/" + planName
-				hasPlanArtifacts := len(artifactSubgroups[planFullName]) > 0 && m.showArtifacts
-
-				// Add notes in this plan
-				for ni, note := range planNotes {
-					isLastNote := ni == len(planNotes)-1 && !hasPlanArtifacts
-					var notePrefix strings.Builder
-					noteIndent := strings.ReplaceAll(planPrefix.String(), "├─", "│ ")
-					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
-					notePrefix.WriteString(noteIndent)
-					if isLastNote {
-						notePrefix.WriteString("└─ ")
-					} else {
-						notePrefix.WriteString("├─ ")
-					}
-					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
-				}
-
-				// Add .artifacts subgroup if this plan has artifacts
-				if hasPlanArtifacts {
-					m.addArtifactSubgroup(nodes, ws, planPrefix.String(), artifactSubgroups[planFullName], hasSearchFilter, workspacePathMap)
-				}
-			}
-		}
+		// Render the plan tree hierarchically
+		m.renderPlanTree(nodes, ws, planTree, plansPrefix.String(), ws.Depth+1, hasSearchFilter, workspacePathMap, plansDir, artifactSubgroups, hasPlansArchive)
 
 		// Add .archive parent group if there are archived children
 		if hasPlansArchive {
@@ -1281,87 +1163,14 @@ func (m *Model) addPlansArchiveGroup(nodes *[]*DisplayNode, ws *workspace.Worksp
 	// Check if .archive parent is collapsed
 	archiveParentNodeID := archiveParentNode.NodeID()
 	if !m.collapsedNodes[archiveParentNodeID] || hasSearchFilter {
-		// Add individual archived children (similar to addArchiveSubgroup)
-		for pi, archivedName := range archivedNames {
-			isLastArchived := pi == len(archivedNames)-1
-			archivedNotes := archivedPlans[archivedName]
+		// Build hierarchical tree for archived plan names
+		archivedPlanTree := buildGroupTree(archivedPlans, archivedNames)
 
-			// Sort notes within the archived child
-			sort.SliceStable(archivedNotes, func(i, j int) bool {
-				if m.sortAscending {
-					return archivedNotes[i].CreatedAt.Before(archivedNotes[j].CreatedAt)
-				}
-				return archivedNotes[i].CreatedAt.After(archivedNotes[j].CreatedAt)
-			})
+		// Get the plans/.archive directory for absolute paths
+		archiveDir := filepath.Join(ws.Path, "plans/.archive")
 
-			// If archivedName is empty, these are plans directly in .archive folder
-			if archivedName == "" {
-				// Add notes directly under .archive parent
-				for ni, note := range archivedNotes {
-					isLastNote := ni == len(archivedNotes)-1 && isLastArchived
-					var notePrefix strings.Builder
-					noteIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
-					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
-					notePrefix.WriteString(noteIndent)
-					if isLastNote {
-						notePrefix.WriteString("└─ ")
-					} else {
-						notePrefix.WriteString("├─ ")
-					}
-					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
-				}
-				continue
-			}
-
-			// Calculate archived child prefix
-			var archivedPrefix strings.Builder
-			archivedIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
-			archivedIndent = strings.ReplaceAll(archivedIndent, "└─", "  ")
-			archivedPrefix.WriteString(archivedIndent)
-			if isLastArchived {
-				archivedPrefix.WriteString("└─ ")
-			} else {
-				archivedPrefix.WriteString("├─ ")
-			}
-
-			// Add archived child node
-			// Create tree.Item for group
-			archivedNodeItem := &tree.Item{
-				Path:     filepath.Join(ws.Path, "plans/.archive/" + archivedName),
-				Name:     "plans/.archive/" + archivedName,
-				IsDir:    true,
-				Type:     tree.TypeGroup,
-				Metadata: make(map[string]interface{}),
-			}
-			archivedNodeItem.Metadata["Workspace"] = ws.Name
-			archivedNodeItem.Metadata["Group"] = "plans/.archive/" + archivedName
-			archivedNode := &DisplayNode{
-				Item:       archivedNodeItem,
-				Prefix:     archivedPrefix.String(),
-				Depth:      ws.Depth + 3,
-				ChildCount: len(archivedNotes),
-			}
-			*nodes = append(*nodes, archivedNode)
-
-			// Check if this archived child is collapsed
-			archivedNodeID := archivedNode.NodeID()
-			if !m.collapsedNodes[archivedNodeID] || hasSearchFilter {
-				// Add notes in this archived child
-				for ni, note := range archivedNotes {
-					isLastNote := ni == len(archivedNotes)-1
-					var notePrefix strings.Builder
-					noteIndent := strings.ReplaceAll(archivedPrefix.String(), "├─", "│ ")
-					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
-					notePrefix.WriteString(noteIndent)
-					if isLastNote {
-						notePrefix.WriteString("└─ ")
-					} else {
-						notePrefix.WriteString("├─ ")
-					}
-					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 4, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
-				}
-			}
-		}
+		// Render the archived plan tree hierarchically
+		m.renderArchivedPlanTree(nodes, ws, archivedPlanTree, archivePrefix.String(), ws.Depth+2, hasSearchFilter, workspacePathMap, archiveDir)
 	}
 }
 
@@ -1617,6 +1426,395 @@ func (m *Model) addUngroupedSection(nodes *[]*DisplayNode, ungroupedWorkspaces [
 			// In a complete implementation, this would follow the same pattern as the main workspace rendering
 		}
 	}
+}
+
+// addNoteNodes renders the note items for a given group.
+func (m *Model) addNoteNodes(
+	nodes *[]*DisplayNode,
+	notesInGroup []*models.Note,
+	ws *workspace.WorkspaceNode,
+	groupPrefix string,
+	depth int,
+	workspacePathMap map[string]string,
+	hasFollowingSiblings bool,
+) {
+	// Sort notes within the group
+	sort.SliceStable(notesInGroup, func(i, j int) bool {
+		if m.sortAscending {
+			return notesInGroup[i].CreatedAt.Before(notesInGroup[j].CreatedAt)
+		}
+		return notesInGroup[i].CreatedAt.After(notesInGroup[j].CreatedAt)
+	})
+
+	// Add note nodes
+	for j, note := range notesInGroup {
+		isLastNote := j == len(notesInGroup)-1 && !hasFollowingSiblings
+		var notePrefix strings.Builder
+		noteIndent := strings.ReplaceAll(groupPrefix, "├─", "│ ")
+		noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+		notePrefix.WriteString(noteIndent)
+		if isLastNote {
+			notePrefix.WriteString("└─ ")
+		} else {
+			notePrefix.WriteString("├─ ")
+		}
+		*nodes = append(*nodes, &DisplayNode{
+			Item:         noteToItem(note),
+			Prefix:       notePrefix.String(),
+			Depth:        depth + 1,
+			RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+		})
+	}
+}
+
+// renderGroupTree recursively traverses the group tree and generates DisplayNodes.
+func (m *Model) renderGroupTree(
+	nodes *[]*DisplayNode,
+	ws *workspace.WorkspaceNode,
+	n *groupTreeNode,
+	parentPrefix string,
+	depth int,
+	hasSearchFilter bool,
+	workspacePathMap map[string]string,
+	notesRootDir string,
+	archiveSubgroups map[string]map[string][]*models.Note,
+	closedSubgroups map[string]map[string][]*models.Note,
+	artifactSubgroups map[string][]*models.Note,
+	hasFollowingTopLevelSiblings bool, // True if plans, .hold, etc. will be rendered after this tree
+) {
+	numChildren := len(n.childKeys)
+	for i, key := range n.childKeys {
+		child := n.children[key]
+		isLastChild := (i == numChildren-1) && !hasFollowingTopLevelSiblings
+
+		// 1. Calculate prefix for this child node
+		var childPrefix strings.Builder
+		childPrefix.WriteString(parentPrefix)
+		if isLastChild {
+			childPrefix.WriteString("└─ ")
+		} else {
+			childPrefix.WriteString("├─ ")
+		}
+
+		// 2. Create DisplayNode for this directory part
+		groupItem := &tree.Item{
+			Path:  filepath.Join(notesRootDir, child.fullName), // Absolute path for NodeID
+			Name:  child.name,                                   // Just the basename for display
+			IsDir: true,
+			Type:  tree.TypeGroup,
+			Metadata: map[string]interface{}{
+				"Workspace": ws.Name,
+				"Group":     child.fullName, // Full relative path
+			},
+		}
+		childCount := len(child.notes)
+		// Recursively count children notes if it's an intermediate node
+		if childCount == 0 {
+			var countChildren func(*groupTreeNode) int
+			countChildren = func(node *groupTreeNode) int {
+				count := len(node.notes)
+				for _, c := range node.children {
+					count += countChildren(c)
+				}
+				return count
+			}
+			childCount = countChildren(child)
+		}
+
+		groupNode := &DisplayNode{
+			Item:       groupItem,
+			Prefix:     childPrefix.String(),
+			Depth:      depth,
+			ChildCount: childCount,
+		}
+		*nodes = append(*nodes, groupNode)
+
+		// 3. Recurse if not collapsed, and render notes/subgroups
+		nodeID := groupNode.NodeID()
+		if !m.collapsedNodes[nodeID] || hasSearchFilter {
+			var nextParentPrefix string
+			if isLastChild {
+				nextParentPrefix = parentPrefix + "   "
+			} else {
+				nextParentPrefix = parentPrefix + "│  "
+			}
+
+			// Recurse for subdirectories
+			m.renderGroupTree(nodes, ws, child, nextParentPrefix, depth+1, hasSearchFilter, workspacePathMap, notesRootDir, archiveSubgroups, closedSubgroups, artifactSubgroups, false) // hasFollowingTopLevelSiblings is false for nested calls
+
+			// Render notes and special subgroups if this node corresponds to an original group
+			if len(child.notes) > 0 {
+				hasArchives := len(archiveSubgroups[child.fullName]) > 0 && m.showArchives
+				hasClosed := len(closedSubgroups[child.fullName]) > 0 && m.showArchives
+				hasArtifacts := len(artifactSubgroups[child.fullName]) > 0 && m.showArtifacts
+				hasFollowingNoteSiblings := hasArchives || hasClosed || hasArtifacts
+
+				m.addNoteNodes(nodes, child.notes, ws, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings)
+
+				if hasArchives {
+					m.addArchiveSubgroup(nodes, ws, childPrefix.String(), archiveSubgroups[child.fullName], hasSearchFilter, workspacePathMap)
+				}
+				if hasClosed {
+					m.addClosedSubgroup(nodes, ws, childPrefix.String(), closedSubgroups[child.fullName], hasSearchFilter, workspacePathMap)
+				}
+				if hasArtifacts {
+					m.addArtifactSubgroup(nodes, ws, childPrefix.String(), artifactSubgroups[child.fullName], hasSearchFilter, workspacePathMap)
+				}
+			}
+		}
+	}
+}
+
+// renderPlanTree recursively traverses the plan tree and generates DisplayNodes.
+func (m *Model) renderPlanTree(
+	nodes *[]*DisplayNode,
+	ws *workspace.WorkspaceNode,
+	n *groupTreeNode,
+	parentPrefix string,
+	depth int,
+	hasSearchFilter bool,
+	workspacePathMap map[string]string,
+	plansRootDir string,
+	artifactSubgroups map[string][]*models.Note,
+	hasFollowingTopLevelSiblings bool, // True if .archive will be rendered after this tree
+) {
+	numChildren := len(n.childKeys)
+	for i, key := range n.childKeys {
+		child := n.children[key]
+		isLastChild := (i == numChildren-1) && !hasFollowingTopLevelSiblings
+
+		// 1. Calculate prefix for this child node
+		var childPrefix strings.Builder
+		childPrefix.WriteString(parentPrefix)
+		if isLastChild {
+			childPrefix.WriteString("└─ ")
+		} else {
+			childPrefix.WriteString("├─ ")
+		}
+
+		// 2. Create DisplayNode for this directory part (as a plan node)
+		planItem := &tree.Item{
+			Path:  filepath.Join(plansRootDir, child.fullName), // Absolute path for NodeID
+			Name:  "plans/" + child.name,                       // Just the basename for display with "plans/" prefix
+			IsDir: true,
+			Type:  tree.TypePlan,
+			Metadata: map[string]interface{}{
+				"Workspace": ws.Name,
+				"Group":     "plans/" + child.fullName, // Full relative path with "plans/" prefix
+			},
+		}
+
+		childCount := len(child.notes)
+		// Recursively count children notes if it's an intermediate node
+		if childCount == 0 {
+			var countChildren func(*groupTreeNode) int
+			countChildren = func(node *groupTreeNode) int {
+				count := len(node.notes)
+				for _, c := range node.children {
+					count += countChildren(c)
+				}
+				return count
+			}
+			childCount = countChildren(child)
+		}
+
+		planNode := &DisplayNode{
+			Item:       planItem,
+			Prefix:     childPrefix.String(),
+			Depth:      depth,
+			ChildCount: childCount,
+		}
+		*nodes = append(*nodes, planNode)
+
+		// 3. Recurse if not collapsed, and render notes/artifacts
+		nodeID := planNode.NodeID()
+		if !m.collapsedNodes[nodeID] || hasSearchFilter {
+			var nextParentPrefix string
+			if isLastChild {
+				nextParentPrefix = parentPrefix + "   "
+			} else {
+				nextParentPrefix = parentPrefix + "│  "
+			}
+
+			// Recurse for subdirectories
+			m.renderPlanTree(nodes, ws, child, nextParentPrefix, depth+1, hasSearchFilter, workspacePathMap, plansRootDir, artifactSubgroups, false)
+
+			// Render notes and artifacts if this node corresponds to an original plan
+			if len(child.notes) > 0 {
+				planFullName := "plans/" + child.fullName
+				hasArtifacts := len(artifactSubgroups[planFullName]) > 0 && m.showArtifacts
+
+				// Sort notes within the plan
+				sort.SliceStable(child.notes, func(i, j int) bool {
+					if m.sortAscending {
+						return child.notes[i].CreatedAt.Before(child.notes[j].CreatedAt)
+					}
+					return child.notes[i].CreatedAt.After(child.notes[j].CreatedAt)
+				})
+
+				// Add note nodes
+				for j, note := range child.notes {
+					isLastNote := j == len(child.notes)-1 && !hasArtifacts
+					var notePrefix strings.Builder
+					noteIndent := strings.ReplaceAll(childPrefix.String(), "├─", "│ ")
+					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+					notePrefix.WriteString(noteIndent)
+					if isLastNote {
+						notePrefix.WriteString("└─ ")
+					} else {
+						notePrefix.WriteString("├─ ")
+					}
+					*nodes = append(*nodes, &DisplayNode{
+						Item:         noteToItem(note),
+						Prefix:       notePrefix.String(),
+						Depth:        depth + 1,
+						RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+					})
+				}
+
+				// Add .artifacts subgroup if this plan has artifacts
+				if hasArtifacts {
+					m.addArtifactSubgroup(nodes, ws, childPrefix.String(), artifactSubgroups[planFullName], hasSearchFilter, workspacePathMap)
+				}
+			}
+		}
+	}
+}
+
+// renderArchivedPlanTree recursively traverses the archived plan tree and generates DisplayNodes.
+func (m *Model) renderArchivedPlanTree(
+	nodes *[]*DisplayNode,
+	ws *workspace.WorkspaceNode,
+	n *groupTreeNode,
+	parentPrefix string,
+	depth int,
+	hasSearchFilter bool,
+	workspacePathMap map[string]string,
+	archiveRootDir string,
+) {
+	numChildren := len(n.childKeys)
+	for i, key := range n.childKeys {
+		child := n.children[key]
+		isLastChild := (i == numChildren-1)
+
+		// 1. Calculate prefix for this child node
+		var childPrefix strings.Builder
+		childPrefix.WriteString(parentPrefix)
+		if isLastChild {
+			childPrefix.WriteString("└─ ")
+		} else {
+			childPrefix.WriteString("├─ ")
+		}
+
+		// 2. Create DisplayNode for this directory part (as a group node, not plan)
+		archiveItem := &tree.Item{
+			Path:  filepath.Join(archiveRootDir, child.fullName), // Absolute path for NodeID
+			Name:  child.name,                                     // Just the basename for display
+			IsDir: true,
+			Type:  tree.TypeGroup,
+			Metadata: map[string]interface{}{
+				"Workspace": ws.Name,
+				"Group":     "plans/.archive/" + child.fullName, // Full relative path
+			},
+		}
+
+		childCount := len(child.notes)
+		// Recursively count children notes if it's an intermediate node
+		if childCount == 0 {
+			var countChildren func(*groupTreeNode) int
+			countChildren = func(node *groupTreeNode) int {
+				count := len(node.notes)
+				for _, c := range node.children {
+					count += countChildren(c)
+				}
+				return count
+			}
+			childCount = countChildren(child)
+		}
+
+		archiveNode := &DisplayNode{
+			Item:       archiveItem,
+			Prefix:     childPrefix.String(),
+			Depth:      depth,
+			ChildCount: childCount,
+		}
+		*nodes = append(*nodes, archiveNode)
+
+		// 3. Recurse if not collapsed, and render notes
+		nodeID := archiveNode.NodeID()
+		if !m.collapsedNodes[nodeID] || hasSearchFilter {
+			var nextParentPrefix string
+			if isLastChild {
+				nextParentPrefix = parentPrefix + "   "
+			} else {
+				nextParentPrefix = parentPrefix + "│  "
+			}
+
+			// Recurse for subdirectories
+			m.renderArchivedPlanTree(nodes, ws, child, nextParentPrefix, depth+1, hasSearchFilter, workspacePathMap, archiveRootDir)
+
+			// Render notes if this node has them
+			if len(child.notes) > 0 {
+				// Sort notes within the archived plan
+				sort.SliceStable(child.notes, func(i, j int) bool {
+					if m.sortAscending {
+						return child.notes[i].CreatedAt.Before(child.notes[j].CreatedAt)
+					}
+					return child.notes[i].CreatedAt.After(child.notes[j].CreatedAt)
+				})
+
+				// Add note nodes
+				for j, note := range child.notes {
+					isLastNote := j == len(child.notes)-1
+					var notePrefix strings.Builder
+					noteIndent := strings.ReplaceAll(childPrefix.String(), "├─", "│ ")
+					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+					notePrefix.WriteString(noteIndent)
+					if isLastNote {
+						notePrefix.WriteString("└─ ")
+					} else {
+						notePrefix.WriteString("├─ ")
+					}
+					*nodes = append(*nodes, &DisplayNode{
+						Item:         noteToItem(note),
+						Prefix:       notePrefix.String(),
+						Depth:        depth + 1,
+						RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+					})
+				}
+			}
+		}
+	}
+}
+
+// buildGroupTree builds an in-memory tree from a flat list of group paths.
+func buildGroupTree(noteGroups map[string][]*models.Note, regularGroups []string) *groupTreeNode {
+	root := newGroupTreeNode("", "")
+	for _, groupName := range regularGroups {
+		parts := strings.Split(groupName, "/")
+		currentNode := root
+		for i, part := range parts {
+			if _, ok := currentNode.children[part]; !ok {
+				fullName := strings.Join(parts[:i+1], "/")
+				currentNode.children[part] = newGroupTreeNode(part, fullName)
+				currentNode.childKeys = append(currentNode.childKeys, part)
+			}
+			currentNode = currentNode.children[part]
+		}
+		currentNode.notes = noteGroups[groupName]
+	}
+
+	// Sort child keys at each level for consistent rendering order
+	var sortNodes func(*groupTreeNode)
+	sortNodes = func(n *groupTreeNode) {
+		sort.Strings(n.childKeys)
+		for _, child := range n.children {
+			sortNodes(child)
+		}
+	}
+	sortNodes(root)
+
+	return root
 }
 
 // calculateRelativePath returns the shortened absolute path for a note

@@ -249,6 +249,9 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		} else {
 			info.fold = "▼ "
 		}
+	} else {
+		// Add spacing for non-foldable items to align with foldable ones
+		info.fold = "  "
 	}
 
 	if node.IsWorkspace() {
@@ -359,8 +362,16 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 
 // styleNodeContent applies styling to the main content (name/title) of a node.
 func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
-	// Build base content string
-	content := info.indicator
+	// Style the indicator (icon) separately
+	styledIndicator := info.indicator
+	if info.isGroup && !info.isArchived && !info.isArtifact && info.indicator == theme.IconFolder {
+		// Color generic directory icons cyan (light blue)
+		iconStyle := lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Cyan)
+		styledIndicator = iconStyle.Render(info.indicator)
+	}
+
+	// Build base content string with styled indicator
+	content := styledIndicator
 	if info.indicator != "" && !strings.HasSuffix(info.indicator, " ") {
 		content += " "
 	}
@@ -410,6 +421,9 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 	} else if info.note != nil && info.note.Group == "review" {
 		// Notes in the review group should also be pink (magenta)
 		style = style.Foreground(theme.DefaultTheme.Colors.Pink)
+	} else if info.isGroup && !info.isArchived && !info.isArtifact && info.indicator == theme.IconFolder {
+		// Generic directory groups use cyan (light blue) for text
+		style = style.Foreground(theme.DefaultTheme.Colors.Cyan)
 	}
 
 	// 4. Apply state modifiers
@@ -745,7 +759,7 @@ func getGroupIcon(groupName string) string {
 	case ".artifacts":
 		return theme.IconDocs
 	default:
-		return theme.IconArchive // Use as a generic folder icon
+		return theme.IconFolder // Use as a generic folder icon
 	}
 }
 
