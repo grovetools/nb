@@ -32,6 +32,16 @@ func newGroupTreeNode(name, fullName string) *groupTreeNode {
 	}
 }
 
+// treeRenderConfig holds configuration for the generic renderTree function.
+type treeRenderConfig struct {
+	itemType            tree.ItemType
+	groupMetadataPrefix string
+	nameUsesPrefix      bool
+	includeArtifacts    bool
+	includeArchives     bool
+	includeClosed       bool
+}
+
 // Update handles navigation, folding, and selection key events.
 // Returns updated model and any commands. Parent should handle other keys.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -553,7 +563,15 @@ func (m *Model) BuildDisplayTree() {
 						initialPrefix.WriteString("  ")
 					}
 
-					m.renderGroupTree(&nodes, ws, rootGroupNode, initialPrefix.String(), ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, archiveSubgroups, closedSubgroups, artifactSubgroups, hasFollowingTopLevelSiblings)
+					config := treeRenderConfig{
+					itemType:            tree.TypeGroup,
+					groupMetadataPrefix: "",
+					nameUsesPrefix:      false,
+					includeArchives:     true,
+					includeClosed:       true,
+					includeArtifacts:    true,
+				}
+				m.renderTree(&nodes, ws, rootGroupNode, initialPrefix.String(), ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, config, hasFollowingTopLevelSiblings, archiveSubgroups, closedSubgroups, artifactSubgroups)
 				}
 			}
 
@@ -1111,7 +1129,15 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 		plansDir := filepath.Join(ws.Path, "plans")
 
 		// Render the plan tree hierarchically
-		m.renderPlanTree(nodes, ws, planTree, plansPrefix.String(), ws.Depth+1, hasSearchFilter, workspacePathMap, plansDir, artifactSubgroups, hasPlansArchive)
+		config := treeRenderConfig{
+			itemType:            tree.TypePlan,
+			groupMetadataPrefix: "plans/",
+			nameUsesPrefix:      true,
+			includeArtifacts:    true,
+			includeArchives:     false,
+			includeClosed:       false,
+		}
+		m.renderTree(nodes, ws, planTree, plansPrefix.String(), ws.Depth+1, hasSearchFilter, workspacePathMap, plansDir, config, hasPlansArchive, nil, nil, artifactSubgroups)
 
 		// Add .archive parent group if there are archived children
 		if hasPlansArchive {
@@ -1170,7 +1196,15 @@ func (m *Model) addPlansArchiveGroup(nodes *[]*DisplayNode, ws *workspace.Worksp
 		archiveDir := filepath.Join(ws.Path, "plans/.archive")
 
 		// Render the archived plan tree hierarchically
-		m.renderArchivedPlanTree(nodes, ws, archivedPlanTree, archivePrefix.String(), ws.Depth+2, hasSearchFilter, workspacePathMap, archiveDir)
+		config := treeRenderConfig{
+			itemType:            tree.TypeGroup, // An archived plan is just a group
+			groupMetadataPrefix: "plans/.archive/",
+			nameUsesPrefix:      false,
+			includeArtifacts:    false,
+			includeArchives:     false,
+			includeClosed:       false,
+		}
+		m.renderTree(nodes, ws, archivedPlanTree, archivePrefix.String(), ws.Depth+2, hasSearchFilter, workspacePathMap, archiveDir, config, false, nil, nil, nil)
 	}
 }
 
@@ -1467,8 +1501,9 @@ func (m *Model) addNoteNodes(
 	}
 }
 
-// renderGroupTree recursively traverses the group tree and generates DisplayNodes.
-func (m *Model) renderGroupTree(
+// renderTree recursively traverses a group tree and generates DisplayNodes.
+// It is a generic function configurable for rendering different types of hierarchical groups.
+func (m *Model) renderTree(
 	nodes *[]*DisplayNode,
 	ws *workspace.WorkspaceNode,
 	n *groupTreeNode,
@@ -1476,16 +1511,18 @@ func (m *Model) renderGroupTree(
 	depth int,
 	hasSearchFilter bool,
 	workspacePathMap map[string]string,
-	notesRootDir string,
+	rootDir string,
+	config treeRenderConfig,
+	hasFollowingSiblings bool,
+	// Subgroups are passed from the top-level call site
 	archiveSubgroups map[string]map[string][]*models.Note,
 	closedSubgroups map[string]map[string][]*models.Note,
 	artifactSubgroups map[string][]*models.Note,
-	hasFollowingTopLevelSiblings bool, // True if plans, .hold, etc. will be rendered after this tree
 ) {
 	numChildren := len(n.childKeys)
 	for i, key := range n.childKeys {
 		child := n.children[key]
-		isLastChild := (i == numChildren-1) && !hasFollowingTopLevelSiblings
+		isLastChild := (i == numChildren-1) && !hasFollowingSiblings
 
 		// 1. Calculate prefix for this child node
 		var childPrefix strings.Builder
@@ -1497,14 +1534,19 @@ func (m *Model) renderGroupTree(
 		}
 
 		// 2. Create DisplayNode for this directory part
+		itemName := child.name
+		if config.nameUsesPrefix {
+			itemName = config.groupMetadataPrefix + child.fullName
+		}
+
 		groupItem := &tree.Item{
-			Path:  filepath.Join(notesRootDir, child.fullName), // Absolute path for NodeID
-			Name:  child.name,                                   // Just the basename for display
+			Path:  filepath.Join(rootDir, child.fullName), // Absolute path for NodeID
+			Name:  itemName,
 			IsDir: true,
-			Type:  tree.TypeGroup,
+			Type:  config.itemType,
 			Metadata: map[string]interface{}{
 				"Workspace": ws.Name,
-				"Group":     child.fullName, // Full relative path
+				"Group":     config.groupMetadataPrefix + child.fullName, // Full relative path
 			},
 		}
 		childCount := len(child.notes)
@@ -1540,13 +1582,19 @@ func (m *Model) renderGroupTree(
 			}
 
 			// Recurse for subdirectories
-			m.renderGroupTree(nodes, ws, child, nextParentPrefix, depth+1, hasSearchFilter, workspacePathMap, notesRootDir, archiveSubgroups, closedSubgroups, artifactSubgroups, false) // hasFollowingTopLevelSiblings is false for nested calls
+			m.renderTree(nodes, ws, child, nextParentPrefix, depth+1, hasSearchFilter, workspacePathMap, rootDir, config, false, archiveSubgroups, closedSubgroups, artifactSubgroups)
 
 			// Render notes and special subgroups if this node corresponds to an original group
 			if len(child.notes) > 0 {
-				hasArchives := len(archiveSubgroups[child.fullName]) > 0 && m.showArchives
-				hasClosed := len(closedSubgroups[child.fullName]) > 0 && m.showArchives
-				hasArtifacts := len(artifactSubgroups[child.fullName]) > 0 && m.showArtifacts
+				hasArchives := config.includeArchives && len(archiveSubgroups[child.fullName]) > 0 && m.showArchives
+				hasClosed := config.includeClosed && len(closedSubgroups[child.fullName]) > 0 && m.showArchives
+
+				artifactGroupKey := child.fullName
+				if config.itemType == tree.TypePlan {
+					artifactGroupKey = config.groupMetadataPrefix + child.fullName
+				}
+				hasArtifacts := config.includeArtifacts && len(artifactSubgroups[artifactGroupKey]) > 0 && m.showArtifacts
+
 				hasFollowingNoteSiblings := hasArchives || hasClosed || hasArtifacts
 
 				m.addNoteNodes(nodes, child.notes, ws, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings)
@@ -1558,229 +1606,7 @@ func (m *Model) renderGroupTree(
 					m.addClosedSubgroup(nodes, ws, childPrefix.String(), closedSubgroups[child.fullName], hasSearchFilter, workspacePathMap)
 				}
 				if hasArtifacts {
-					m.addArtifactSubgroup(nodes, ws, childPrefix.String(), artifactSubgroups[child.fullName], hasSearchFilter, workspacePathMap)
-				}
-			}
-		}
-	}
-}
-
-// renderPlanTree recursively traverses the plan tree and generates DisplayNodes.
-func (m *Model) renderPlanTree(
-	nodes *[]*DisplayNode,
-	ws *workspace.WorkspaceNode,
-	n *groupTreeNode,
-	parentPrefix string,
-	depth int,
-	hasSearchFilter bool,
-	workspacePathMap map[string]string,
-	plansRootDir string,
-	artifactSubgroups map[string][]*models.Note,
-	hasFollowingTopLevelSiblings bool, // True if .archive will be rendered after this tree
-) {
-	numChildren := len(n.childKeys)
-	for i, key := range n.childKeys {
-		child := n.children[key]
-		isLastChild := (i == numChildren-1) && !hasFollowingTopLevelSiblings
-
-		// 1. Calculate prefix for this child node
-		var childPrefix strings.Builder
-		childPrefix.WriteString(parentPrefix)
-		if isLastChild {
-			childPrefix.WriteString("└─ ")
-		} else {
-			childPrefix.WriteString("├─ ")
-		}
-
-		// 2. Create DisplayNode for this directory part (as a plan node)
-		planItem := &tree.Item{
-			Path:  filepath.Join(plansRootDir, child.fullName), // Absolute path for NodeID
-			Name:  "plans/" + child.name,                       // Just the basename for display with "plans/" prefix
-			IsDir: true,
-			Type:  tree.TypePlan,
-			Metadata: map[string]interface{}{
-				"Workspace": ws.Name,
-				"Group":     "plans/" + child.fullName, // Full relative path with "plans/" prefix
-			},
-		}
-
-		childCount := len(child.notes)
-		// Recursively count children notes if it's an intermediate node
-		if childCount == 0 {
-			var countChildren func(*groupTreeNode) int
-			countChildren = func(node *groupTreeNode) int {
-				count := len(node.notes)
-				for _, c := range node.children {
-					count += countChildren(c)
-				}
-				return count
-			}
-			childCount = countChildren(child)
-		}
-
-		planNode := &DisplayNode{
-			Item:       planItem,
-			Prefix:     childPrefix.String(),
-			Depth:      depth,
-			ChildCount: childCount,
-		}
-		*nodes = append(*nodes, planNode)
-
-		// 3. Recurse if not collapsed, and render notes/artifacts
-		nodeID := planNode.NodeID()
-		if !m.collapsedNodes[nodeID] || hasSearchFilter {
-			var nextParentPrefix string
-			if isLastChild {
-				nextParentPrefix = parentPrefix + "   "
-			} else {
-				nextParentPrefix = parentPrefix + "│  "
-			}
-
-			// Recurse for subdirectories
-			m.renderPlanTree(nodes, ws, child, nextParentPrefix, depth+1, hasSearchFilter, workspacePathMap, plansRootDir, artifactSubgroups, false)
-
-			// Render notes and artifacts if this node corresponds to an original plan
-			if len(child.notes) > 0 {
-				planFullName := "plans/" + child.fullName
-				hasArtifacts := len(artifactSubgroups[planFullName]) > 0 && m.showArtifacts
-
-				// Sort notes within the plan
-				sort.SliceStable(child.notes, func(i, j int) bool {
-					if m.sortAscending {
-						return child.notes[i].CreatedAt.Before(child.notes[j].CreatedAt)
-					}
-					return child.notes[i].CreatedAt.After(child.notes[j].CreatedAt)
-				})
-
-				// Add note nodes
-				for j, note := range child.notes {
-					isLastNote := j == len(child.notes)-1 && !hasArtifacts
-					var notePrefix strings.Builder
-					noteIndent := strings.ReplaceAll(childPrefix.String(), "├─", "│ ")
-					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
-					notePrefix.WriteString(noteIndent)
-					if isLastNote {
-						notePrefix.WriteString("└─ ")
-					} else {
-						notePrefix.WriteString("├─ ")
-					}
-					*nodes = append(*nodes, &DisplayNode{
-						Item:         noteToItem(note),
-						Prefix:       notePrefix.String(),
-						Depth:        depth + 1,
-						RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
-					})
-				}
-
-				// Add .artifacts subgroup if this plan has artifacts
-				if hasArtifacts {
-					m.addArtifactSubgroup(nodes, ws, childPrefix.String(), artifactSubgroups[planFullName], hasSearchFilter, workspacePathMap)
-				}
-			}
-		}
-	}
-}
-
-// renderArchivedPlanTree recursively traverses the archived plan tree and generates DisplayNodes.
-func (m *Model) renderArchivedPlanTree(
-	nodes *[]*DisplayNode,
-	ws *workspace.WorkspaceNode,
-	n *groupTreeNode,
-	parentPrefix string,
-	depth int,
-	hasSearchFilter bool,
-	workspacePathMap map[string]string,
-	archiveRootDir string,
-) {
-	numChildren := len(n.childKeys)
-	for i, key := range n.childKeys {
-		child := n.children[key]
-		isLastChild := (i == numChildren-1)
-
-		// 1. Calculate prefix for this child node
-		var childPrefix strings.Builder
-		childPrefix.WriteString(parentPrefix)
-		if isLastChild {
-			childPrefix.WriteString("└─ ")
-		} else {
-			childPrefix.WriteString("├─ ")
-		}
-
-		// 2. Create DisplayNode for this directory part (as a group node, not plan)
-		archiveItem := &tree.Item{
-			Path:  filepath.Join(archiveRootDir, child.fullName), // Absolute path for NodeID
-			Name:  child.name,                                     // Just the basename for display
-			IsDir: true,
-			Type:  tree.TypeGroup,
-			Metadata: map[string]interface{}{
-				"Workspace": ws.Name,
-				"Group":     "plans/.archive/" + child.fullName, // Full relative path
-			},
-		}
-
-		childCount := len(child.notes)
-		// Recursively count children notes if it's an intermediate node
-		if childCount == 0 {
-			var countChildren func(*groupTreeNode) int
-			countChildren = func(node *groupTreeNode) int {
-				count := len(node.notes)
-				for _, c := range node.children {
-					count += countChildren(c)
-				}
-				return count
-			}
-			childCount = countChildren(child)
-		}
-
-		archiveNode := &DisplayNode{
-			Item:       archiveItem,
-			Prefix:     childPrefix.String(),
-			Depth:      depth,
-			ChildCount: childCount,
-		}
-		*nodes = append(*nodes, archiveNode)
-
-		// 3. Recurse if not collapsed, and render notes
-		nodeID := archiveNode.NodeID()
-		if !m.collapsedNodes[nodeID] || hasSearchFilter {
-			var nextParentPrefix string
-			if isLastChild {
-				nextParentPrefix = parentPrefix + "   "
-			} else {
-				nextParentPrefix = parentPrefix + "│  "
-			}
-
-			// Recurse for subdirectories
-			m.renderArchivedPlanTree(nodes, ws, child, nextParentPrefix, depth+1, hasSearchFilter, workspacePathMap, archiveRootDir)
-
-			// Render notes if this node has them
-			if len(child.notes) > 0 {
-				// Sort notes within the archived plan
-				sort.SliceStable(child.notes, func(i, j int) bool {
-					if m.sortAscending {
-						return child.notes[i].CreatedAt.Before(child.notes[j].CreatedAt)
-					}
-					return child.notes[i].CreatedAt.After(child.notes[j].CreatedAt)
-				})
-
-				// Add note nodes
-				for j, note := range child.notes {
-					isLastNote := j == len(child.notes)-1
-					var notePrefix strings.Builder
-					noteIndent := strings.ReplaceAll(childPrefix.String(), "├─", "│ ")
-					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
-					notePrefix.WriteString(noteIndent)
-					if isLastNote {
-						notePrefix.WriteString("└─ ")
-					} else {
-						notePrefix.WriteString("├─ ")
-					}
-					*nodes = append(*nodes, &DisplayNode{
-						Item:         noteToItem(note),
-						Prefix:       notePrefix.String(),
-						Depth:        depth + 1,
-						RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
-					})
+					m.addArtifactSubgroup(nodes, ws, childPrefix.String(), artifactSubgroups[artifactGroupKey], hasSearchFilter, workspacePathMap)
 				}
 			}
 		}
