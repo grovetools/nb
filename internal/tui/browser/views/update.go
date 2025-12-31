@@ -219,6 +219,7 @@ func (m *Model) BuildDisplayTree() {
 		}
 	} else if m.focusedWorkspace != nil {
 		var globalNode *workspace.WorkspaceNode
+		var baseDepth int
 		for _, ws := range m.workspaces {
 			// Save global separately
 			if ws.Name == "global" {
@@ -228,6 +229,7 @@ func (m *Model) BuildDisplayTree() {
 			// Use case-insensitive path comparison
 			isSame, _ := pathutil.ComparePaths(ws.Path, m.focusedWorkspace.Path)
 			if isSame {
+				baseDepth = ws.Depth // Save the focused workspace's depth for adjustment
 				workspacesToShow = append(workspacesToShow, ws)
 				continue
 			}
@@ -239,11 +241,14 @@ func (m *Model) BuildDisplayTree() {
 			}
 		}
 
-		// Clear tree prefix on focused workspace (first item) to make it a sibling of global
+		// Adjust depths to make focused workspace a root-level item
 		if len(workspacesToShow) > 0 {
-			focusedCopy := *workspacesToShow[0]
-			focusedCopy.TreePrefix = ""
-			workspacesToShow[0] = &focusedCopy
+			for i, ws := range workspacesToShow {
+				wsCopy := *ws
+				wsCopy.Depth = ws.Depth - baseDepth
+				wsCopy.TreePrefix = "" // Clear prefix as depth is adjusted
+				workspacesToShow[i] = &wsCopy
+			}
 		}
 
 		// Prepend global at the front (unless hidden)
@@ -350,7 +355,7 @@ func (m *Model) BuildDisplayTree() {
 		wsItem := &tree.Item{
 			Path:     ws.Path,
 			Name:     ws.Name,
-			IsDir:    true,
+			IsDir:    ws.Name != "global", // Global is not a directory, so it won't show folding icon
 			Type:     tree.TypeWorkspace,
 			Metadata: make(map[string]interface{}),
 		}
@@ -751,16 +756,16 @@ func (m *Model) buildTagFilteredTree() {
 			for i, note := range notesInWs {
 				isLastNote := i == len(notesInWs)-1
 				var notePrefix strings.Builder
-				indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
-				indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+				indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├ ", "│ ")
+				indentPrefix = strings.ReplaceAll(indentPrefix, "└ ", "  ")
 				notePrefix.WriteString(indentPrefix)
 				if ws.Depth > 0 || ws.TreePrefix != "" {
 					notePrefix.WriteString("  ")
 				}
 				if isLastNote {
-					notePrefix.WriteString("└─ ")
+					notePrefix.WriteString("└ ")
 				} else {
-					notePrefix.WriteString("├─ ")
+					notePrefix.WriteString("├ ")
 				}
 
 				nodes = append(nodes, &DisplayNode{
@@ -795,10 +800,10 @@ func (m *Model) addArchiveSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspac
 
 	// Calculate .archive prefix (last child under this group)
 	var archivePrefix strings.Builder
-	archiveIndent := strings.ReplaceAll(groupPrefix, "├─", "│ ")
-	archiveIndent = strings.ReplaceAll(archiveIndent, "└─", "  ")
+	archiveIndent := strings.ReplaceAll(groupPrefix, "├ ", "│ ")
+	archiveIndent = strings.ReplaceAll(archiveIndent, "└ ", "  ")
 	archivePrefix.WriteString(archiveIndent)
-	archivePrefix.WriteString("└─ ")
+	archivePrefix.WriteString("└ ")
 
 	// Get parent group name from groupPrefix context
 	// This is a bit tricky - we need to track which group we're in
@@ -853,13 +858,13 @@ func (m *Model) addArchiveSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspac
 				for ni, note := range archivedNotes {
 					isLastNote := ni == len(archivedNotes)-1 && isLastArchived
 					var notePrefix strings.Builder
-					noteIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
-					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+					noteIndent := strings.ReplaceAll(archivePrefix.String(), "├ ", "│ ")
+					noteIndent = strings.ReplaceAll(noteIndent, "└ ", "  ")
 					notePrefix.WriteString(noteIndent)
 					if isLastNote {
-						notePrefix.WriteString("└─ ")
+						notePrefix.WriteString("└ ")
 					} else {
-						notePrefix.WriteString("├─ ")
+						notePrefix.WriteString("├ ")
 					}
 					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
 				}
@@ -868,13 +873,13 @@ func (m *Model) addArchiveSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspac
 
 			// Calculate archived child prefix
 			var archivedPrefix strings.Builder
-			archivedIndent := strings.ReplaceAll(archivePrefix.String(), "├─", "│ ")
-			archivedIndent = strings.ReplaceAll(archivedIndent, "└─", "  ")
+			archivedIndent := strings.ReplaceAll(archivePrefix.String(), "├ ", "│ ")
+			archivedIndent = strings.ReplaceAll(archivedIndent, "└ ", "  ")
 			archivedPrefix.WriteString(archivedIndent)
 			if isLastArchived {
-				archivedPrefix.WriteString("└─ ")
+				archivedPrefix.WriteString("└ ")
 			} else {
-				archivedPrefix.WriteString("├─ ")
+				archivedPrefix.WriteString("├ ")
 			}
 
 			// Add archived child node
@@ -902,13 +907,13 @@ func (m *Model) addArchiveSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspac
 				for ni, note := range archivedNotes {
 					isLastArchivedNote := ni == len(archivedNotes)-1
 					var archivedNotePrefix strings.Builder
-					archivedNoteIndent := strings.ReplaceAll(archivedPrefix.String(), "├─", "│ ")
-					archivedNoteIndent = strings.ReplaceAll(archivedIndent, "└─", "  ")
+					archivedNoteIndent := strings.ReplaceAll(archivedPrefix.String(), "├ ", "│ ")
+					archivedNoteIndent = strings.ReplaceAll(archivedIndent, "└ ", "  ")
 					archivedNotePrefix.WriteString(archivedNoteIndent)
 					if isLastArchivedNote {
-						archivedNotePrefix.WriteString("└─ ")
+						archivedNotePrefix.WriteString("└ ")
 					} else {
-						archivedNotePrefix.WriteString("├─ ")
+						archivedNotePrefix.WriteString("├ ")
 					}
 					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: archivedNotePrefix.String(), Depth: ws.Depth + 4, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
 				}
@@ -933,10 +938,10 @@ func (m *Model) addClosedSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 
 	// Calculate .closed prefix (last child under this group)
 	var closedPrefix strings.Builder
-	closedIndent := strings.ReplaceAll(groupPrefix, "├─", "│ ")
-	closedIndent = strings.ReplaceAll(closedIndent, "└─", "  ")
+	closedIndent := strings.ReplaceAll(groupPrefix, "├ ", "│ ")
+	closedIndent = strings.ReplaceAll(closedIndent, "└ ", "  ")
 	closedPrefix.WriteString(closedIndent)
-	closedPrefix.WriteString("└─ ")
+	closedPrefix.WriteString("└ ")
 
 	// Get parent group name from groupPrefix context
 	parentGroupName := ""
@@ -989,13 +994,13 @@ func (m *Model) addClosedSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 				for ni, note := range closedNotes {
 					isLastNote := ni == len(closedNotes)-1 && isLastClosed
 					var notePrefix strings.Builder
-					noteIndent := strings.ReplaceAll(closedPrefix.String(), "├─", "│ ")
-					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+					noteIndent := strings.ReplaceAll(closedPrefix.String(), "├ ", "│ ")
+					noteIndent = strings.ReplaceAll(noteIndent, "└ ", "  ")
 					notePrefix.WriteString(noteIndent)
 					if isLastNote {
-						notePrefix.WriteString("└─ ")
+						notePrefix.WriteString("└ ")
 					} else {
-						notePrefix.WriteString("├─ ")
+						notePrefix.WriteString("├ ")
 					}
 					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
 				}
@@ -1004,13 +1009,13 @@ func (m *Model) addClosedSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 
 			// Calculate closed child prefix
 			var closedChildPrefix strings.Builder
-			closedChildIndent := strings.ReplaceAll(closedPrefix.String(), "├─", "│ ")
-			closedChildIndent = strings.ReplaceAll(closedChildIndent, "└─", "  ")
+			closedChildIndent := strings.ReplaceAll(closedPrefix.String(), "├ ", "│ ")
+			closedChildIndent = strings.ReplaceAll(closedChildIndent, "└ ", "  ")
 			closedChildPrefix.WriteString(closedChildIndent)
 			if isLastClosed {
-				closedChildPrefix.WriteString("└─ ")
+				closedChildPrefix.WriteString("└ ")
 			} else {
-				closedChildPrefix.WriteString("├─ ")
+				closedChildPrefix.WriteString("├ ")
 			}
 
 			// Add closed child node
@@ -1038,13 +1043,13 @@ func (m *Model) addClosedSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 				for ni, note := range closedNotes {
 					isLastClosedNote := ni == len(closedNotes)-1
 					var closedNotePrefix strings.Builder
-					closedNoteIndent := strings.ReplaceAll(closedChildPrefix.String(), "├─", "│ ")
-					closedNoteIndent = strings.ReplaceAll(closedIndent, "└─", "  ")
+					closedNoteIndent := strings.ReplaceAll(closedChildPrefix.String(), "├ ", "│ ")
+					closedNoteIndent = strings.ReplaceAll(closedIndent, "└ ", "  ")
 					closedNotePrefix.WriteString(closedNoteIndent)
 					if isLastClosedNote {
-						closedNotePrefix.WriteString("└─ ")
+						closedNotePrefix.WriteString("└ ")
 					} else {
-						closedNotePrefix.WriteString("├─ ")
+						closedNotePrefix.WriteString("├ ")
 					}
 					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: closedNotePrefix.String(), Depth: ws.Depth + 4, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
 				}
@@ -1056,10 +1061,10 @@ func (m *Model) addClosedSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 func (m *Model) addArtifactSubgroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, groupPrefix string, artifactNotes []*models.Note, hasSearchFilter bool, workspacePathMap map[string]string) {
 	// Calculate .artifacts prefix (last child under this group)
 	var artifactsPrefix strings.Builder
-	artifactsIndent := strings.ReplaceAll(groupPrefix, "├─", "│ ")
-	artifactsIndent = strings.ReplaceAll(artifactsIndent, "└─", "  ")
+	artifactsIndent := strings.ReplaceAll(groupPrefix, "├ ", "│ ")
+	artifactsIndent = strings.ReplaceAll(artifactsIndent, "└ ", "  ")
 	artifactsPrefix.WriteString(artifactsIndent)
-	artifactsPrefix.WriteString("└─ ")
+	artifactsPrefix.WriteString("└ ")
 
 	// Get parent group name from the last group node
 	parentGroupName := ""
@@ -1105,13 +1110,13 @@ func (m *Model) addArtifactSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspa
 		for ai, artifact := range artifactNotes {
 			isLastArtifact := ai == len(artifactNotes)-1
 			var artifactPrefix strings.Builder
-			artifactIndent := strings.ReplaceAll(artifactsPrefix.String(), "├─", "│ ")
-			artifactIndent = strings.ReplaceAll(artifactIndent, "└─", "  ")
+			artifactIndent := strings.ReplaceAll(artifactsPrefix.String(), "├ ", "│ ")
+			artifactIndent = strings.ReplaceAll(artifactIndent, "└ ", "  ")
 			artifactPrefix.WriteString(artifactIndent)
 			if isLastArtifact {
-				artifactPrefix.WriteString("└─ ")
+				artifactPrefix.WriteString("└ ")
 			} else {
-				artifactPrefix.WriteString("├─ ")
+				artifactPrefix.WriteString("├ ")
 			}
 
 			*nodes = append(*nodes, &DisplayNode{Item: noteToItem(artifact), Prefix: artifactPrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(artifact, workspacePathMap, m.focusedWorkspace)})
@@ -1122,16 +1127,16 @@ func (m *Model) addArtifactSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspa
 func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, planGroups map[string][]*models.Note, archiveSubgroups map[string]map[string][]*models.Note, artifactSubgroups map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasGroupsAfter bool) {
 	// Calculate plans parent prefix
 	var plansPrefix strings.Builder
-	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
-	indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├ ", "│ ")
+	indentPrefix = strings.ReplaceAll(indentPrefix, "└ ", "  ")
 	plansPrefix.WriteString(indentPrefix)
 	if ws.Depth > 0 || ws.TreePrefix != "" {
 		plansPrefix.WriteString("  ")
 	}
 	if hasGroupsAfter {
-		plansPrefix.WriteString("├─ ") // Not last if other groups exist after
+		plansPrefix.WriteString("├ ") // Not last if other groups exist after
 	} else {
-		plansPrefix.WriteString("└─ ") // Plans is last if no other groups
+		plansPrefix.WriteString("└ ") // Plans is last if no other groups
 	}
 
 	// Add "plans" parent node
@@ -1202,10 +1207,10 @@ func (m *Model) addPlansArchiveGroup(nodes *[]*DisplayNode, ws *workspace.Worksp
 
 	// Calculate .archive prefix (last child under plans)
 	var archivePrefix strings.Builder
-	archiveIndent := strings.ReplaceAll(plansPrefix, "├─", "│ ")
-	archiveIndent = strings.ReplaceAll(archiveIndent, "└─", "  ")
+	archiveIndent := strings.ReplaceAll(plansPrefix, "├ ", "│ ")
+	archiveIndent = strings.ReplaceAll(archiveIndent, "└ ", "  ")
 	archivePrefix.WriteString(archiveIndent)
-	archivePrefix.WriteString("└─ ")
+	archivePrefix.WriteString("└ ")
 
 	// Add .archive parent node
 	// Create tree.Item for group
@@ -1251,16 +1256,16 @@ func (m *Model) addPlansArchiveGroup(nodes *[]*DisplayNode, ws *workspace.Worksp
 func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, holdPlanGroups map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasCompleted bool) {
 	// Calculate .hold parent prefix
 	var holdPrefix strings.Builder
-	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
-	indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├ ", "│ ")
+	indentPrefix = strings.ReplaceAll(indentPrefix, "└ ", "  ")
 	holdPrefix.WriteString(indentPrefix)
 	if ws.Depth > 0 || ws.TreePrefix != "" {
 		holdPrefix.WriteString("  ")
 	}
 	if hasCompleted {
-		holdPrefix.WriteString("├─ ") // Not last if completed exists
+		holdPrefix.WriteString("├ ") // Not last if completed exists
 	} else {
-		holdPrefix.WriteString("└─ ") // .hold is last if no completed
+		holdPrefix.WriteString("└ ") // .hold is last if no completed
 	}
 
 	// Add ".hold" parent node
@@ -1306,13 +1311,13 @@ func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 
 			// Calculate plan prefix
 			var planPrefix strings.Builder
-			planIndent := strings.ReplaceAll(holdPrefix.String(), "├─", "│ ")
-			planIndent = strings.ReplaceAll(planIndent, "└─", "  ")
+			planIndent := strings.ReplaceAll(holdPrefix.String(), "├ ", "│ ")
+			planIndent = strings.ReplaceAll(planIndent, "└ ", "  ")
 			planPrefix.WriteString(planIndent)
 			if isLastPlan {
-				planPrefix.WriteString("└─ ")
+				planPrefix.WriteString("└ ")
 			} else {
-				planPrefix.WriteString("├─ ")
+				planPrefix.WriteString("├ ")
 			}
 
 			// Add hold plan node
@@ -1340,13 +1345,13 @@ func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 				for ni, note := range planNotes {
 					isLastNote := ni == len(planNotes)-1
 					var notePrefix strings.Builder
-					noteIndent := strings.ReplaceAll(planPrefix.String(), "├─", "│ ")
-					noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+					noteIndent := strings.ReplaceAll(planPrefix.String(), "├ ", "│ ")
+					noteIndent = strings.ReplaceAll(noteIndent, "└ ", "  ")
 					notePrefix.WriteString(noteIndent)
 					if isLastNote {
-						notePrefix.WriteString("└─ ")
+						notePrefix.WriteString("└ ")
 					} else {
-						notePrefix.WriteString("├─ ")
+						notePrefix.WriteString("├ ")
 					}
 					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
 				}
@@ -1358,13 +1363,13 @@ func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 func (m *Model) addCompletedGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, completedNotes []*models.Note, archiveSubgroups map[string]map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string) {
 	// Calculate completed group prefix (always last)
 	var completedPrefix strings.Builder
-	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├─", "│ ")
-	indentPrefix = strings.ReplaceAll(indentPrefix, "└─", "  ")
+	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├ ", "│ ")
+	indentPrefix = strings.ReplaceAll(indentPrefix, "└ ", "  ")
 	completedPrefix.WriteString(indentPrefix)
 	if ws.Depth > 0 || ws.TreePrefix != "" {
 		completedPrefix.WriteString("  ")
 	}
-	completedPrefix.WriteString("└─ ") // Completed is always last
+	completedPrefix.WriteString("└ ") // Completed is always last
 
 	// Sort notes within the completed group
 	sort.SliceStable(completedNotes, func(i, j int) bool {
@@ -1403,13 +1408,13 @@ func (m *Model) addCompletedGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 		for j, note := range completedNotes {
 			isLastNote := j == len(completedNotes)-1 && !hasArchives
 			var notePrefix strings.Builder
-			noteIndent := strings.ReplaceAll(completedPrefix.String(), "├─", "│ ")
-			noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+			noteIndent := strings.ReplaceAll(completedPrefix.String(), "├ ", "│ ")
+			noteIndent = strings.ReplaceAll(noteIndent, "└ ", "  ")
 			notePrefix.WriteString(noteIndent)
 			if isLastNote {
-				notePrefix.WriteString("└─ ")
+				notePrefix.WriteString("└ ")
 			} else {
-				notePrefix.WriteString("├─ ")
+				notePrefix.WriteString("├ ")
 			}
 			*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 2, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
 		}
@@ -1460,9 +1465,9 @@ func (m *Model) addUngroupedSection(nodes *[]*DisplayNode, ungroupedWorkspaces [
 				// Check if this is the last ungrouped workspace
 				isLast := i == len(ungroupedWorkspaces)-1
 				if isLast {
-					adjustedPrefix = "  └─ "
+					adjustedPrefix = "  └ "
 				} else {
-					adjustedPrefix = "  ├─ "
+					adjustedPrefix = "  ├ "
 				}
 			}
 
@@ -1524,13 +1529,13 @@ func (m *Model) addNoteNodes(
 	for j, note := range notesInGroup {
 		isLastNote := j == len(notesInGroup)-1 && !hasFollowingSiblings
 		var notePrefix strings.Builder
-		noteIndent := strings.ReplaceAll(groupPrefix, "├─", "│ ")
-		noteIndent = strings.ReplaceAll(noteIndent, "└─", "  ")
+		noteIndent := strings.ReplaceAll(groupPrefix, "├ ", "│ ")
+		noteIndent = strings.ReplaceAll(noteIndent, "└ ", "  ")
 		notePrefix.WriteString(noteIndent)
 		if isLastNote {
-			notePrefix.WriteString("└─ ")
+			notePrefix.WriteString("└ ")
 		} else {
-			notePrefix.WriteString("├─ ")
+			notePrefix.WriteString("├ ")
 		}
 		*nodes = append(*nodes, &DisplayNode{
 			Item:         noteToItem(note),
@@ -1568,9 +1573,9 @@ func (m *Model) renderTree(
 		var childPrefix strings.Builder
 		childPrefix.WriteString(parentPrefix)
 		if isLastChild {
-			childPrefix.WriteString("└─ ")
+			childPrefix.WriteString("└ ")
 		} else {
-			childPrefix.WriteString("├─ ")
+			childPrefix.WriteString("├ ")
 		}
 
 		// 2. Create DisplayNode for this directory part
@@ -1616,9 +1621,9 @@ func (m *Model) renderTree(
 		if !m.collapsedNodes[nodeID] || hasSearchFilter {
 			var nextParentPrefix string
 			if isLastChild {
-				nextParentPrefix = parentPrefix + "   "
+				nextParentPrefix = parentPrefix + "  "
 			} else {
-				nextParentPrefix = parentPrefix + "│  "
+				nextParentPrefix = parentPrefix + "│ "
 			}
 
 			// Recurse for subdirectories

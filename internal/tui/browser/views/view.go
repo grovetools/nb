@@ -18,7 +18,6 @@ import (
 // This decouples data extraction from styling logic.
 type nodeRenderInfo struct {
 	prefix      string
-	fold        string // "▶ ", "▼ ", or ""
 	indicator   string // "■", note icon, or plan status icon
 	name        string
 	count      string // "(d)"
@@ -41,9 +40,70 @@ func (m *Model) View() string {
 	return m.renderTableView()
 }
 
+// recomputePrefixes recalculates tree prefixes for the currently visible nodes.
+// This ensures the tree lines (│, ├─, └─) are drawn correctly for the current view.
+func (m *Model) recomputePrefixes(nodes []*DisplayNode) {
+	if len(nodes) == 0 {
+		return
+	}
+
+	// Track if an ancestor at each depth is the last in its sibling group
+	ancestorIsLast := make(map[int]bool)
+
+	for i, node := range nodes {
+		if node.Item == nil { // Skip separators
+			continue
+		}
+
+		depth := node.Depth
+		var prefixBuilder strings.Builder
+
+		// Build the prefix from │ and spaces based on ancestors' status
+		for d := 0; d < depth; d++ {
+			if ancestorIsLast[d] {
+				prefixBuilder.WriteString("  ") // Ancestor was last, so no vertical line (2 chars)
+			} else {
+				prefixBuilder.WriteString("│ ") // Ancestor was not last, draw vertical line (2 chars)
+			}
+		}
+
+		// Determine if the current node is the last sibling at its depth
+		isLast := true
+		for j := i + 1; j < len(nodes); j++ {
+			if nodes[j].Item == nil {
+				continue
+			}
+			if nodes[j].Depth < depth {
+				// We've moved to a shallower depth, so this was the last
+				break
+			}
+			if nodes[j].Depth == depth {
+				// Found another node at the same depth
+				isLast = false
+				break
+			}
+		}
+
+		// Add the final branch character
+		if depth > 0 { // Don't add branch characters to root-level nodes
+			if isLast {
+				prefixBuilder.WriteString("└ ") // 2 chars (no horizontal dash)
+			} else {
+				prefixBuilder.WriteString("├ ") // 2 chars (no horizontal dash)
+			}
+		}
+
+		ancestorIsLast[depth] = isLast
+		node.Prefix = prefixBuilder.String()
+	}
+}
+
 // renderTreeView renders the hierarchical tree view.
 func (m *Model) renderTreeView() string {
 	var b strings.Builder
+
+	// Recompute prefixes for the current view
+	m.recomputePrefixes(m.displayNodes)
 
 	// Viewport calculation
 	viewportHeight := m.getViewportHeight()
@@ -69,7 +129,7 @@ func (m *Model) renderTreeView() string {
 		if info.isSeparator {
 			line = lipgloss.NewStyle().Faint(true).Render("  ─────")
 		} else {
-			prefix := theme.DefaultTheme.Muted.Render(info.prefix + info.fold)
+			prefix := theme.DefaultTheme.Muted.Render(info.prefix)
 			content := m.styleNodeContent(info, isSelected)
 			count := theme.DefaultTheme.Muted.Render(info.count)
 			line = cursor + prefix + content + count
@@ -185,7 +245,7 @@ func (m *Model) renderTableView() string {
 		if info.isSeparator {
 			styledNameCol = theme.DefaultTheme.Muted.Render(padOrTruncate("  ─────", nameWidth))
 		} else {
-			prefix := theme.DefaultTheme.Muted.Render(info.prefix + info.fold)
+			prefix := theme.DefaultTheme.Muted.Render(info.prefix)
 			content := m.styleNodeContent(info, isSelected)
 			count := theme.DefaultTheme.Muted.Render(info.count)
 			styledNameCol = padOrTruncate(prefix+content+count, nameWidth)
@@ -242,23 +302,18 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		return info
 	}
 
-	// Set fold indicator for foldable nodes
-	if node.IsFoldable() {
-		if m.collapsedNodes[node.NodeID()] {
-			info.fold = "▶ "
-		} else {
-			info.fold = "▼ "
-		}
-	} else {
-		// Add spacing for non-foldable items to align with foldable ones
-		info.fold = "  "
-	}
-
 	if node.IsWorkspace() {
 		info.isWorkspace = true
 		if ws, ok := node.Item.Metadata["Workspace"].(*workspace.WorkspaceNode); ok {
 			info.workspace = ws
 			info.name = ws.Name
+			if ws.Name == "global" {
+				info.indicator = theme.IconEarth
+			} else if ws.IsEcosystem() {
+				info.indicator = theme.IconFolderTree
+			} else { // It's a project/repo
+				info.indicator = theme.IconRepo
+			}
 		}
 	} else if node.IsGroup() {
 		info.isGroup = true
@@ -302,7 +357,7 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 				info.indicator = getPlanStatusIcon(planStatus) + " "
 			}
 		} else {
-			// Regular note groups - add their icons
+			// Regular note groups - add their semantic icons
 			icon := getGroupIcon(groupName)
 			if icon != "" {
 				info.indicator = icon
@@ -558,7 +613,7 @@ func (m *Model) calculateTableColumnWidths() [8]int {
 			if ws, ok := node.Item.Metadata["Workspace"].(*workspace.WorkspaceNode); ok {
 				wsName = ws.Name
 			}
-			nameLen := lipgloss.Width(fmt.Sprintf("%s%s", node.Prefix, wsName)) + 4 // +4 for fold indicator
+			nameLen := lipgloss.Width(fmt.Sprintf("%s%s", node.Prefix, wsName)) + 2 // +2 for icon
 			if nameLen > maxName {
 				maxName = nameLen
 			}
@@ -567,7 +622,7 @@ func (m *Model) calculateTableColumnWidths() [8]int {
 			if node.IsPlan() {
 				displayName = strings.TrimPrefix(displayName, "plans/")
 			}
-			nameLen := lipgloss.Width(fmt.Sprintf("%s%s", node.Prefix, displayName)) + 4
+			nameLen := lipgloss.Width(fmt.Sprintf("%s%s", node.Prefix, displayName)) + 2
 			if nameLen > maxName {
 				maxName = nameLen
 			}
