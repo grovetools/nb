@@ -1165,6 +1165,7 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 		for planName := range planGroups {
 			planNames = append(planNames, planName)
 		}
+		sort.Strings(planNames)
 
 		// Build hierarchical tree for plan names
 		planTree := buildGroupTree(planGroups, planNames)
