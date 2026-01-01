@@ -77,7 +77,17 @@ func (m *Model) recomputePrefixes(nodes []*DisplayNode) {
 					prefixBuilder.WriteString("│ ")
 				}
 			} else { // This is for an ancestor's vertical line.
-				if lastNodeAtDepth[d] {
+				isLastAncestor := lastNodeAtDepth[d]
+
+				// For children of root nodes (where ancestor depth d is 0),
+				// always behave as if the root is not the last item. This ensures
+				// the vertical line is always drawn for the children of every
+				// top-level workspace, creating a consistent look.
+				if d == 0 {
+					isLastAncestor = false
+				}
+
+				if isLastAncestor {
 					// The ancestor at this level was a "last" child, so we draw a space instead of a line.
 					prefixBuilder.WriteString("  ")
 				} else {
