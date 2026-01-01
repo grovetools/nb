@@ -1177,7 +1177,7 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 		config := treeRenderConfig{
 			itemType:            tree.TypePlan,
 			groupMetadataPrefix: "plans/",
-			nameUsesPrefix:      true,
+			nameUsesPrefix:      false,
 			includeArtifacts:    true,
 			includeArchives:     false,
 			includeClosed:       false,
@@ -1626,8 +1626,14 @@ func (m *Model) renderTree(
 				nextParentPrefix = parentPrefix + "│ "
 			}
 
+			// Prepare recursive config: subdirectories of a plan should be TypeGroup
+			var recursiveConfig = config
+			if config.itemType == tree.TypePlan {
+				recursiveConfig.itemType = tree.TypeGroup
+			}
+
 			// Recurse for subdirectories
-			m.renderTree(nodes, ws, child, nextParentPrefix, depth+1, hasSearchFilter, workspacePathMap, rootDir, config, false, archiveSubgroups, closedSubgroups, artifactSubgroups)
+			m.renderTree(nodes, ws, child, nextParentPrefix, depth+1, hasSearchFilter, workspacePathMap, rootDir, recursiveConfig, false, archiveSubgroups, closedSubgroups, artifactSubgroups)
 
 			// Render notes and special subgroups if this node corresponds to an original group
 			if len(child.notes) > 0 {

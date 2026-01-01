@@ -974,6 +974,9 @@ func (m *Model) getViewportHeight() int {
 func (m *Model) getGroupKey(node *DisplayNode) string {
 	if node.Item.Type == tree.TypeGroup || node.Item.Type == tree.TypePlan {
 		if wsName, ok := node.Item.Metadata["Workspace"].(string); ok {
+			if group, ok := node.Item.Metadata["Group"].(string); ok {
+				return wsName + ":" + group
+			}
 			return wsName + ":" + node.Item.Name
 		}
 	}

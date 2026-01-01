@@ -47,6 +47,9 @@ func (n *DisplayNode) IsFoldable() bool {
 func (n *DisplayNode) GroupKey() string {
 	if n.Item != nil && (n.Item.Type == tree.TypeGroup || n.Item.Type == tree.TypePlan) {
 		if wsName, ok := n.Item.Metadata["Workspace"].(string); ok {
+			if group, ok := n.Item.Metadata["Group"].(string); ok {
+				return wsName + ":" + group
+			}
 			return wsName + ":" + n.Item.Name
 		}
 	}
