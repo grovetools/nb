@@ -53,15 +53,6 @@ func (m *Model) recomputePrefixes(nodes []*DisplayNode) {
 		var prefixBuilder strings.Builder
 		depth := node.Depth
 
-		// Build the prefix from ancestor lines.
-		for d := 0; d < depth; d++ {
-			if lastNodeAtDepth[d] {
-				prefixBuilder.WriteString("  ") // Ancestor was last, so no vertical line.
-			} else {
-				prefixBuilder.WriteString("│ ") // Ancestor was not last, so draw vertical line.
-			}
-		}
-
 		// Determine if the current node is the last among its direct siblings.
 		isLast := true
 		for j := i + 1; j < len(nodes); j++ {
@@ -77,12 +68,22 @@ func (m *Model) recomputePrefixes(nodes []*DisplayNode) {
 			}
 		}
 
-		// Add the final branch character for the current node itself.
-		if depth > 0 {
-			if isLast {
-				prefixBuilder.WriteString("└ ")
-			} else {
-				prefixBuilder.WriteString("│ ")
+		// Build the prefix.
+		for d := 0; d < depth; d++ {
+			if d == depth-1 { // This is the node's own connector level.
+				if isLast {
+					prefixBuilder.WriteString("└ ")
+				} else {
+					prefixBuilder.WriteString("│ ")
+				}
+			} else { // This is for an ancestor's vertical line.
+				if lastNodeAtDepth[d] {
+					// The ancestor at this level was a "last" child, so we draw a space instead of a line.
+					prefixBuilder.WriteString("  ")
+				} else {
+					// The ancestor was not a "last" child, so we continue the vertical line.
+					prefixBuilder.WriteString("│ ")
+				}
 			}
 		}
 
