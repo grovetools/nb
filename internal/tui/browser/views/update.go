@@ -509,13 +509,13 @@ func (m *Model) BuildDisplayTree() {
 				nameA := regularGroups[i]
 				nameB := regularGroups[j]
 
-				// Get SortOrder from registry, default to 100 if not found
+				// Get SortOrder from registry, default to 100 if not found or if SortOrder is 0
 				sortOrderA := 100
 				sortOrderB := 100
-				if typeConfig, ok := m.service.NoteTypes[nameA]; ok {
+				if typeConfig, ok := m.service.NoteTypes[nameA]; ok && typeConfig.SortOrder != 0 {
 					sortOrderA = typeConfig.SortOrder
 				}
-				if typeConfig, ok := m.service.NoteTypes[nameB]; ok {
+				if typeConfig, ok := m.service.NoteTypes[nameB]; ok && typeConfig.SortOrder != 0 {
 					sortOrderB = typeConfig.SortOrder
 				}
 
@@ -533,10 +533,31 @@ func (m *Model) BuildDisplayTree() {
 			// Render groups in the sorted order
 			notesRootDir, err := m.service.GetNotebookLocator().GetNotesDir(ws, "")
 			if err == nil { // Proceed only if we can get the notes root directory
-				// Render all regular groups in their sorted order
-				if len(regularGroups) > 0 {
-					rootGroupNode := buildGroupTree(noteGroups, regularGroups)
-					hasFollowingTopLevelSiblings := hasPlans || hasHoldPlans
+				// Determine where to insert plans based on SortOrder
+				plansSortOrder := 100
+				if typeConfig, ok := m.service.NoteTypes["plans"]; ok && typeConfig.SortOrder != 0 {
+					plansSortOrder = typeConfig.SortOrder
+				}
+
+				// Split regular groups into those that come before and after plans
+				var groupsBeforePlans []string
+				var groupsAfterPlans []string
+				for _, groupName := range regularGroups {
+					groupSortOrder := 100
+					if typeConfig, ok := m.service.NoteTypes[groupName]; ok && typeConfig.SortOrder != 0 {
+						groupSortOrder = typeConfig.SortOrder
+					}
+					if groupSortOrder < plansSortOrder {
+						groupsBeforePlans = append(groupsBeforePlans, groupName)
+					} else {
+						groupsAfterPlans = append(groupsAfterPlans, groupName)
+					}
+				}
+
+				// Render groups before plans
+				if len(groupsBeforePlans) > 0 {
+					rootGroupNode := buildGroupTree(noteGroups, groupsBeforePlans)
+					hasFollowingTopLevelSiblings := hasPlans || len(groupsAfterPlans) > 0 || hasHoldPlans
 					config := treeRenderConfig{
 						itemType:            tree.TypeGroup,
 						groupMetadataPrefix: "",
@@ -548,13 +569,28 @@ func (m *Model) BuildDisplayTree() {
 					m.renderTree(&nodes, ws, rootGroupNode, ws.TreePrefix+"  ", ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, config, hasFollowingTopLevelSiblings, archiveSubgroups, closedSubgroups, artifactSubgroups)
 				}
 
-				// Render Plans Group (after regular groups if plans has high SortOrder)
+				// Render Plans Group in its sorted position
 				if hasPlans {
-					hasGroupsAfter := hasHoldPlans
+					hasGroupsAfter := len(groupsAfterPlans) > 0 || hasHoldPlans
 					m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, artifactSubgroups, hasSearchFilter, workspacePathMap, hasGroupsAfter)
 				}
 
-				// Render On-Hold Plans
+				// Render groups after plans
+				if len(groupsAfterPlans) > 0 {
+					rootGroupNode := buildGroupTree(noteGroups, groupsAfterPlans)
+					hasFollowingTopLevelSiblings := hasHoldPlans
+					config := treeRenderConfig{
+						itemType:            tree.TypeGroup,
+						groupMetadataPrefix: "",
+						nameUsesPrefix:      false,
+						includeArchives:     true,
+						includeClosed:       true,
+						includeArtifacts:    true,
+					}
+					m.renderTree(&nodes, ws, rootGroupNode, ws.TreePrefix+"  ", ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, config, hasFollowingTopLevelSiblings, archiveSubgroups, closedSubgroups, artifactSubgroups)
+				}
+
+				// Render On-Hold Plans (always last)
 				if hasHoldPlans {
 					m.addHoldPlansGroup(&nodes, ws, holdPlanGroups, hasSearchFilter, workspacePathMap, false)
 				}
