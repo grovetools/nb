@@ -577,8 +577,39 @@ related_notes: []
 		return nil, fmt.Errorf("create concept-manifest.yml: %w", err)
 	}
 
-	// Create overview.md
-	overviewContent := fmt.Sprintf("# Overview: %s\n\n## Summary\n\nA high-level summary of what this concept is about.\n", title)
+	// Create overview.md with proper frontmatter
+	now := time.Now()
+	timestampStr := frontmatter.FormatTimestamp(now)
+	tags := frontmatter.MergeTags([]string{"concepts"}, []string{currentContext.CurrentWorkspace.Name})
+	worktreeName := ""
+	if currentContext.CurrentWorkspace != nil {
+		worktreeName = currentContext.CurrentWorkspace.GetWorktreeName()
+	}
+
+	id := GenerateNoteID(title)
+	fm := &frontmatter.Frontmatter{
+		ID:       id,
+		Title:    title,
+		Type:     "concepts",
+		Aliases:  []string{},
+		Tags:     tags,
+		Created:  timestampStr,
+		Modified: timestampStr,
+	}
+
+	if currentContext.NotebookContextWorkspace.Name != "" && currentContext.NotebookContextWorkspace.Name != "global" {
+		fm.Repository = currentContext.NotebookContextWorkspace.Name
+		if currentContext.Branch != "" {
+			fm.Branch = currentContext.Branch
+		}
+		if worktreeName != "" {
+			fm.Worktree = worktreeName
+		}
+	}
+
+	overviewBody := fmt.Sprintf("# Overview: %s\n\n## Summary\n\nA high-level summary of what this concept is about.\n", title)
+	overviewContent := frontmatter.BuildContent(fm, overviewBody)
+
 	if err := os.WriteFile(filepath.Join(conceptPath, "overview.md"), []byte(overviewContent), 0644); err != nil {
 		return nil, fmt.Errorf("create overview.md: %w", err)
 	}

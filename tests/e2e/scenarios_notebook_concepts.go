@@ -93,6 +93,15 @@ notebooks:
 					v.Contains("manifest has related_concepts field", manifestContent, "related_concepts: []")
 					v.Contains("manifest has related_plans field", manifestContent, "related_plans: []")
 					v.Contains("manifest has related_notes field", manifestContent, "related_notes: []")
+
+					// Verify frontmatter in overview.md
+					v.Contains("overview starts with frontmatter delimiter", overviewContent, "---")
+					v.Contains("overview frontmatter has title", overviewContent, "title: My Test Concept")
+					v.Contains("overview frontmatter has type", overviewContent, "type: concepts")
+					v.Contains("overview frontmatter has tags", overviewContent, "tags: [concepts, test-project]")
+					v.Contains("overview frontmatter has repository", overviewContent, "repository: test-project")
+
+					// Verify body content
 					v.Contains("overview has title", overviewContent, "# Overview: My Test Concept")
 					v.Contains("overview has summary section", overviewContent, "## Summary")
 				})
