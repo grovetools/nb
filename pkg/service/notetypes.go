@@ -22,6 +22,13 @@ var DefaultNoteTypes = map[string]*coreconfig.NoteTypeConfig{
 		SortOrder:     11,
 		Description:   "Notes related to bugs or issues.",
 	},
+	"plans": {
+		Icon:          theme.IconPlan,
+		IconColor:     "blue",
+		DefaultExpand: true,
+		SortOrder:     13,
+		Description:   "Directory for structured project plans.",
+	},
 	"in_progress": {
 		Icon:          theme.IconNoteInProgress,
 		IconColor:     "blue",
@@ -42,13 +49,6 @@ var DefaultNoteTypes = map[string]*coreconfig.NoteTypeConfig{
 		DefaultExpand: false,
 		SortOrder:     999,
 		Description:   "Completed work and historical notes.",
-	},
-	"plans": {
-		Icon:          theme.IconPlan,
-		IconColor:     "blue",
-		DefaultExpand: true,
-		SortOrder:     15,
-		Description:   "Directory for structured project plans.",
 	},
 	"docs": {
 		Icon:       theme.IconDocs,
