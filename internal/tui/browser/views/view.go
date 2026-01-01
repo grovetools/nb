@@ -485,15 +485,7 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 
 	// 2. Apply type-specific base styling
 	if info.isWorkspace {
-		ws := info.workspace
-		style = style.Bold(true)
-		if ws.Name == "global" {
-			style = style.Foreground(theme.DefaultTheme.Colors.Green)
-		} else if ws.IsEcosystem() {
-			style = style.Foreground(theme.DefaultTheme.Colors.Cyan)
-		} else {
-			style = style.Foreground(theme.DefaultTheme.Colors.Violet)
-		}
+		style = style.Italic(true)
 	} else if info.isPlan {
 		// Individual plans are italic with default text color
 		style = style.Italic(true)
