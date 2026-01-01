@@ -244,3 +244,264 @@ notebooks:
 		},
 	)
 }
+
+// NotebookConceptAliasLinkingScenario verifies linking concepts using aliases.
+func NotebookConceptAliasLinkingScenario() *harness.Scenario {
+	return harness.NewScenario(
+		"notebook-concept-alias-linking",
+		"Verifies linking concepts to plans and notes using workspace aliases.",
+		[]string{"notebook", "concepts", "alias", "link"},
+		[]harness.Step{
+			harness.NewStep("Create concept and link to plan and note using aliases", func(ctx *harness.Context) error {
+				// 1. Setup global config for centralized notebook
+				globalYAML := `
+version: "1.0"
+notebooks:
+  rules:
+    default: "main"
+  definitions:
+    main:
+      root_dir: "~/.grove/notebooks/nb"
+`
+				globalConfigDir := filepath.Join(ctx.HomeDir(), ".config", "grove")
+				if err := fs.CreateDir(globalConfigDir); err != nil {
+					return fmt.Errorf("failed to create global config dir: %w", err)
+				}
+				if err := fs.WriteString(filepath.Join(globalConfigDir, "grove.yml"), globalYAML); err != nil {
+					return err
+				}
+
+				// 2. Setup test project
+				projectDir := ctx.NewDir("test-project")
+				if err := fs.WriteString(filepath.Join(projectDir, "grove.yml"), "name: test-project\nversion: '1.0'"); err != nil {
+					return err
+				}
+				if _, err := git.SetupTestRepo(projectDir); err != nil {
+					return err
+				}
+
+				// 3. Create a plan directory structure
+				plansDir := filepath.Join(projectDir, "plans", "my-test-plan")
+				if err := fs.CreateDir(plansDir); err != nil {
+					return err
+				}
+				planContent := "# Test Plan\n\nThis is a test plan for alias linking."
+				if err := fs.WriteString(filepath.Join(plansDir, "01-spec.md"), planContent); err != nil {
+					return err
+				}
+
+				// 4. Create a note in the centralized notebook
+				cmd := ctx.Bin("new", "--no-edit", "test note for linking").Dir(projectDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+
+				// Find the created note path from the centralized notebook
+				notesDir := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb", "workspaces", "test-project", "inbox")
+				noteFiles, err := fs.ListFiles(notesDir)
+				if err != nil {
+					return fmt.Errorf("failed to list note files: %w", err)
+				}
+				if len(noteFiles) != 1 {
+					return fmt.Errorf("expected 1 note file, got %d", len(noteFiles))
+				}
+				notePath := noteFiles[0]
+				noteBasename := filepath.Base(notePath)
+
+				// 5. Create a concept
+				cmd = ctx.Bin("concept", "new", "Architecture Overview").Dir(projectDir)
+				result = cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+
+				// 6. Link the plan using an alias
+				cmd = ctx.Bin("concept", "link", "plan", "architecture-overview", "test-project:plans/my-test-plan").Dir(projectDir)
+				result = cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+
+				// 7. Link the note using an alias
+				noteAlias := fmt.Sprintf("test-project:inbox/%s", noteBasename)
+				cmd = ctx.Bin("concept", "link", "note", "architecture-overview", noteAlias).Dir(projectDir)
+				result = cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+
+				// 8. Verify the manifest contains the aliases
+				manifestPath := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb", "workspaces", "test-project", "concepts", "architecture-overview", "concept-manifest.yml")
+				manifestContent, err := fs.ReadString(manifestPath)
+				if err != nil {
+					return err
+				}
+
+				return ctx.Verify(func(v *verify.Collector) {
+					v.Contains("manifest contains plan alias", manifestContent, "test-project:plans/my-test-plan")
+					v.Contains("manifest contains note alias", manifestContent, noteAlias)
+				})
+			}),
+		},
+	)
+}
+
+// NotebookConceptContextResolutionScenario verifies grove-context can resolve concept aliases.
+func NotebookConceptContextResolutionScenario() *harness.Scenario {
+	return harness.NewScenario(
+		"notebook-concept-context-resolution",
+		"Verifies that grove-context can resolve @concept directives with aliased resources.",
+		[]string{"notebook", "concepts", "context", "integration"},
+		[]harness.Step{
+			harness.NewStep("Create concept with aliases and verify cx resolution", func(ctx *harness.Context) error {
+				// 1. Setup global config for centralized notebook
+				globalYAML := `
+version: "1.0"
+notebooks:
+  rules:
+    default: "main"
+  definitions:
+    main:
+      root_dir: "~/.grove/notebooks/nb"
+`
+				globalConfigDir := filepath.Join(ctx.HomeDir(), ".config", "grove")
+				if err := fs.CreateDir(globalConfigDir); err != nil {
+					return fmt.Errorf("failed to create global config dir: %w", err)
+				}
+				if err := fs.WriteString(filepath.Join(globalConfigDir, "grove.yml"), globalYAML); err != nil {
+					return err
+				}
+
+				// 2. Setup test project
+				projectDir := ctx.NewDir("test-project")
+				if err := fs.WriteString(filepath.Join(projectDir, "grove.yml"), "name: test-project\nversion: '1.0'"); err != nil {
+					return err
+				}
+				if _, err := git.SetupTestRepo(projectDir); err != nil {
+					return err
+				}
+
+				// 3. Create a plan with recognizable content
+				plansDir := filepath.Join(projectDir, "plans", "architecture-plan")
+				if err := fs.CreateDir(plansDir); err != nil {
+					return err
+				}
+				planContent := "# Architecture Plan\n\nThis plan describes the architecture MARKER_PLAN_CONTENT."
+				if err := fs.WriteString(filepath.Join(plansDir, "01-spec.md"), planContent); err != nil {
+					return err
+				}
+
+				// 4. Create a note with recognizable content
+				cmd := ctx.Bin("new", "--no-edit", "architecture note").Dir(projectDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+
+				// Find and update the note with recognizable content
+				notesDir := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb", "workspaces", "test-project", "inbox")
+				noteFiles, err := fs.ListFiles(notesDir)
+				if err != nil {
+					return fmt.Errorf("failed to list note files: %w", err)
+				}
+				if len(noteFiles) != 1 {
+					return fmt.Errorf("expected 1 note file, got %d", len(noteFiles))
+				}
+				noteFilename := filepath.Base(noteFiles[0])
+				notePath := filepath.Join(notesDir, noteFilename)
+
+				// Append recognizable content to the note
+				existingContent, err := fs.ReadString(notePath)
+				if err != nil {
+					return err
+				}
+				noteContent := existingContent + "\n\nThis note contains MARKER_NOTE_CONTENT for testing."
+				if err := fs.WriteString(notePath, noteContent); err != nil {
+					return err
+				}
+
+				// 5. Create a concept
+				cmd = ctx.Bin("concept", "new", "System Architecture").Dir(projectDir)
+				result = cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+
+				// 6. Add recognizable content to concept overview
+				conceptPath := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb", "workspaces", "test-project", "concepts", "system-architecture")
+				overviewPath := filepath.Join(conceptPath, "overview.md")
+				existingOverview, err := fs.ReadString(overviewPath)
+				if err != nil {
+					return err
+				}
+				overviewContent := existingOverview + "\n\nThis concept overview contains MARKER_CONCEPT_CONTENT."
+				if err := fs.WriteString(overviewPath, overviewContent); err != nil {
+					return err
+				}
+
+				// 7. Link the plan and note using aliases
+				cmd = ctx.Bin("concept", "link", "plan", "system-architecture", "test-project:plans/architecture-plan").Dir(projectDir)
+				result = cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+
+				noteAlias := fmt.Sprintf("test-project:inbox/%s", noteFilename)
+				cmd = ctx.Bin("concept", "link", "note", "system-architecture", noteAlias).Dir(projectDir)
+				result = cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+
+				// 8. Create a rules file with @concept directive
+				rulesContent := "@concept: system-architecture\n"
+				rulesPath := filepath.Join(projectDir, ".context")
+				if err := fs.WriteString(rulesPath, rulesContent); err != nil {
+					return err
+				}
+
+				// 9. Run cx to resolve the concept
+				// Use the cx binary from the worktree (absolute path)
+				cxBinary := "/Users/solom4/Code/grove-ecosystem/.grove-worktrees/concepts-eco/grove-context/bin/cx"
+
+				// First set the rules to resolve the concept
+				cxSetRulesCmd := ctx.Command(cxBinary, "set-rules", ".context").Dir(projectDir)
+				cxSetRulesResult := cxSetRulesCmd.Run()
+				ctx.ShowCommandOutput(cxSetRulesCmd.String(), cxSetRulesResult.Stdout, cxSetRulesResult.Stderr)
+				if cxSetRulesResult.Error != nil {
+					return cxSetRulesResult.Error
+				}
+
+				// Then generate the context file
+				cxGenCmd := ctx.Command(cxBinary, "generate").Dir(projectDir)
+				cxGenResult := cxGenCmd.Run()
+				ctx.ShowCommandOutput(cxGenCmd.String(), cxGenResult.Stdout, cxGenResult.Stderr)
+				if cxGenResult.Error != nil {
+					return cxGenResult.Error
+				}
+
+				// 10. Read the generated context file
+				contextPath := filepath.Join(projectDir, ".grove", "context")
+				contextContent, err := fs.ReadString(contextPath)
+				if err != nil {
+					return fmt.Errorf("failed to read context file: %w", err)
+				}
+
+				return ctx.Verify(func(v *verify.Collector) {
+					v.Contains("context includes concept overview", contextContent, "MARKER_CONCEPT_CONTENT")
+					v.Contains("context includes plan content", contextContent, "MARKER_PLAN_CONTENT")
+					v.Contains("context includes note content", contextContent, "MARKER_NOTE_CONTENT")
+				})
+			}),
+		},
+	)
+}
