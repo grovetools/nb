@@ -504,12 +504,7 @@ notebooks:
 				return ctx.Verify(func(v *verify.Collector) {
 					v.Contains("context includes concept overview", contextContent, "MARKER_CONCEPT_CONTENT")
 					v.Contains("context includes plan content", contextContent, "MARKER_PLAN_CONTENT")
-					// Note: Note resolution from centralized notebooks requires additional work
-					// The alias test-project:inbox/file.md tries to resolve to <workspace>/inbox/file.md
-					// but centralized notes are actually in ~/.grove/notebooks/nb/workspaces/test-project/inbox/
-					// This would require the alias resolver to understand notebook configurations.
-					// For now, we verify that plan resolution works correctly.
-					// v.Contains("context includes note content", contextContent, "MARKER_NOTE_CONTENT")
+					v.Contains("context includes note content", contextContent, "MARKER_NOTE_CONTENT")
 				})
 			}),
 		},
