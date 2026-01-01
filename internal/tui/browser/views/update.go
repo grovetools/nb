@@ -2198,7 +2198,7 @@ func noteToItem(note *models.Note) *tree.Item {
 
 	item := &tree.Item{
 		Path:     note.Path,
-		Name:     note.Title,
+		Name:     filepath.Base(note.Path),
 		IsDir:    false,
 		ModTime:  note.ModifiedAt,
 		Type:     tree.TypeNote,

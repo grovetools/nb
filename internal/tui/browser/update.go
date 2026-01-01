@@ -280,8 +280,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loadingCount--
 		}
 		m.allItems = msg.items
-		// Only reset collapse state if focus just changed
-		if m.focusChanged {
+		// Set collapse state on focus change OR on initial load
+		if m.focusChanged || len(m.views.GetCollapseState()) == 0 {
 			m.setCollapseStateForFocus()
 			m.focusChanged = false
 		}
@@ -1410,7 +1410,7 @@ func (m *Model) collapseChildWorkspaces(parent *workspace.WorkspaceNode) {
 		// Check if this workspace is a child of parent
 		normWs, _ := pathutil.NormalizeForLookup(ws.Path)
 		if strings.HasPrefix(normWs, normParent+string(filepath.Separator)) {
-			wsNodeID := "ws:" + ws.Path
+			wsNodeID := "dir:" + ws.Path
 			collapsedNodes[wsNodeID] = true
 		}
 	}
@@ -1421,7 +1421,7 @@ func (m *Model) collapseChildWorkspaces(parent *workspace.WorkspaceNode) {
 func (m *Model) collapseAllWorkspaces() {
 	collapsedNodes := m.views.GetCollapseState()
 	for _, ws := range m.workspaces {
-		wsNodeID := "ws:" + ws.Path
+		wsNodeID := "dir:" + ws.Path
 		collapsedNodes[wsNodeID] = true
 	}
 	m.views.SetCollapseState(collapsedNodes)
@@ -1429,7 +1429,7 @@ func (m *Model) collapseAllWorkspaces() {
 
 // setCollapseStateForFocus systematically sets the collapse state based on the current focus level
 func (m *Model) setCollapseStateForFocus() {
-	collapsedNodes := m.views.GetCollapseState()
+	collapsedNodes := make(map[string]bool) // Start fresh
 
 	if m.focusedWorkspace == nil {
 		// Global/top level view: collapse all workspaces for a clean overview
@@ -1438,64 +1438,143 @@ func (m *Model) setCollapseStateForFocus() {
 		// Ecosystem focus: collapse ALL note groups and child workspaces
 		// to show a clean view of the ecosystem structure
 		// First, ensure the focused ecosystem itself is expanded
-		wsNodeID := "ws:" + m.focusedWorkspace.Path
+		wsNodeID := "dir:" + m.focusedWorkspace.Path
 		delete(collapsedNodes, wsNodeID)
 
 		// Collapse all child workspaces under this ecosystem
 		m.collapseChildWorkspaces(m.focusedWorkspace)
 
-		// Collapse ALL note groups within the focused ecosystem
-		// (inbox, learn, quick, etc.) BUT keep "plans" parent expanded
-		groupsSeen := make(map[string]bool)
-		for _, item := range m.allItems {
-			wsName, _ := item.Metadata["Workspace"].(string)
-			groupName, _ := item.Metadata["Group"].(string)
-			if wsName == m.focusedWorkspace.Name && !groupsSeen[groupName] {
-				groupNodeID := "grp:" + groupName
-				// Collapse individual plan directories but not other top-level groups
-				if strings.HasPrefix(groupName, "plans/") {
-					collapsedNodes[groupNodeID] = true
-				} else if groupName != "plans" {
-					// Collapse regular groups (inbox, learn, quick, etc.)
-					collapsedNodes[groupNodeID] = true
-				}
-				groupsSeen[groupName] = true
+		// Get workspace node from m.workspaces to ensure we use the same one as tree building
+		var wsNode *workspace.WorkspaceNode
+		for _, ws := range m.workspaces {
+			if ws.Name == m.focusedWorkspace.Name {
+				wsNode = ws
+				break
 			}
 		}
-		// Ensure the "plans" parent group is expanded
-		plansParentID := "grp:plans"
-		delete(collapsedNodes, plansParentID)
+		if wsNode == nil {
+			wsNode = m.focusedWorkspace
+		}
+
+		// Get both path types (same as leaf workspace logic)
+		notesRootDir, notesErr := m.service.GetNotebookLocator().GetNotesDir(wsNode, "")
+		if notesErr == nil {
+			wsPath := wsNode.Path
+
+			groupsSeen := make(map[string]bool)
+			for _, item := range m.allItems {
+				wsName, _ := item.Metadata["Workspace"].(string)
+				groupName, _ := item.Metadata["Group"].(string)
+				if wsName == m.focusedWorkspace.Name && !groupsSeen[groupName] {
+					var groupPath string
+					var groupNodeID string
+
+					if strings.HasPrefix(groupName, "plans/") {
+						planSubPath := strings.TrimPrefix(groupName, "plans/")
+						groupPath = filepath.Join(wsPath, "plans", planSubPath)
+						groupNodeID = "dir:" + groupPath
+						collapsedNodes[groupNodeID] = true
+					} else if groupName == "completed" {
+						// Completed uses ws.Path
+						groupPath = filepath.Join(wsPath, groupName)
+						groupNodeID = "dir:" + groupPath
+						collapsedNodes[groupNodeID] = true
+					} else if groupName != "plans" && groupName != "in_progress" {
+						// Regular groups use notesRootDir
+						groupPath = filepath.Join(notesRootDir, groupName)
+						groupNodeID = "dir:" + groupPath
+						collapsedNodes[groupNodeID] = true
+					}
+					groupsSeen[groupName] = true
+				}
+			}
+			// Ensure the "plans" and "in_progress" parent groups are expanded
+			plansGroupPath := filepath.Join(wsPath, "plans")
+			delete(collapsedNodes, "dir:"+plansGroupPath)
+			inProgressPath := filepath.Join(notesRootDir, "in_progress")
+			delete(collapsedNodes, "dir:"+inProgressPath)
+		}
 	} else {
-		// Leaf workspace focus: expand the workspace, collapse child workspaces and all note groups
-		// Ensure the focused workspace itself is expanded
-		wsNodeID := "ws:" + m.focusedWorkspace.Path
+		// Leaf workspace focus (e.g., repo or worktree)
+		// This implements the requested default folding behavior.
+
+		// 1. Collapse the global workspace
+		collapsedNodes["dir:::global"] = true
+
+		// 2. Ensure the focused workspace itself is expanded
+		wsNodeID := "dir:" + m.focusedWorkspace.Path
 		delete(collapsedNodes, wsNodeID)
 
-		// Collapse any child workspaces (if this workspace has children)
+		// 3. Collapse any child workspaces (if any)
 		m.collapseChildWorkspaces(m.focusedWorkspace)
 
-		// Collapse ALL note groups within the focused workspace
-		// EXCEPT "in_progress" and "plans" which remain expanded
+		// 4. Collapse/expand note groups according to rules
+		// CRITICAL: The tree building code is inconsistent!
+		// - addPlansGroup uses ws.Path for plans
+		// - addCompletedGroup uses ws.Path for completed
+		// - renderTree uses GetNotesDir() for inbox/issues via rootDir parameter
+		// We need to match BOTH patterns. Get both the workspace node and the notesRootDir.
+		var wsNode *workspace.WorkspaceNode
+		for _, ws := range m.workspaces {
+			if ws.Name == m.focusedWorkspace.Name {
+				wsNode = ws
+				break
+			}
+		}
+
+		if wsNode == nil {
+			wsNode = m.focusedWorkspace
+		}
+
+		// Get the notes root directory (used by renderTree for inbox/issues/etc)
+		notesRootDir, notesErr := m.service.GetNotebookLocator().GetNotesDir(wsNode, "")
+		if notesErr != nil {
+			// Silently skip if we can't get notes dir
+			return
+		}
+
+		// Also get ws.Path (used by addPlansGroup and addCompletedGroup)
+		wsPath := wsNode.Path
+
 		groupsSeen := make(map[string]bool)
 		for _, item := range m.allItems {
 			wsName, _ := item.Metadata["Workspace"].(string)
 			groupName, _ := item.Metadata["Group"].(string)
+
 			if wsName == m.focusedWorkspace.Name && !groupsSeen[groupName] {
-				groupNodeID := "grp:" + groupName
-				// Collapse individual plan directories
+				var groupPath string
+				var groupNodeID string
+
 				if strings.HasPrefix(groupName, "plans/") {
+					// This is an individual plan directory like "plans/nb-tui-tree"
+					// Extract just the plan name (e.g., "nb-tui-tree" from "plans/nb-tui-tree")
+					planName := strings.TrimPrefix(groupName, "plans/")
+					// Use ws.Path + "plans" + planName to match addPlansGroup (line 1177)
+					groupPath = filepath.Join(wsPath, "plans", planName)
+					groupNodeID = "dir:" + groupPath
+					// Rule: Collapse individual plan directories
+					collapsedNodes[groupNodeID] = true
+				} else if groupName == "completed" {
+					// Completed uses ws.Path (from addCompletedGroup line 1386)
+					groupPath = filepath.Join(wsPath, groupName)
+					groupNodeID = "dir:" + groupPath
 					collapsedNodes[groupNodeID] = true
 				} else if groupName != "plans" && groupName != "in_progress" {
-					// Collapse regular groups (inbox, issues, docs, etc.)
-					// but NOT in_progress or plans
+					// Regular note types like "inbox", "issues" use notesRootDir (from renderTree line 1601)
+					groupPath = filepath.Join(notesRootDir, groupName)
+					groupNodeID = "dir:" + groupPath
+					// Rule: Collapse all note type groups except plans and in_progress
 					collapsedNodes[groupNodeID] = true
 				}
 				groupsSeen[groupName] = true
 			}
 		}
-		// Ensure the "plans" and "in_progress" groups are expanded
-		delete(collapsedNodes, "grp:plans")
-		delete(collapsedNodes, "grp:in_progress")
+		// Rule: Ensure the top-level 'plans' group is expanded.
+		plansGroupPath := filepath.Join(wsPath, "plans")
+		delete(collapsedNodes, "dir:"+plansGroupPath)
+		// Rule: Ensure the top-level 'in_progress' group is expanded.
+		inProgressPath := filepath.Join(notesRootDir, "in_progress")
+		delete(collapsedNodes, "dir:"+inProgressPath)
 	}
 
 	m.views.SetCollapseState(collapsedNodes)

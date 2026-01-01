@@ -380,7 +380,7 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		// Convert Item to Note for compatibility
 		note := ItemToNote(node.Item)
 		info.note = note
-		info.name = note.Title
+		info.name = node.Item.Name
 		info.isArchived = strings.Contains(node.Item.Path, "/.archive/") || strings.Contains(node.Item.Path, "/.closed/")
 		info.isArtifact = node.Item.Type == tree.TypeArtifact
 		if _, ok := m.selected[node.Item.Path]; ok {
