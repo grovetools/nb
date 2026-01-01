@@ -113,6 +113,7 @@ type Model struct {
 	showOnHold          bool
 	filterValue         string
 	isGrepping          bool
+	pendingWorkspaceInit string // Workspace name to initialize child groups for after next rebuild
 	isFilteringByTag    bool
 	selectedTag         string
 	recentNotesMode     bool
@@ -280,7 +281,8 @@ func (m *Model) ToggleFold() {
 }
 
 // initializeChildGroupCollapseState sets the default collapse state for child groups
-// when a workspace is expanded. Groups with DefaultExpand=false are collapsed by default.
+// when a workspace is expanded. All groups are collapsed by default unless they have
+// DefaultExpand=true in the NoteTypes registry.
 func (m *Model) initializeChildGroupCollapseState(wsNode *DisplayNode) {
 	if wsNode == nil || !wsNode.IsWorkspace() {
 		return
@@ -292,24 +294,67 @@ func (m *Model) initializeChildGroupCollapseState(wsNode *DisplayNode) {
 		return
 	}
 
-	// For each group in the service's note types, set default collapse state
-	for groupName, typeConfig := range m.service.NoteTypes {
-		// Get the group's path
-		groupPath, err := m.service.GetNotebookLocator().GetGroupDir(ws, groupName)
-		if err != nil {
+	// We need to collapse all groups under this workspace that don't have explicit
+	// collapse state set. We'll do this by scanning all current display nodes after
+	// the tree rebuild and finding groups belonging to this workspace.
+
+	// Since BuildDisplayTree() will be called after this function returns, we can't
+	// iterate the display nodes here. Instead, we'll use a simple heuristic:
+	// recursively collapse all directory nodes under this workspace path.
+
+	// Get all directory paths under this workspace by checking existing collapsed state
+	// and adding new ones. But since we don't have the tree yet, let's use a different approach.
+
+	// The better solution: After rebuild, scan for any group nodes belonging to this
+	// workspace and initialize them. We'll store the workspace name and handle it
+	// after BuildDisplayTree completes.
+	m.pendingWorkspaceInit = ws.Name
+}
+
+// finalizePendingWorkspaceInit scans all display nodes and initializes collapse state
+// for any group nodes belonging to the pending workspace that don't already have state set.
+// Returns true if any nodes were collapsed (requiring a rebuild).
+func (m *Model) finalizePendingWorkspaceInit() bool {
+	if m.pendingWorkspaceInit == "" {
+		return false
+	}
+
+	collapsedCount := 0
+	for _, node := range m.displayNodes {
+		// Skip non-directories
+		if !node.IsFoldable() {
 			continue
 		}
 
-		groupNodeID := "dir:" + groupPath
+		// Check if this node belongs to the pending workspace
+		if wsName, ok := node.Item.Metadata["Workspace"].(string); ok && wsName == m.pendingWorkspaceInit {
+			nodeID := node.NodeID()
 
-		// If this group doesn't have a collapse state set yet, initialize it
-		if _, exists := m.collapsedNodes[groupNodeID]; !exists {
-			// Collapse by default unless DefaultExpand is true
-			if !typeConfig.DefaultExpand {
-				m.collapsedNodes[groupNodeID] = true
+			// If this node doesn't have collapse state set yet, initialize it
+			if _, exists := m.collapsedNodes[nodeID]; !exists {
+				// Check if this is a known group type with DefaultExpand
+				shouldExpand := false
+				if groupName, ok := node.Item.Metadata["Group"].(string); ok {
+					if typeConfig, ok := m.service.NoteTypes[groupName]; ok {
+						shouldExpand = typeConfig.DefaultExpand
+					}
+				}
+
+				// Collapse by default unless DefaultExpand is true
+				if !shouldExpand {
+					m.collapsedNodes[nodeID] = true
+					collapsedCount++
+				}
 			}
 		}
 	}
+
+	// Debug: log how many nodes we collapsed
+	if m.service != nil && m.service.Logger != nil {
+		m.service.Logger.Debugf("finalizePendingWorkspaceInit for %s: collapsed %d nodes", m.pendingWorkspaceInit, collapsedCount)
+	}
+
+	return collapsedCount > 0
 }
 
 // GetViewMode returns the current view mode.

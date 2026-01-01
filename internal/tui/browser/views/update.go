@@ -615,6 +615,22 @@ func (m *Model) BuildDisplayTree() {
 
 	m.displayNodes = nodes
 	m.ApplyLinks()
+
+	// Handle pending workspace initialization
+	// We need to check if any collapse state was actually set
+	needsRebuild := false
+	if m.pendingWorkspaceInit != "" {
+		needsRebuild = m.finalizePendingWorkspaceInit()
+		m.pendingWorkspaceInit = ""
+	}
+
+	// If we initialized collapse state, rebuild the tree to reflect the changes
+	if needsRebuild {
+		// Recursive call - but pendingWorkspaceInit is now empty so won't loop
+		m.BuildDisplayTree()
+		return
+	}
+
 	m.clampCursor()
 }
 
