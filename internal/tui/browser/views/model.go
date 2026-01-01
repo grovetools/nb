@@ -266,12 +266,50 @@ func (m *Model) ToggleFold() {
 		return
 	}
 	nodeID := node.NodeID()
-	if m.collapsedNodes[nodeID] {
+	wasCollapsed := m.collapsedNodes[nodeID]
+	if wasCollapsed {
 		delete(m.collapsedNodes, nodeID)
+		// When expanding a workspace, initialize default collapse state for its child groups
+		if node.IsWorkspace() {
+			m.initializeChildGroupCollapseState(node)
+		}
 	} else {
 		m.collapsedNodes[nodeID] = true
 	}
 	m.BuildDisplayTree()
+}
+
+// initializeChildGroupCollapseState sets the default collapse state for child groups
+// when a workspace is expanded. Groups with DefaultExpand=false are collapsed by default.
+func (m *Model) initializeChildGroupCollapseState(wsNode *DisplayNode) {
+	if wsNode == nil || !wsNode.IsWorkspace() {
+		return
+	}
+
+	// Get the workspace from metadata
+	ws, ok := wsNode.Item.Metadata["Workspace"].(*workspace.WorkspaceNode)
+	if !ok || ws == nil {
+		return
+	}
+
+	// For each group in the service's note types, set default collapse state
+	for groupName, typeConfig := range m.service.NoteTypes {
+		// Get the group's path
+		groupPath, err := m.service.GetNotebookLocator().GetGroupDir(ws, groupName)
+		if err != nil {
+			continue
+		}
+
+		groupNodeID := "dir:" + groupPath
+
+		// If this group doesn't have a collapse state set yet, initialize it
+		if _, exists := m.collapsedNodes[groupNodeID]; !exists {
+			// Collapse by default unless DefaultExpand is true
+			if !typeConfig.DefaultExpand {
+				m.collapsedNodes[groupNodeID] = true
+			}
+		}
+	}
 }
 
 // GetViewMode returns the current view mode.
