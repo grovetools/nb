@@ -391,8 +391,9 @@ notebooks:
 					return err
 				}
 
-				// 4. Create a plan with recognizable content
-				plansDir := filepath.Join(projectDir, "plans", "architecture-plan")
+				// 4. Create a plan with recognizable content in the centralized notebook
+				// Plans are stored in the notebook location, not the workspace
+				plansDir := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb", "workspaces", "test-project", "plans", "architecture-plan")
 				if err := fs.CreateDir(plansDir); err != nil {
 					return err
 				}
