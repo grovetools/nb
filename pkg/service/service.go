@@ -17,6 +17,7 @@ import (
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/tree"
 	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 )
 
 // CreateNoteWithContent creates a new note programmatically without opening an editor.
@@ -528,6 +529,222 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 	}).Info("Created new note")
 
 	return note, nil
+}
+
+// CreateConcept creates the directory structure for a new concept.
+func (s *Service) CreateConcept(ctx *WorkspaceContext, title string, options ...CreateOption) (*models.Note, error) {
+	opts := &createOptions{}
+	for _, opt := range options {
+		opt(opts)
+	}
+
+	var currentContext *WorkspaceContext
+	var err error
+
+	if opts.useGlobal {
+		currentContext, err = s.GetWorkspaceContext("global")
+	} else {
+		currentContext = ctx
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get workspace context for concept: %w", err)
+	}
+
+	// Get the base directory for concepts
+	conceptsDir, err := s.getNotePathForContext(currentContext, "concepts")
+	if err != nil {
+		return nil, fmt.Errorf("get concepts directory path: %w", err)
+	}
+
+	conceptID := sanitizeFilename(title)
+	conceptPath := filepath.Join(conceptsDir, conceptID)
+
+	if err := os.MkdirAll(conceptPath, 0755); err != nil {
+		return nil, fmt.Errorf("create concept directory: %w", err)
+	}
+
+	// Create concept-manifest.yml
+	manifestContent := fmt.Sprintf(
+`id: %s
+title: %s
+description: A brief description of the concept.
+status: active
+related_concepts: []
+related_plans: []
+related_notes: []
+`, conceptID, title)
+	if err := os.WriteFile(filepath.Join(conceptPath, "concept-manifest.yml"), []byte(manifestContent), 0644); err != nil {
+		return nil, fmt.Errorf("create concept-manifest.yml: %w", err)
+	}
+
+	// Create overview.md
+	overviewContent := fmt.Sprintf("# Overview: %s\n\n## Summary\n\nA high-level summary of what this concept is about.\n", title)
+	if err := os.WriteFile(filepath.Join(conceptPath, "overview.md"), []byte(overviewContent), 0644); err != nil {
+		return nil, fmt.Errorf("create overview.md: %w", err)
+	}
+
+	// Return a synthetic Note object representing the concept directory
+	return &models.Note{
+		Path:  conceptPath,
+		Title: title,
+		Type:  "concepts",
+	}, nil
+}
+
+// ConceptInfo represents metadata about a concept
+type ConceptInfo struct {
+	ID    string
+	Title string
+	Path  string
+}
+
+// ListConcepts lists all concepts in the workspace
+func (s *Service) ListConcepts(ctx *WorkspaceContext) ([]ConceptInfo, error) {
+	conceptsDir, err := s.getNotePathForContext(ctx, "concepts")
+	if err != nil {
+		return nil, fmt.Errorf("get concepts directory: %w", err)
+	}
+
+	entries, err := os.ReadDir(conceptsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read concepts directory: %w", err)
+	}
+
+	var concepts []ConceptInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		conceptID := entry.Name()
+		conceptPath := filepath.Join(conceptsDir, conceptID)
+		manifestPath := filepath.Join(conceptPath, "concept-manifest.yml")
+
+		// Read manifest to get title
+		manifestData, err := os.ReadFile(manifestPath)
+		if err != nil {
+			// Skip if no manifest
+			continue
+		}
+
+		var manifest struct {
+			Title string `yaml:"title"`
+		}
+		if err := yaml.Unmarshal(manifestData, &manifest); err != nil {
+			// Skip if invalid manifest
+			continue
+		}
+
+		concepts = append(concepts, ConceptInfo{
+			ID:    conceptID,
+			Title: manifest.Title,
+			Path:  conceptPath,
+		})
+	}
+
+	return concepts, nil
+}
+
+// LinkPlanToConcept adds a plan reference to a concept's manifest
+func (s *Service) LinkPlanToConcept(ctx *WorkspaceContext, conceptID, planAlias string) error {
+	conceptsDir, err := s.getNotePathForContext(ctx, "concepts")
+	if err != nil {
+		return fmt.Errorf("get concepts directory: %w", err)
+	}
+
+	manifestPath := filepath.Join(conceptsDir, conceptID, "concept-manifest.yml")
+	return s.addToManifestList(manifestPath, "related_plans", planAlias)
+}
+
+// LinkNoteToConcept adds a note reference to a concept's manifest
+func (s *Service) LinkNoteToConcept(ctx *WorkspaceContext, conceptID, noteAlias string) error {
+	conceptsDir, err := s.getNotePathForContext(ctx, "concepts")
+	if err != nil {
+		return fmt.Errorf("get concepts directory: %w", err)
+	}
+
+	manifestPath := filepath.Join(conceptsDir, conceptID, "concept-manifest.yml")
+	return s.addToManifestList(manifestPath, "related_notes", noteAlias)
+}
+
+// LinkConceptToConcept adds a concept-to-concept reference
+func (s *Service) LinkConceptToConcept(ctx *WorkspaceContext, sourceID, targetID string) error {
+	conceptsDir, err := s.getNotePathForContext(ctx, "concepts")
+	if err != nil {
+		return fmt.Errorf("get concepts directory: %w", err)
+	}
+
+	manifestPath := filepath.Join(conceptsDir, sourceID, "concept-manifest.yml")
+	return s.addToManifestList(manifestPath, "related_concepts", targetID)
+}
+
+// addToManifestList adds a value to a list field in a YAML manifest file
+func (s *Service) addToManifestList(manifestPath, fieldName, value string) error {
+	// Read the manifest
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("read manifest: %w", err)
+	}
+
+	// Parse with yaml.v3 to preserve structure
+	var node yaml.Node
+	if err := yaml.Unmarshal(manifestData, &node); err != nil {
+		return fmt.Errorf("parse manifest: %w", err)
+	}
+
+	// Find the mapping node (root should be a document node containing a mapping)
+	if len(node.Content) == 0 || node.Content[0].Kind != yaml.MappingNode {
+		return fmt.Errorf("invalid manifest structure")
+	}
+	mappingNode := node.Content[0]
+
+	// Find the field in the mapping
+	var sequenceNode *yaml.Node
+	for i := 0; i < len(mappingNode.Content); i += 2 {
+		keyNode := mappingNode.Content[i]
+		valueNode := mappingNode.Content[i+1]
+
+		if keyNode.Value == fieldName {
+			if valueNode.Kind != yaml.SequenceNode {
+				return fmt.Errorf("field %s is not a sequence", fieldName)
+			}
+			sequenceNode = valueNode
+			break
+		}
+	}
+
+	if sequenceNode == nil {
+		return fmt.Errorf("field %s not found in manifest", fieldName)
+	}
+
+	// Check if value already exists
+	for _, item := range sequenceNode.Content {
+		if item.Value == value {
+			return nil // Already exists, nothing to do
+		}
+	}
+
+	// Append the new value
+	newNode := &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Value: value,
+	}
+	sequenceNode.Content = append(sequenceNode.Content, newNode)
+
+	// Write back
+	output, err := yaml.Marshal(&node)
+	if err != nil {
+		return fmt.Errorf("marshal manifest: %w", err)
+	}
+
+	if err := os.WriteFile(manifestPath, output, 0644); err != nil {
+		return fmt.Errorf("write manifest: %w", err)
+	}
+
+	return nil
 }
 
 // SearchNotes searches for notes matching the query using filesystem tools.

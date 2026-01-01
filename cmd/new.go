@@ -91,6 +91,16 @@ Examples:
 				opts = append(opts, service.InGlobalWorkspace())
 			}
 
+			// Handle concepts type specially
+			if actualNoteType == "concepts" {
+				note, err := s.CreateConcept(ctx, title, opts...)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("Created concept: %s\n", note.Path)
+				return nil
+			}
+
 			// Create the note
 			note, err := s.CreateNote(ctx, models.NoteType(actualNoteType), title, opts...)
 			if err != nil {

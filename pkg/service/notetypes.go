@@ -111,4 +111,11 @@ var DefaultNoteTypes = map[string]*coreconfig.NoteTypeConfig{
 		Icon:        theme.IconChecklist,
 		Description: "Task lists and todos.",
 	},
+	"concepts": {
+		Icon:          theme.IconLightbulb,
+		IconColor:     "cyan",
+		SortOrder:     60,
+		DefaultExpand: true,
+		Description:   "Project concepts and architectural memory.",
+	},
 }

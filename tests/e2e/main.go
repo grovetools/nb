@@ -21,6 +21,9 @@ func main() {
 		NotebookFileBrowserScenario(),
 		NotebookTUIScenario(),
 		NotebookTUIComprehensiveScenario(),
+		NotebookConceptBasicScenario(),
+		NotebookConceptListScenario(),
+		NotebookConceptLinkingScenario(),
 	}
 
 	// Setup signal handling for graceful shutdown.
