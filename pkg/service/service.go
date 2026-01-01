@@ -304,6 +304,7 @@ type Service struct {
 	Config            *Config
 	CoreConfig        *coreconfig.Config
 	Logger            *logrus.Entry
+	NoteTypes         map[string]*coreconfig.NoteTypeConfig
 }
 
 // Config holds service configuration
@@ -318,12 +319,63 @@ type Config struct {
 func New(config *Config, provider *coreworkspace.Provider, coreCfg *coreconfig.Config, logger *logrus.Entry) (*Service, error) {
 	notebookLocator := coreworkspace.NewNotebookLocator(coreCfg)
 
+	// Build the final note type registry
+	finalNoteTypes := make(map[string]*coreconfig.NoteTypeConfig)
+
+	// 1. Load built-in defaults
+	for name, cfg := range DefaultNoteTypes {
+		// Create a copy to avoid shared pointers
+		copyCfg := *cfg
+		finalNoteTypes[name] = &copyCfg
+	}
+
+	// 2. Merge user-defined types from grove.yml, overriding defaults
+	if coreCfg != nil && coreCfg.Notebooks != nil && coreCfg.Notebooks.Definitions != nil {
+		// Get default notebook name
+		defaultNotebookName := "default"
+		if coreCfg.Notebooks.Rules != nil && coreCfg.Notebooks.Rules.Default != "" {
+			defaultNotebookName = coreCfg.Notebooks.Rules.Default
+		}
+		if notebook, ok := coreCfg.Notebooks.Definitions[defaultNotebookName]; ok && notebook != nil && notebook.Types != nil {
+			for name, userCfg := range notebook.Types {
+				if existingCfg, exists := finalNoteTypes[name]; exists {
+					// Merge user config with existing default
+					if userCfg.Icon != "" {
+						existingCfg.Icon = userCfg.Icon
+					}
+					if userCfg.IconColor != "" {
+						existingCfg.IconColor = userCfg.IconColor
+					}
+					if userCfg.DefaultExpand {
+						existingCfg.DefaultExpand = userCfg.DefaultExpand
+					}
+					if userCfg.SortOrder != 0 {
+						existingCfg.SortOrder = userCfg.SortOrder
+					}
+					if userCfg.Description != "" {
+						existingCfg.Description = userCfg.Description
+					}
+					if userCfg.TemplatePath != "" {
+						existingCfg.TemplatePath = userCfg.TemplatePath
+					}
+					if userCfg.FilenameFormat != "" {
+						existingCfg.FilenameFormat = userCfg.FilenameFormat
+					}
+				} else {
+					// User defined a completely new type
+					finalNoteTypes[name] = userCfg
+				}
+			}
+		}
+	}
+
 	return &Service{
 		workspaceProvider: provider,
 		notebookLocator:   notebookLocator,
 		Config:            config,
 		CoreConfig:        coreCfg,
 		Logger:            logger,
+		NoteTypes:         finalNoteTypes,
 	}, nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	coreconfig "github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
@@ -335,21 +336,21 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		// For archive parent nodes (e.g., "current/.archive" or "plans/.archive"), display just ".archive"
 		if strings.HasSuffix(groupName, "/.archive") {
 			info.name = ".archive"
-			icon := getGroupIcon(".archive")
+			icon := getGroupIcon(".archive", m.service.NoteTypes)
 			if icon != "" {
 				info.indicator = icon
 			}
 		} else if strings.HasSuffix(groupName, "/.closed") {
 			// For closed parent nodes (e.g., "github-issues/.closed"), display just ".closed"
 			info.name = ".closed"
-			icon := getGroupIcon(".closed")
+			icon := getGroupIcon(".closed", m.service.NoteTypes)
 			if icon != "" {
 				info.indicator = icon
 			}
 		} else if strings.HasSuffix(groupName, "/.artifacts") {
 			// For artifact parent nodes, display just ".artifacts"
 			info.name = ".artifacts"
-			icon := getGroupIcon(".artifacts")
+			icon := getGroupIcon(".artifacts", m.service.NoteTypes)
 			if icon != "" {
 				info.indicator = icon
 			}
@@ -368,7 +369,7 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 			}
 		} else {
 			// Regular note groups - add their semantic icons
-			icon := getGroupIcon(groupName)
+			icon := getGroupIcon(groupName, m.service.NoteTypes)
 			if icon != "" {
 				info.indicator = icon
 			}
@@ -435,41 +436,18 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 		var iconColor lipgloss.TerminalColor
 		applyColor := false
 
-		switch info.name {
-		case "issues", "github-issues":
-			// Issue groups use red (error color)
-			iconColor = theme.DefaultTheme.Colors.Red
+		// Look up the icon color from NoteTypes registry
+		if typeConfig, ok := m.service.NoteTypes[info.name]; ok && typeConfig.IconColor != "" {
+			iconColor = m.mapColorString(typeConfig.IconColor)
 			applyColor = true
-		case "inbox", "docs", "learn":
-			// Workflow groups use orange (bright yellow in terminal theme)
-			iconColor = theme.DefaultTheme.Colors.Orange
-			applyColor = true
-		case "in_progress":
-			// In progress uses blue like plans (will be italicized below)
+		} else if info.isPlan {
+			// Individual plans use blue (fallback if not in registry)
 			iconColor = theme.DefaultTheme.Colors.Blue
 			applyColor = true
-		case "review", "github-prs":
-			// Review groups use pink
-			iconColor = theme.DefaultTheme.Colors.Pink
+		} else if info.indicator == theme.IconFolder {
+			// Generic directory icons use cyan
+			iconColor = theme.DefaultTheme.Colors.Cyan
 			applyColor = true
-		case "completed":
-			// Completed uses green
-			iconColor = theme.DefaultTheme.Colors.Green
-			applyColor = true
-		case "plans":
-			// Plans uses blue
-			iconColor = theme.DefaultTheme.Colors.Blue
-			applyColor = true
-		default:
-			if info.isPlan {
-				// Individual plans use blue
-				iconColor = theme.DefaultTheme.Colors.Blue
-				applyColor = true
-			} else if info.indicator == theme.IconFolder {
-				// Generic directory icons use cyan
-				iconColor = theme.DefaultTheme.Colors.Cyan
-				applyColor = true
-			}
 		}
 
 		if applyColor {
@@ -570,6 +548,27 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 	}
 
 	return content + styledName + suffix
+}
+
+// mapColorString maps a color string from config to a lipgloss.TerminalColor
+func (m *Model) mapColorString(colorStr string) lipgloss.TerminalColor {
+	switch colorStr {
+	case "red":
+		return theme.DefaultTheme.Colors.Red
+	case "orange":
+		return theme.DefaultTheme.Colors.Orange
+	case "blue":
+		return theme.DefaultTheme.Colors.Blue
+	case "pink":
+		return theme.DefaultTheme.Colors.Pink
+	case "green":
+		return theme.DefaultTheme.Colors.Green
+	case "cyan":
+		return theme.DefaultTheme.Colors.Cyan
+	default:
+		// Treat any other value as a direct lipgloss.Color value
+		return lipgloss.Color(colorStr)
+	}
 }
 
 // getSearchHighlightIndices returns the start and end indices of the search match, or -1, -1 if no match
@@ -838,39 +837,13 @@ func getNoteIcon(noteType string) string {
 }
 
 // getGroupIcon returns the appropriate icon for a note group
-func getGroupIcon(groupName string) string {
-	switch groupName {
-	case "github-issues":
-		return theme.IconIssueOpened
-	case "github-prs":
-		return theme.IconPullRequest
-	case "current":
-		return theme.IconNoteCurrent
-	case "issues":
-		return theme.IconNoteIssues
-	case "inbox":
-		return theme.IconNoteInbox
-	case "completed":
-		return theme.IconNoteCompleted
-	case "review":
-		return theme.IconNoteReview
-	case "in_progress":
-		return theme.IconNoteInProgress
-	case "learn":
-		return theme.IconSchool
-	case "docs":
-		return theme.IconDocs
-	case "plans":
-		return theme.IconPlan
-	case ".archive":
-		return theme.IconArchive
-	case ".closed":
-		return theme.IconArchive
-	case ".artifacts":
-		return theme.IconDocs
-	default:
-		return theme.IconFolder // Use as a generic folder icon
+func getGroupIcon(groupName string, noteTypes map[string]*coreconfig.NoteTypeConfig) string {
+	// Look up the icon from the NoteTypes registry
+	if typeConfig, ok := noteTypes[groupName]; ok && typeConfig.Icon != "" {
+		return typeConfig.Icon
 	}
+	// Fallback to a generic folder icon
+	return theme.IconFolder
 }
 
 // getPlanStatus reads the plan status from the .grove-plan.yml file

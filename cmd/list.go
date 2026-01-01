@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	coreconfig "github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
@@ -81,7 +82,7 @@ Examples:
 				if listJSON {
 					return outputJSON(repoNotes)
 				} else {
-					printNotesTable(repoNotes)
+					printNotesTable(repoNotes, s.NoteTypes)
 				}
 				return nil
 			}
@@ -120,7 +121,7 @@ Examples:
 				if listJSON {
 					return outputJSON(allNotes)
 				} else {
-					printNotesTable(allNotes)
+					printNotesTable(allNotes, s.NoteTypes)
 				}
 				return nil
 			}
@@ -167,7 +168,7 @@ Examples:
 				if listJSON {
 					return outputJSON(allNotes)
 				} else {
-					printNotesTable(allNotes)
+					printNotesTable(allNotes, s.NoteTypes)
 				}
 				return nil
 			}
@@ -210,7 +211,7 @@ Examples:
 			if listJSON {
 				return outputJSON(notes)
 			} else {
-				printNotesTable(notes)
+				printNotesTable(notes, s.NoteTypes)
 			}
 
 			return nil
@@ -228,7 +229,7 @@ Examples:
 	return cmd
 }
 
-func printNotesTable(notes []*models.Note) {
+func printNotesTable(notes []*models.Note, noteTypes map[string]*coreconfig.NoteTypeConfig) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 
 	// Print header
@@ -237,7 +238,7 @@ func printNotesTable(notes []*models.Note) {
 
 	// Print each note
 	for _, note := range notes {
-		typeIcon := getNoteTypeIcon(note.Type)
+		typeIcon := getNoteTypeIcon(noteTypes, note.Type)
 		typeAbbrev := getTypeAbbreviation(note.Type)
 		typeStr := fmt.Sprintf("%s %s", typeIcon, typeAbbrev)
 		dateStr := note.ModifiedAt.Format("2006-01-02")
@@ -250,37 +251,13 @@ func printNotesTable(notes []*models.Note) {
 	w.Flush()
 }
 
-func getNoteTypeIcon(noteType models.NoteType) string {
-	switch noteType {
-	case "current", "inbox":
-		return theme.IconNoteCurrent
-	case "claude_session":
-		return theme.IconInteractiveAgent
-	case "llm":
-		return theme.IconInteractiveAgent
-	case "learn":
-		return theme.IconSchool
-	case "daily":
-		return theme.IconCalendar
-	case "issues":
-		return theme.IconIssueOpened
-	case "github-prs":
-		return theme.IconPullRequest
-	case "architecture":
-		return theme.IconArchitecture
-	case "todos":
-		return theme.IconChecklist
-	case "quick":
-		return theme.IconClockFast
-	case "blog":
-		return theme.IconRss
-	case "prompts":
-		return theme.IconLightbulb
-	case "docs":
-		return theme.IconDocs
-	default:
-		return theme.IconNote
+func getNoteTypeIcon(noteTypes map[string]*coreconfig.NoteTypeConfig, noteType models.NoteType) string {
+	// Look up the icon from the NoteTypes registry
+	if typeConfig, ok := noteTypes[string(noteType)]; ok && typeConfig.Icon != "" {
+		return typeConfig.Icon
 	}
+	// Fallback to a generic note icon
+	return theme.IconNote
 }
 
 func getTypeAbbreviation(noteType models.NoteType) string {

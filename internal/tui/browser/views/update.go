@@ -503,80 +503,40 @@ func (m *Model) BuildDisplayTree() {
 					regularGroups = append(regularGroups, name)
 				}
 			}
-			// NEW: Categorize groups for workflow-based sorting
-			var workflowGroups, plainGroups, executionGroups, reviewGroups []string
-			var completedGroup string
-			var hasCompleted bool
+			// Sort groups using SortOrder from NoteTypes registry
+			// Groups with lower SortOrder appear first, then alphabetically by name
+			sort.SliceStable(regularGroups, func(i, j int) bool {
+				nameA := regularGroups[i]
+				nameB := regularGroups[j]
 
-			// Separate regular groups from special ones
-			for _, name := range regularGroups {
-				switch name {
-				case "inbox", "issues", "github-issues", "docs", "learn":
-					workflowGroups = append(workflowGroups, name)
-				case "in_progress":
-					executionGroups = append(executionGroups, name)
-				case "review", "github-prs":
-					reviewGroups = append(reviewGroups, name)
-				case "completed":
-					completedGroup = name
-					hasCompleted = true
-				default:
-					plainGroups = append(plainGroups, name)
+				// Get SortOrder from registry, default to 100 if not found
+				sortOrderA := 100
+				sortOrderB := 100
+				if typeConfig, ok := m.service.NoteTypes[nameA]; ok {
+					sortOrderA = typeConfig.SortOrder
 				}
-			}
+				if typeConfig, ok := m.service.NoteTypes[nameB]; ok {
+					sortOrderB = typeConfig.SortOrder
+				}
 
-			// Sort workflow groups with specific order (intake first, then issue tracking)
-			workflowOrder := map[string]int{
-				"inbox":         1,
-				"issues":        2,
-				"github-issues": 3,
-				"docs":          4,
-				"learn":         5,
-			}
-			sort.Slice(workflowGroups, func(i, j int) bool {
-				orderA, okA := workflowOrder[workflowGroups[i]]
-				orderB, okB := workflowOrder[workflowGroups[j]]
-				if !okA {
-					orderA = 99
+				// Sort by SortOrder first, then alphabetically
+				if sortOrderA != sortOrderB {
+					return sortOrderA < sortOrderB
 				}
-				if !okB {
-					orderB = 99
-				}
-				if orderA == orderB {
-					return workflowGroups[i] < workflowGroups[j]
-				}
-				return orderA < orderB
+				return nameA < nameB
 			})
-
-			// Sort other categories alphabetically
-			sort.Strings(plainGroups)
-			sort.Strings(executionGroups)
-			sort.Strings(reviewGroups)
-
-			// Combine workflow and plain groups for the first rendering block
-			topLevelGroups := append(workflowGroups, plainGroups...)
 
 			// Check if we have plans to add a "plans" parent group
 			hasPlans := len(planGroups) > 0 || len(archiveSubgroups["plans"]) > 0
 			hasHoldPlans := len(holdPlanGroups) > 0
-			totalGroups := len(regularGroups)
-			if hasPlans {
-				totalGroups++
-			}
-			if hasHoldPlans {
-				totalGroups++
-			}
-			if hasCompleted {
-				totalGroups++
-			}
 
-			// Render groups in the desired order
+			// Render groups in the sorted order
 			notesRootDir, err := m.service.GetNotebookLocator().GetNotesDir(ws, "")
 			if err == nil { // Proceed only if we can get the notes root directory
-				// 1. Render Workflow and Plain Groups
-				if len(topLevelGroups) > 0 {
-					rootGroupNode := buildGroupTree(noteGroups, topLevelGroups)
-					hasFollowingTopLevelSiblings := hasPlans || hasHoldPlans || len(executionGroups) > 0 || len(reviewGroups) > 0 || hasCompleted
+				// Render all regular groups in their sorted order
+				if len(regularGroups) > 0 {
+					rootGroupNode := buildGroupTree(noteGroups, regularGroups)
+					hasFollowingTopLevelSiblings := hasPlans || hasHoldPlans
 					config := treeRenderConfig{
 						itemType:            tree.TypeGroup,
 						groupMetadataPrefix: "",
@@ -588,50 +548,15 @@ func (m *Model) BuildDisplayTree() {
 					m.renderTree(&nodes, ws, rootGroupNode, ws.TreePrefix+"  ", ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, config, hasFollowingTopLevelSiblings, archiveSubgroups, closedSubgroups, artifactSubgroups)
 				}
 
-				// 2. Render Plans Group
+				// Render Plans Group (after regular groups if plans has high SortOrder)
 				if hasPlans {
-					hasGroupsAfter := hasHoldPlans || len(executionGroups) > 0 || len(reviewGroups) > 0 || hasCompleted
+					hasGroupsAfter := hasHoldPlans
 					m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, artifactSubgroups, hasSearchFilter, workspacePathMap, hasGroupsAfter)
 				}
 
-				// 3. Render Execution Groups (in_progress)
-				if len(executionGroups) > 0 {
-					rootGroupNode := buildGroupTree(noteGroups, executionGroups)
-					hasFollowingTopLevelSiblings := hasHoldPlans || len(reviewGroups) > 0 || hasCompleted
-					config := treeRenderConfig{
-						itemType:            tree.TypeGroup,
-						groupMetadataPrefix: "",
-						nameUsesPrefix:      false,
-						includeArchives:     true,
-						includeClosed:       true,
-						includeArtifacts:    true,
-					}
-					m.renderTree(&nodes, ws, rootGroupNode, ws.TreePrefix+"  ", ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, config, hasFollowingTopLevelSiblings, archiveSubgroups, closedSubgroups, artifactSubgroups)
-				}
-
-				// 4. Render Review Groups
-				if len(reviewGroups) > 0 {
-					rootGroupNode := buildGroupTree(noteGroups, reviewGroups)
-					hasFollowingTopLevelSiblings := hasHoldPlans || hasCompleted
-					config := treeRenderConfig{
-						itemType:            tree.TypeGroup,
-						groupMetadataPrefix: "",
-						nameUsesPrefix:      false,
-						includeArchives:     true,
-						includeClosed:       true,
-						includeArtifacts:    true,
-					}
-					m.renderTree(&nodes, ws, rootGroupNode, ws.TreePrefix+"  ", ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, config, hasFollowingTopLevelSiblings, archiveSubgroups, closedSubgroups, artifactSubgroups)
-				}
-
-				// 5. Render On-Hold Plans
+				// Render On-Hold Plans
 				if hasHoldPlans {
-					m.addHoldPlansGroup(&nodes, ws, holdPlanGroups, hasSearchFilter, workspacePathMap, hasCompleted)
-				}
-
-				// 6. Render Completed Group
-				if hasCompleted {
-					m.addCompletedGroup(&nodes, ws, noteGroups[completedGroup], archiveSubgroups, hasSearchFilter, workspacePathMap)
+					m.addHoldPlansGroup(&nodes, ws, holdPlanGroups, hasSearchFilter, workspacePathMap, false)
 				}
 			}
 		}
@@ -1139,9 +1064,16 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 		plansPrefix.WriteString("└ ") // Plans is last if no other groups
 	}
 
+	// Use GetGroupDir for centralized path resolution
+	plansPath, err := m.service.GetNotebookLocator().GetGroupDir(ws, "plans")
+	if err != nil {
+		// Skip if we can't resolve path
+		return
+	}
+
 	// Add "plans" parent node
 	plansParentItem := &tree.Item{
-		Path:     filepath.Join(ws.Path, "plans"),
+		Path:     plansPath,
 		Name:     "plans",
 		IsDir:    true,
 		Type:     tree.TypeGroup,
@@ -1171,9 +1103,6 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 		planTree := buildGroupTree(planGroups, planNames)
 		hasPlansArchive := len(archiveSubgroups["plans"]) > 0 && m.showArchives
 
-		// Get the plans directory for absolute paths
-		plansDir := filepath.Join(ws.Path, "plans")
-
 		// Render the plan tree hierarchically
 		config := treeRenderConfig{
 			itemType:            tree.TypePlan,
@@ -1183,7 +1112,7 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 			includeArchives:     false,
 			includeClosed:       false,
 		}
-		m.renderTree(nodes, ws, planTree, plansPrefix.String(), ws.Depth+2, hasSearchFilter, workspacePathMap, plansDir, config, hasPlansArchive, nil, nil, artifactSubgroups)
+		m.renderTree(nodes, ws, planTree, plansPrefix.String(), ws.Depth+2, hasSearchFilter, workspacePathMap, plansPath, config, hasPlansArchive, nil, nil, artifactSubgroups)
 
 		// Add .archive parent group if there are archived children
 		if hasPlansArchive {
@@ -1213,10 +1142,17 @@ func (m *Model) addPlansArchiveGroup(nodes *[]*DisplayNode, ws *workspace.Worksp
 	archivePrefix.WriteString(archiveIndent)
 	archivePrefix.WriteString("└ ")
 
+	// Use GetGroupDir for centralized path resolution
+	archivePath, err := m.service.GetNotebookLocator().GetGroupDir(ws, "plans/.archive")
+	if err != nil {
+		// Skip if we can't resolve path
+		return
+	}
+
 	// Add .archive parent node
 	// Create tree.Item for group
 	archiveParentNodeItem := &tree.Item{
-		Path:     filepath.Join(ws.Path, "plans/.archive"),
+		Path:     archivePath,
 		Name:     "plans/.archive",
 		IsDir:    true,
 		Type:     tree.TypeGroup,
@@ -1238,9 +1174,6 @@ func (m *Model) addPlansArchiveGroup(nodes *[]*DisplayNode, ws *workspace.Worksp
 		// Build hierarchical tree for archived plan names
 		archivedPlanTree := buildGroupTree(archivedPlans, archivedNames)
 
-		// Get the plans/.archive directory for absolute paths
-		archiveDir := filepath.Join(ws.Path, "plans/.archive")
-
 		// Render the archived plan tree hierarchically
 		config := treeRenderConfig{
 			itemType:            tree.TypeGroup, // An archived plan is just a group
@@ -1250,7 +1183,7 @@ func (m *Model) addPlansArchiveGroup(nodes *[]*DisplayNode, ws *workspace.Worksp
 			includeArchives:     false,
 			includeClosed:       false,
 		}
-		m.renderTree(nodes, ws, archivedPlanTree, archivePrefix.String(), ws.Depth+2, hasSearchFilter, workspacePathMap, archiveDir, config, false, nil, nil, nil)
+		m.renderTree(nodes, ws, archivedPlanTree, archivePrefix.String(), ws.Depth+2, hasSearchFilter, workspacePathMap, archivePath, config, false, nil, nil, nil)
 	}
 }
 
@@ -1269,9 +1202,18 @@ func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 		holdPrefix.WriteString("└ ") // .hold is last if no completed
 	}
 
+	// Use GetNotesDir to get the base path for notes, then create .hold virtual path
+	// .hold is a virtual grouping, not a real directory, but we need a consistent path for NodeID
+	notesDir, err := m.service.GetNotebookLocator().GetNotesDir(ws, "")
+	if err != nil {
+		// Skip if we can't resolve path
+		return
+	}
+	holdPath := filepath.Join(filepath.Dir(notesDir), ".hold")
+
 	// Add ".hold" parent node
 	holdParentItem := &tree.Item{
-		Path:     filepath.Join(ws.Path, ".hold"),
+		Path:     holdPath,
 		Name:     ".hold",
 		IsDir:    true,
 		Type:     tree.TypeGroup,
@@ -1321,9 +1263,16 @@ func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 				planPrefix.WriteString("├ ")
 			}
 
+			// Use GetGroupDir for centralized path resolution
+			planPath, err := m.service.GetNotebookLocator().GetGroupDir(ws, "plans/"+planName)
+			if err != nil {
+				// Skip this plan if we can't resolve its path
+				continue
+			}
+
 			// Add hold plan node
 			planItem := &tree.Item{
-				Path:     filepath.Join(ws.Path, "plans", planName),
+				Path:     planPath,
 				Name:     "plans/" + planName, // Keep full path for consistency
 				IsDir:    true,
 				Type:     tree.TypePlan,
@@ -1380,10 +1329,17 @@ func (m *Model) addCompletedGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 		return completedNotes[i].CreatedAt.After(completedNotes[j].CreatedAt)
 	})
 
+	// Use GetGroupDir for centralized path resolution
+	completedPath, err := m.service.GetNotebookLocator().GetGroupDir(ws, "completed")
+	if err != nil {
+		// Skip if we can't resolve path
+		return
+	}
+
 	// Add completed group node
 	// Create tree.Item for group
 	completedGroupNodeItem := &tree.Item{
-		Path:     filepath.Join(ws.Path, "completed"),
+		Path:     completedPath,
 		Name:     "completed",
 		IsDir:    true,
 		Type:     tree.TypeGroup,

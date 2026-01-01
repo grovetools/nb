@@ -1456,43 +1456,43 @@ func (m *Model) setCollapseStateForFocus() {
 			wsNode = m.focusedWorkspace
 		}
 
-		// Get both path types (same as leaf workspace logic)
-		notesRootDir, notesErr := m.service.GetNotebookLocator().GetNotesDir(wsNode, "")
-		if notesErr == nil {
-			wsPath := wsNode.Path
-
-			groupsSeen := make(map[string]bool)
-			for _, item := range m.allItems {
-				wsName, _ := item.Metadata["Workspace"].(string)
-				groupName, _ := item.Metadata["Group"].(string)
-				if wsName == m.focusedWorkspace.Name && !groupsSeen[groupName] {
-					var groupPath string
-					var groupNodeID string
-
-					if strings.HasPrefix(groupName, "plans/") {
-						planSubPath := strings.TrimPrefix(groupName, "plans/")
-						groupPath = filepath.Join(wsPath, "plans", planSubPath)
-						groupNodeID = "dir:" + groupPath
-						collapsedNodes[groupNodeID] = true
-					} else if groupName == "completed" {
-						// Completed uses ws.Path
-						groupPath = filepath.Join(wsPath, groupName)
-						groupNodeID = "dir:" + groupPath
-						collapsedNodes[groupNodeID] = true
-					} else if groupName != "plans" && groupName != "in_progress" {
-						// Regular groups use notesRootDir
-						groupPath = filepath.Join(notesRootDir, groupName)
-						groupNodeID = "dir:" + groupPath
-						collapsedNodes[groupNodeID] = true
-					}
+		// Use GetGroupDir for all path resolution to ensure consistency
+		groupsSeen := make(map[string]bool)
+		for _, item := range m.allItems {
+			wsName, _ := item.Metadata["Workspace"].(string)
+			groupName, _ := item.Metadata["Group"].(string)
+			if wsName == m.focusedWorkspace.Name && !groupsSeen[groupName] {
+				// Use GetGroupDir for centralized path resolution
+				groupPath, err := m.service.GetNotebookLocator().GetGroupDir(wsNode, groupName)
+				if err != nil {
+					// Skip if we can't resolve path
 					groupsSeen[groupName] = true
+					continue
+				}
+
+				groupNodeID := "dir:" + groupPath
+
+				// Use DefaultExpand from NoteTypes to determine if group should be expanded
+				shouldExpand := false
+				if typeConfig, ok := m.service.NoteTypes[groupName]; ok {
+					shouldExpand = typeConfig.DefaultExpand
+				}
+
+				// Collapse groups that shouldn't be expanded by default
+				if !shouldExpand {
+					collapsedNodes[groupNodeID] = true
+				}
+				groupsSeen[groupName] = true
+			}
+		}
+
+		// Ensure groups with DefaultExpand=true are expanded
+		for groupName, typeConfig := range m.service.NoteTypes {
+			if typeConfig.DefaultExpand {
+				if groupPath, err := m.service.GetNotebookLocator().GetGroupDir(wsNode, groupName); err == nil {
+					delete(collapsedNodes, "dir:"+groupPath)
 				}
 			}
-			// Ensure the "plans" and "in_progress" parent groups are expanded
-			plansGroupPath := filepath.Join(wsPath, "plans")
-			delete(collapsedNodes, "dir:"+plansGroupPath)
-			inProgressPath := filepath.Join(notesRootDir, "in_progress")
-			delete(collapsedNodes, "dir:"+inProgressPath)
 		}
 	} else {
 		// Leaf workspace focus (e.g., repo or worktree)
@@ -1509,11 +1509,7 @@ func (m *Model) setCollapseStateForFocus() {
 		m.collapseChildWorkspaces(m.focusedWorkspace)
 
 		// 4. Collapse/expand note groups according to rules
-		// CRITICAL: The tree building code is inconsistent!
-		// - addPlansGroup uses ws.Path for plans
-		// - addCompletedGroup uses ws.Path for completed
-		// - renderTree uses GetNotesDir() for inbox/issues via rootDir parameter
-		// We need to match BOTH patterns. Get both the workspace node and the notesRootDir.
+		// NOW USING GetGroupDir for ALL path resolution to ensure consistency
 		var wsNode *workspace.WorkspaceNode
 		for _, ws := range m.workspaces {
 			if ws.Name == m.focusedWorkspace.Name {
@@ -1526,55 +1522,44 @@ func (m *Model) setCollapseStateForFocus() {
 			wsNode = m.focusedWorkspace
 		}
 
-		// Get the notes root directory (used by renderTree for inbox/issues/etc)
-		notesRootDir, notesErr := m.service.GetNotebookLocator().GetNotesDir(wsNode, "")
-		if notesErr != nil {
-			// Silently skip if we can't get notes dir
-			return
-		}
-
-		// Also get ws.Path (used by addPlansGroup and addCompletedGroup)
-		wsPath := wsNode.Path
-
 		groupsSeen := make(map[string]bool)
 		for _, item := range m.allItems {
 			wsName, _ := item.Metadata["Workspace"].(string)
 			groupName, _ := item.Metadata["Group"].(string)
 
 			if wsName == m.focusedWorkspace.Name && !groupsSeen[groupName] {
-				var groupPath string
-				var groupNodeID string
+				// Use GetGroupDir for centralized path resolution
+				groupPath, err := m.service.GetNotebookLocator().GetGroupDir(wsNode, groupName)
+				if err != nil {
+					// Skip if we can't resolve path
+					groupsSeen[groupName] = true
+					continue
+				}
 
-				if strings.HasPrefix(groupName, "plans/") {
-					// This is an individual plan directory like "plans/nb-tui-tree"
-					// Extract just the plan name (e.g., "nb-tui-tree" from "plans/nb-tui-tree")
-					planName := strings.TrimPrefix(groupName, "plans/")
-					// Use ws.Path + "plans" + planName to match addPlansGroup (line 1177)
-					groupPath = filepath.Join(wsPath, "plans", planName)
-					groupNodeID = "dir:" + groupPath
-					// Rule: Collapse individual plan directories
-					collapsedNodes[groupNodeID] = true
-				} else if groupName == "completed" {
-					// Completed uses ws.Path (from addCompletedGroup line 1386)
-					groupPath = filepath.Join(wsPath, groupName)
-					groupNodeID = "dir:" + groupPath
-					collapsedNodes[groupNodeID] = true
-				} else if groupName != "plans" && groupName != "in_progress" {
-					// Regular note types like "inbox", "issues" use notesRootDir (from renderTree line 1601)
-					groupPath = filepath.Join(notesRootDir, groupName)
-					groupNodeID = "dir:" + groupPath
-					// Rule: Collapse all note type groups except plans and in_progress
+				groupNodeID := "dir:" + groupPath
+
+				// Use DefaultExpand from NoteTypes to determine if group should be expanded
+				shouldExpand := false
+				if typeConfig, ok := m.service.NoteTypes[groupName]; ok {
+					shouldExpand = typeConfig.DefaultExpand
+				}
+
+				// Collapse groups that shouldn't be expanded by default
+				if !shouldExpand {
 					collapsedNodes[groupNodeID] = true
 				}
 				groupsSeen[groupName] = true
 			}
 		}
-		// Rule: Ensure the top-level 'plans' group is expanded.
-		plansGroupPath := filepath.Join(wsPath, "plans")
-		delete(collapsedNodes, "dir:"+plansGroupPath)
-		// Rule: Ensure the top-level 'in_progress' group is expanded.
-		inProgressPath := filepath.Join(notesRootDir, "in_progress")
-		delete(collapsedNodes, "dir:"+inProgressPath)
+
+		// Ensure groups with DefaultExpand=true are expanded
+		for groupName, typeConfig := range m.service.NoteTypes {
+			if typeConfig.DefaultExpand {
+				if groupPath, err := m.service.GetNotebookLocator().GetGroupDir(wsNode, groupName); err == nil {
+					delete(collapsedNodes, "dir:"+groupPath)
+				}
+			}
+		}
 	}
 
 	m.views.SetCollapseState(collapsedNodes)
