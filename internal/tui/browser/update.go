@@ -102,7 +102,8 @@ func (m *Model) createPlanCmd(note *models.Note) tea.Cmd {
 		"--worktree", // Pre-selects the worktree option in the TUI
 	}
 
-	cmd := exec.Command("flow", args...)
+	cmdArgs := append([]string{"flow"}, args...)
+	cmd := exec.Command("grove", cmdArgs...)
 
 	// This command takes over the terminal. When it exits, we want to refresh our state.
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
