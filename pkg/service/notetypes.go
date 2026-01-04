@@ -29,6 +29,12 @@ var DefaultNoteTypes = map[string]*coreconfig.NoteTypeConfig{
 		SortOrder:     13,
 		Description:   "Directory for structured project plans.",
 	},
+	"skills": {
+		Icon:        theme.IconBuild,
+		IconColor:   "orange",
+		SortOrder:   15,
+		Description: "Agent skills for automation and integration.",
+	},
 	"in_progress": {
 		Icon:          theme.IconNoteInProgress,
 		IconColor:     "blue",
