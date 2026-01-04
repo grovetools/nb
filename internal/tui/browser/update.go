@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -793,6 +794,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.views.SetCutPaths(make(map[string]struct{})) // Clear cut visual
 				m.statusMessage = fmt.Sprintf("Copied %d note(s) to clipboard", len(paths))
 			}
+		case key.Matches(msg, m.keys.Yank):
+			node := m.views.GetCurrentNode()
+			if node != nil && node.Item != nil {
+				path := node.Item.Path
+				if err := clipboard.WriteAll(path); err != nil {
+					m.statusMessage = fmt.Sprintf("Error yanking path: %v", err)
+				} else {
+					m.statusMessage = fmt.Sprintf("Yanked: %s", shortenPath(path))
+				}
+			}
+			return m, nil
 		case key.Matches(msg, m.keys.Paste):
 			if len(m.clipboard) > 0 {
 				m.statusMessage = fmt.Sprintf("Pasting %d note(s)...", len(m.clipboard))

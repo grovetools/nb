@@ -39,6 +39,7 @@ type KeyMap struct {
 	Sync           key.Binding
 	Cut              key.Binding
 	Copy             key.Binding
+	Yank             key.Binding
 	Paste            key.Binding
 	Delete           key.Binding
 	CreateNote       key.Binding
@@ -97,6 +98,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.Delete,
 		k.Cut,
 		k.Copy,
+		k.Yank,
 		k.Paste,
 	})
 }
@@ -250,6 +252,10 @@ var keys = KeyMap{
 	Copy: key.NewBinding(
 		key.WithKeys("y", "c"),
 		key.WithHelp("y/c", "copy selected"),
+	),
+	Yank: key.NewBinding(
+		key.WithKeys("ctrl+y"),
+		key.WithHelp("ctrl+y", "yank path"),
 	),
 	Paste: key.NewBinding(
 		key.WithKeys("p"),
