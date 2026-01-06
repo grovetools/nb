@@ -1,12 +1,14 @@
 package browser
 
 import (
+	"os/exec"
 	"path/filepath"
 	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/mattsolo1/grove-notebook/pkg/tree"
 )
@@ -157,4 +159,143 @@ type commitFinishedMsg struct {
 	success bool
 	message string
 	err     error
+}
+
+// stageFinishedMsg is sent when a stage operation completes
+type stageFinishedMsg struct {
+	success       bool
+	count         int
+	err           error
+	updatedStatus map[string]string // Updated status for staged files
+}
+
+// unstageFinishedMsg is sent when an unstage operation completes
+type unstageFinishedMsg struct {
+	success       bool
+	count         int
+	err           error
+	updatedStatus map[string]string // Updated status for unstaged files
+}
+
+// toggleStageFilesCmd toggles the stage status for the given files.
+// If a file is staged, it unstages it. If unstaged, it stages it.
+// Returns updated status map for optimistic UI update without full refresh.
+func toggleStageFilesCmd(paths []string, gitFileStatus map[string]string) tea.Cmd {
+	return func() tea.Msg {
+		if len(paths) == 0 {
+			return stageFinishedMsg{success: false, count: 0, err: nil}
+		}
+
+		// Separate paths into those to stage and those to unstage
+		// Also track normalized paths for status updates
+		type pathInfo struct {
+			path       string
+			normalized string
+			oldStatus  string
+		}
+		var toStage, toUnstage []pathInfo
+
+		for _, path := range paths {
+			normalizedPath, err := pathutil.NormalizeForLookup(path)
+			if err != nil {
+				continue
+			}
+
+			status := gitFileStatus[normalizedPath]
+			info := pathInfo{path: path, normalized: normalizedPath, oldStatus: status}
+
+			if len(status) >= 2 {
+				staged := status[0]
+				if staged != ' ' && staged != '?' {
+					toUnstage = append(toUnstage, info)
+				} else {
+					toStage = append(toStage, info)
+				}
+			} else {
+				toStage = append(toStage, info)
+			}
+		}
+
+		totalStaged := 0
+		totalUnstaged := 0
+		updatedStatus := make(map[string]string)
+
+		// Stage files
+		if len(toStage) > 0 {
+			pathsByRoot := make(map[string][]pathInfo)
+			for _, info := range toStage {
+				dir := filepath.Dir(info.path)
+				gitRoot, err := git.GetGitRoot(dir)
+				if err != nil {
+					continue
+				}
+				pathsByRoot[gitRoot] = append(pathsByRoot[gitRoot], info)
+			}
+			for gitRoot, infos := range pathsByRoot {
+				filePaths := make([]string, len(infos))
+				for i, info := range infos {
+					filePaths[i] = info.path
+				}
+				args := append([]string{"add", "--"}, filePaths...)
+				cmd := exec.Command("git", args...)
+				cmd.Dir = gitRoot
+				if _, err := cmd.CombinedOutput(); err != nil {
+					return stageFinishedMsg{success: false, count: totalStaged, err: err}
+				}
+				// Update status optimistically
+				for _, info := range infos {
+					if info.oldStatus == "??" {
+						updatedStatus[info.normalized] = "A "
+					} else if len(info.oldStatus) >= 2 && info.oldStatus[1] == 'M' {
+						updatedStatus[info.normalized] = "M "
+					} else {
+						updatedStatus[info.normalized] = "M "
+					}
+				}
+				totalStaged += len(infos)
+			}
+		}
+
+		// Unstage files
+		if len(toUnstage) > 0 {
+			pathsByRoot := make(map[string][]pathInfo)
+			for _, info := range toUnstage {
+				dir := filepath.Dir(info.path)
+				gitRoot, err := git.GetGitRoot(dir)
+				if err != nil {
+					continue
+				}
+				pathsByRoot[gitRoot] = append(pathsByRoot[gitRoot], info)
+			}
+			for gitRoot, infos := range pathsByRoot {
+				filePaths := make([]string, len(infos))
+				for i, info := range infos {
+					filePaths[i] = info.path
+				}
+				args := append([]string{"reset", "HEAD", "--"}, filePaths...)
+				cmd := exec.Command("git", args...)
+				cmd.Dir = gitRoot
+				if _, err := cmd.CombinedOutput(); err != nil {
+					return unstageFinishedMsg{success: false, count: totalUnstaged, err: err}
+				}
+				// Update status optimistically
+				for _, info := range infos {
+					if len(info.oldStatus) >= 2 && info.oldStatus[0] == 'A' {
+						updatedStatus[info.normalized] = "??"
+					} else {
+						updatedStatus[info.normalized] = " M"
+					}
+				}
+				totalUnstaged += len(infos)
+			}
+		}
+
+		// Return appropriate message with updated status
+		if totalStaged > 0 && totalUnstaged > 0 {
+			return stageFinishedMsg{success: true, count: totalStaged, err: nil, updatedStatus: updatedStatus}
+		} else if totalUnstaged > 0 {
+			return unstageFinishedMsg{success: true, count: totalUnstaged, err: nil, updatedStatus: updatedStatus}
+		}
+		return stageFinishedMsg{success: true, count: totalStaged, err: nil, updatedStatus: updatedStatus}
+	}
 }

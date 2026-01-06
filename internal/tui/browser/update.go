@@ -321,6 +321,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// Pass git status to views for rendering
 				m.views.SetGitFileStatus(m.gitFileStatus)
+				// Rebuild view if git filter is active (status changed)
+				if m.showGitModifiedOnly {
+					m.updateViewsState()
+				}
 			}
 		}
 		return m, nil
@@ -337,6 +341,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return refreshMsg{} }
 		} else {
 			m.statusMessage = msg.message
+		}
+		return m, nil
+
+	case stageFinishedMsg:
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Stage failed: %v", msg.err)
+		} else if msg.success && msg.count > 0 {
+			m.statusMessage = fmt.Sprintf("Staged %d file(s)", msg.count)
+			// Optimistically update git status without full refresh
+			for path, status := range msg.updatedStatus {
+				m.gitFileStatus[path] = status
+			}
+			m.views.SetGitFileStatus(m.gitFileStatus)
+		} else {
+			m.statusMessage = "No files to stage"
+		}
+		return m, nil
+
+	case unstageFinishedMsg:
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Unstage failed: %v", msg.err)
+		} else if msg.success && msg.count > 0 {
+			m.statusMessage = fmt.Sprintf("Unstaged %d file(s)", msg.count)
+			// Optimistically update git status without full refresh
+			for path, status := range msg.updatedStatus {
+				m.gitFileStatus[path] = status
+			}
+			m.views.SetGitFileStatus(m.gitFileStatus)
+		} else {
+			m.statusMessage = "No files to unstage"
 		}
 		return m, nil
 
@@ -1005,6 +1039,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.commitInput.SetValue("")
 			m.commitInput.Focus()
 			return m, textinput.Blink
+		case key.Matches(msg, m.keys.GitStageToggle):
+			// Toggle stage for selected files (or current file if none selected)
+			paths := m.views.GetTargetedNotePaths()
+			if len(paths) == 0 {
+				m.statusMessage = "No files to stage/unstage"
+				return m, nil
+			}
+			return m, toggleStageFilesCmd(paths, m.gitFileStatus)
 		case key.Matches(msg, m.keys.Back):
 			if m.ecosystemPickerMode {
 				m.ecosystemPickerMode = false
@@ -1707,14 +1749,7 @@ func (m *Model) executeCommitCmd() tea.Cmd {
 			return commitFinishedMsg{success: false, message: "No git repository found", err: nil}
 		}
 
-		// Stage all changes
-		gitAddCmd := exec.Command("git", "add", ".")
-		gitAddCmd.Dir = gitRoot
-		if output, err := gitAddCmd.CombinedOutput(); err != nil {
-			return commitFinishedMsg{success: false, message: "", err: fmt.Errorf("git add failed: %w\n%s", err, string(output))}
-		}
-
-		// Commit
+		// Commit only what's already staged (no auto-staging)
 		gitCommitCmd := exec.Command("git", "commit", "-m", message)
 		gitCommitCmd.Dir = gitRoot
 		output, err := gitCommitCmd.CombinedOutput()

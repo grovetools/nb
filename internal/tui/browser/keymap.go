@@ -50,6 +50,7 @@ type KeyMap struct {
 	CreatePlan       key.Binding
 	FocusRecent      key.Binding
 	GitCommit        key.Binding
+	GitStageToggle   key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -103,6 +104,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.Copy,
 		k.Yank,
 		k.Paste,
+		k.GitStageToggle,
 		k.GitCommit,
 	})
 }
@@ -118,8 +120,8 @@ var keys = KeyMap{
 		key.WithHelp("ctrl+g", "clear focus"),
 	),
 	FocusParent: key.NewBinding(
-		key.WithKeys("-"),
-		key.WithHelp("-", "focus parent"),
+		key.WithKeys(""),
+		key.WithHelp("", "focus parent (disabled)"),
 	),
 	FocusSelected: key.NewBinding(
 		key.WithKeys("."),
@@ -276,5 +278,9 @@ var keys = KeyMap{
 	GitCommit: key.NewBinding(
 		key.WithKeys("C"),
 		key.WithHelp("C", "git commit"),
+	),
+	GitStageToggle: key.NewBinding(
+		key.WithKeys("-"),
+		key.WithHelp("-", "toggle git stage"),
 	),
 }
