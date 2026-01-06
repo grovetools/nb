@@ -46,8 +46,15 @@ func (m *Model) updateViewsState() {
 		m.showArtifacts,
 		m.showOnHold,
 		m.recentNotesMode,
+		m.showGitModifiedOnly,
+		m.gitFileStatus,
 	)
 	m.views.BuildDisplayTree()
+
+	// Apply git status filter if active
+	if m.showGitModifiedOnly {
+		m.views.FilterDisplayTreeByGitStatus()
+	}
 
 	// Apply text filter if present (not grep mode and not tag filter mode)
 	if m.filterInput.Value() != "" && !m.isGrepping && !m.isFilteringByTag {
@@ -652,8 +659,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Track 'z' for fold sequences
 			if key.Matches(msg, m.keys.FoldPrefix) {
 				m.lastKey = "z"
-			} else if msg.String() == "A" && m.lastKey == "z" {
-				m.lastKey = "" // Reset after zA sequence
+			} else if m.lastKey == "z" {
+				m.lastKey = "" // Reset after any z* sequence
 			}
 			m.views, cmd = m.views.Update(msg)
 			// After any view update that could change the cursor, update the preview.
@@ -773,6 +780,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 	case key.Matches(msg, m.keys.Refresh):
 		return m, func() tea.Msg { return refreshMsg{} }
+	case key.Matches(msg, m.keys.ToggleGitChanges):
+		m.showGitModifiedOnly = !m.showGitModifiedOnly
+		if m.showGitModifiedOnly {
+			m.statusMessage = "Filtering for git changes"
+		} else {
+			m.statusMessage = "Cleared git changes filter"
+		}
+		m.updateViewsState()
+		return m, nil
 	case key.Matches(msg, m.keys.Sync):
 		m.statusMessage = "Syncing with remotes..."
 		return m, tea.Batch(m.syncWorkspaceCmd(), m.spinner.Tick)

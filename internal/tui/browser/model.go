@@ -39,14 +39,15 @@ type Model struct {
 	width      int
 	height     int
 	filterInput textinput.Model
-	lastKey      string // For detecting 'gg' and 'z' sequences
-	showArchives bool   // Whether to show .archive and .closed directories
-	showArtifacts bool  // Whether to show .artifacts directories
-	hideGlobal   bool   // Whether to hide the global workspace node
-	showOnHold   bool   // Whether to show on-hold plans
-	spinner      spinner.Model
-	loadingCount int
-	recentNotesMode bool  // Whether to show only recent notes
+	lastKey             string // For detecting 'gg' and 'z' sequences
+	showArchives        bool   // Whether to show .archive and .closed directories
+	showArtifacts       bool   // Whether to show .artifacts directories
+	hideGlobal          bool   // Whether to hide the global workspace node
+	showOnHold          bool   // Whether to show on-hold plans
+	showGitModifiedOnly bool   // Whether to show only notes with git changes
+	spinner             spinner.Model
+	loadingCount        int
+	recentNotesMode     bool // Whether to show only recent notes
 	savedViewMode views.ViewMode // View mode to restore when exiting recent notes mode
 	savedModVisibility bool      // Saved visibility state for MODIFIED column
 	savedWsVisibility  bool      // Saved visibility state for WORKSPACE column

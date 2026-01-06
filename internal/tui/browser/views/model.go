@@ -112,11 +112,12 @@ type Model struct {
 	showArtifacts       bool
 	showOnHold          bool
 	filterValue         string
-	isGrepping          bool
+	isGrepping           bool
 	pendingWorkspaceInit string // Workspace name to initialize child groups for after next rebuild
-	isFilteringByTag    bool
-	selectedTag         string
-	recentNotesMode     bool
+	isFilteringByTag     bool
+	selectedTag          string
+	recentNotesMode      bool
+	showGitModifiedOnly  bool
 
 	// Git status for rendering indicators
 	gitFileStatus map[string]string // Key: normalized absolute path, Value: git status code
@@ -153,7 +154,8 @@ func (m *Model) SetParentState(
 	isGrepping bool,
 	isFilteringByTag bool,
 	selectedTag string,
-	ecoPickerMode, hideGlobal, showArchives, showArtifacts, showOnHold, recentNotesMode bool,
+	ecoPickerMode, hideGlobal, showArchives, showArtifacts, showOnHold, recentNotesMode, showGitModifiedOnly bool,
+	gitFileStatus map[string]string,
 ) {
 	m.service = service
 	m.allItems = allItems
@@ -169,6 +171,8 @@ func (m *Model) SetParentState(
 	m.showArtifacts = showArtifacts
 	m.showOnHold = showOnHold
 	m.recentNotesMode = recentNotesMode
+	m.showGitModifiedOnly = showGitModifiedOnly
+	m.gitFileStatus = gitFileStatus
 }
 
 // ToggleViewMode switches between tree and table views.

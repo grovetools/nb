@@ -245,6 +245,9 @@ func (m Model) View() string {
 	if m.recentNotesMode {
 		headerParts = append(headerParts, " [Recent]")
 	}
+	if m.showGitModifiedOnly {
+		headerParts = append(headerParts, " [Git Modified]")
+	}
 
 	// Add tag indicator inline with special styling
 	if m.isFilteringByTag {

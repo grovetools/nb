@@ -197,8 +197,8 @@ func (m *Model) BuildDisplayTree() {
 	var nodes []*DisplayNode
 	var workspacesToShow []*workspace.WorkspaceNode
 
-	// Check if we should ignore collapsed state (when searching)
-	hasSearchFilter := m.filterValue != "" && !m.isGrepping
+	// Check if we should ignore collapsed state (when searching or filtering by git status)
+	hasSearchFilter := (m.filterValue != "" && !m.isGrepping) || m.showGitModifiedOnly
 
 	// 1. Filter workspaces based on focus mode
 	var showUngroupedSection bool
@@ -1763,6 +1763,62 @@ func (m *Model) FilterDisplayTree() {
 					break // No more parents
 				}
 				curr = parentIndex
+			}
+		}
+	}
+
+	// Third pass: build the filtered tree
+	var filteredTree []*DisplayNode
+	for i, node := range fullTree {
+		if nodesToKeep[i] {
+			filteredTree = append(filteredTree, node)
+		}
+	}
+
+	m.displayNodes = filteredTree
+	m.clampCursor()
+}
+
+// FilterDisplayTreeByGitStatus filters the tree view to show only notes with git changes, preserving parent nodes.
+func (m *Model) FilterDisplayTreeByGitStatus() {
+	if !m.showGitModifiedOnly || m.gitFileStatus == nil {
+		return // No filter to apply
+	}
+
+	fullTree := m.displayNodes
+	nodesToKeep := make(map[int]bool)
+	parentMap := make(map[int]int)
+	lastNodeAtDepth := make(map[int]int)
+
+	// First pass: build parent map
+	for i, node := range fullTree {
+		if node.Depth > 0 {
+			if parentIndex, ok := lastNodeAtDepth[node.Depth-1]; ok {
+				parentMap[i] = parentIndex
+			}
+		}
+		lastNodeAtDepth[node.Depth] = i
+	}
+
+	// Second pass: mark nodes to keep
+	for i, node := range fullTree {
+		if node.IsNote() {
+			normalizedPath, err := pathutil.NormalizeForLookup(node.Item.Path)
+			if err != nil {
+				continue
+			}
+
+			if status, exists := m.gitFileStatus[normalizedPath]; exists && strings.TrimSpace(status) != "" {
+				// This note is modified, mark it and its parents to be kept
+				curr := i
+				for {
+					nodesToKeep[curr] = true
+					parentIndex, ok := parentMap[curr]
+					if !ok {
+						break // No more parents
+					}
+					curr = parentIndex
+				}
 			}
 		}
 	}

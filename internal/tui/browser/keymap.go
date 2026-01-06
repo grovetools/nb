@@ -8,14 +8,15 @@ import (
 // KeyMap defines the keybindings for the browser TUI
 type KeyMap struct {
 	keymap.Base
-	FocusEcosystem  key.Binding
-	ClearFocus      key.Binding
-	FocusParent     key.Binding
-	FocusSelected   key.Binding
-	ToggleView      key.Binding
-	Search          key.Binding
-	FilterByTag     key.Binding
-	Sort            key.Binding
+	FocusEcosystem   key.Binding
+	ClearFocus       key.Binding
+	FocusParent      key.Binding
+	FocusSelected    key.Binding
+	ToggleView       key.Binding
+	Search           key.Binding
+	FilterByTag      key.Binding
+	ToggleGitChanges key.Binding
+	Sort             key.Binding
 	JumpToWorkspace key.Binding
 	PageUp          key.Binding
 	PageDown        key.Binding
@@ -65,6 +66,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.ToggleView,
 		k.Search,
 		k.FilterByTag,
+		k.ToggleGitChanges,
 		k.Grep,
 		k.Sort,
 		k.FocusRecent,
@@ -134,6 +136,10 @@ var keys = KeyMap{
 	FilterByTag: key.NewBinding(
 		key.WithKeys("&"),
 		key.WithHelp("&", "filter by tag"),
+	),
+	ToggleGitChanges: key.NewBinding(
+		key.WithKeys("<", ">"),
+		key.WithHelp("<,>", "git changes"),
 	),
 	Sort: key.NewBinding(
 		key.WithKeys("s"),
