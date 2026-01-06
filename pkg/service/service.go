@@ -972,6 +972,16 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, incl
 				}
 			}
 
+			// Skip .git directories - these should never appear in notebook tree
+			if info.IsDir() && info.Name() == ".git" {
+				return filepath.SkipDir
+			}
+
+			// Skip .grove-worktrees directories - worktrees don't belong in notebooks
+			if info.IsDir() && info.Name() == ".grove-worktrees" {
+				return filepath.SkipDir
+			}
+
 			// Ignore common dotfiles, but not special dot-directories like .archive
 			if !info.IsDir() && strings.HasPrefix(info.Name(), ".") {
 				return nil
@@ -1096,6 +1106,16 @@ func (s *Service) ListAllItems(ctx *WorkspaceContext, includeArchived bool, incl
 			}
 			// Skip artifacts directories if not requested
 			if !includeArtifacts && info.Name() == ".artifacts" {
+				return filepath.SkipDir
+			}
+
+			// Skip .git directories - these should never appear in notebook tree
+			if info.IsDir() && info.Name() == ".git" {
+				return filepath.SkipDir
+			}
+
+			// Skip .grove-worktrees directories - worktrees don't belong in notebooks
+			if info.IsDir() && info.Name() == ".grove-worktrees" {
 				return filepath.SkipDir
 			}
 
@@ -1258,6 +1278,13 @@ func (s *Service) GetWorkspaceContext(startPath string) (*WorkspaceContext, erro
 			// Fallback to global context if not in a known workspace
 			return s.GetWorkspaceContext("global")
 		}
+	} else if coreworkspace.IsNotebookRepo(currentWorkspace.Path) {
+		// The workspace is a notebook repo (has .grove/notebook.yml marker).
+		// Try to extract the actual workspace from the path within the notebook.
+		if ws := s.extractWorkspaceFromNotebooksPath(CWD); ws != nil {
+			currentWorkspace = ws
+		}
+		// If extraction fails, keep using the notebook root as the workspace
 	}
 
 	notebookContextWorkspace, err := s.findNotebookContextNode(currentWorkspace)
@@ -1663,6 +1690,14 @@ func (s *Service) ListAllNotesInWorkspace(ws *coreworkspace.WorkspaceNode) ([]*m
 			return nil // Skip errors to continue walking
 		}
 		if strings.Contains(path, "/archive/") {
+			return filepath.SkipDir
+		}
+		// Skip .git directories - these should never appear in notebook tree
+		if info.IsDir() && info.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		// Skip .grove-worktrees directories - worktrees don't belong in notebooks
+		if info.IsDir() && info.Name() == ".grove-worktrees" {
 			return filepath.SkipDir
 		}
 		if !info.IsDir() && strings.HasSuffix(path, ".md") {

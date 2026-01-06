@@ -3,22 +3,23 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+
+	"github.com/mattsolo1/grove-tend/pkg/project"
 )
 
-// findProjectBinary locates the nb binary in the bin directory.
-// This is needed for TUI tests which require the binary path directly.
+// findProjectBinary finds the project's main binary path by reading grove.yml.
+// This provides a single source of truth for locating the binary under test.
 func findProjectBinary() (string, error) {
-	// The binary should be at ../../bin/nb relative to the test directory
-	binPath := filepath.Join("..", "..", "bin", "nb")
-	absPath, err := filepath.Abs(binPath)
+	// The test runner is executed from the project root, so we start the search here.
+	wd, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("failed to get absolute path: %w", err)
+		return "", fmt.Errorf("could not get working directory: %w", err)
 	}
 
-	if _, err := os.Stat(absPath); err != nil {
-		return "", fmt.Errorf("nb binary not found at %s: %w", absPath, err)
+	binaryPath, err := project.GetBinaryPath(wd)
+	if err != nil {
+		return "", fmt.Errorf("failed to find project binary via grove.yml: %w", err)
 	}
 
-	return absPath, nil
+	return binaryPath, nil
 }

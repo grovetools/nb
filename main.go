@@ -79,6 +79,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewInternalCmd(&svc))
 	rootCmd.AddCommand(cmd.NewTmuxCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewRemoteCmd(&svc, &workspaceOverride))
+	rootCmd.AddCommand(cmd.NewGitCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewConceptCmd(&svc, &workspaceOverride))
 
 	if err := rootCmd.Execute(); err != nil {
