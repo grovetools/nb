@@ -11,6 +11,7 @@ import (
 	coreconfig "github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/tree"
 )
@@ -31,6 +32,7 @@ type nodeRenderInfo struct {
 	isSeparator bool
 	workspace   *workspace.WorkspaceNode // a reference to the workspace node if applicable
 	note        *models.Note             // a reference to the note if applicable
+	gitStatus   string                   // Git status code (e.g., "M ", " M", "??")
 }
 
 // View renders the main content area (tree or table view).
@@ -393,6 +395,13 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 			}
 			info.indicator = getNoteIcon(noteType)
 		}
+		// Get git status for this file
+		if m.gitFileStatus != nil {
+			normalizedPath, err := pathutil.NormalizeForLookup(node.Item.Path)
+			if err == nil {
+				info.gitStatus = m.gitFileStatus[normalizedPath]
+			}
+		}
 	}
 
 	// Add link suffix if the node is linked
@@ -528,6 +537,12 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 	// Prepare suffix styling
 	suffix := theme.DefaultTheme.Muted.Render(info.suffix)
 
+	// Add git status indicator
+	gitIndicator := ""
+	if info.gitStatus != "" {
+		gitIndicator = renderGitStatusIndicator(info.gitStatus)
+	}
+
 	var styledName string
 	if hasMatch {
 		pre := info.name[:matchStart]
@@ -539,7 +554,51 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 		styledName = style.Render(info.name)
 	}
 
-	return content + styledName + suffix
+	return content + styledName + gitIndicator + suffix
+}
+
+// renderGitStatusIndicator returns a styled string for the given git status code.
+func renderGitStatusIndicator(status string) string {
+	if len(status) < 2 {
+		return ""
+	}
+
+	// Git status codes: XY where X = staged, Y = unstaged
+	// M = modified, A = added, D = deleted, R = renamed, ? = untracked
+	staged := status[0]
+	unstaged := status[1]
+
+	var indicator string
+	var color lipgloss.TerminalColor
+
+	// Prioritize showing status
+	switch {
+	case status == "??":
+		// Untracked file
+		indicator = " [+]"
+		color = theme.DefaultTheme.Colors.Green
+	case staged == 'M' || unstaged == 'M':
+		// Modified (staged or unstaged)
+		indicator = " [M]"
+		color = theme.DefaultTheme.Colors.Orange
+	case staged == 'A':
+		// Added (staged)
+		indicator = " [A]"
+		color = theme.DefaultTheme.Colors.Green
+	case staged == 'D' || unstaged == 'D':
+		// Deleted
+		indicator = " [D]"
+		color = theme.DefaultTheme.Colors.Red
+	case staged == 'R':
+		// Renamed
+		indicator = " [R]"
+		color = theme.DefaultTheme.Colors.Cyan
+	default:
+		// Unknown or unhandled status
+		return ""
+	}
+
+	return lipgloss.NewStyle().Foreground(color).Render(indicator)
 }
 
 // mapColorString maps a color string from config to a lipgloss.TerminalColor

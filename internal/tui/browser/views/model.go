@@ -117,6 +117,9 @@ type Model struct {
 	isFilteringByTag    bool
 	selectedTag         string
 	recentNotesMode     bool
+
+	// Git status for rendering indicators
+	gitFileStatus map[string]string // Key: normalized absolute path, Value: git status code
 }
 
 // New creates a new view model.
@@ -414,4 +417,17 @@ func (m *Model) GetSelected() map[string]struct{} {
 // GetSelectedGroups returns the set of selected group keys.
 func (m *Model) GetSelectedGroups() map[string]struct{} {
 	return m.selectedGroups
+}
+
+// SetGitFileStatus updates the git file status map for rendering indicators.
+func (m *Model) SetGitFileStatus(status map[string]string) {
+	m.gitFileStatus = status
+}
+
+// GetGitFileStatus returns the git status for a given file path.
+func (m *Model) GetGitFileStatus(path string) string {
+	if m.gitFileStatus == nil {
+		return ""
+	}
+	return m.gitFileStatus[path]
 }

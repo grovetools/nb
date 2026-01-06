@@ -112,6 +112,14 @@ type Model struct {
 	previewVisible bool   // Whether the preview pane is shown
 	previewContent string
 	previewFile    string // Path of the file currently in preview
+
+	// Git status state
+	gitFileStatus   map[string]string // Key: normalized absolute path, Value: git status code
+	scannedGitRepos map[string]bool   // Key: git root path
+
+	// Commit dialog state
+	isCommitting bool
+	commitInput  textinput.Model
 }
 
 // FileToEdit returns the file path that should be edited (for Neovim integration)
@@ -178,6 +186,12 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode, ctx *servi
 	renameInput.Placeholder = "Enter new title..."
 	renameInput.CharLimit = 200
 	renameInput.Width = 60
+
+	// Commit dialog setup
+	commitInput := textinput.New()
+	commitInput.Placeholder = "Update notes"
+	commitInput.CharLimit = 200
+	commitInput.Width = 60
 
 	// Column Visibility Setup - load from state
 	availableColumns := []string{"TYPE", "STATUS", "TAGS", "WORKSPACE", "CREATED", "MODIFIED", "PATH"}
@@ -269,6 +283,9 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode, ctx *servi
 		previewFocused:    false,
 		previewVisible:    false, // Preview hidden by default
 		recentNotesMode:   false,
+		gitFileStatus:     make(map[string]string),
+		scannedGitRepos:   make(map[string]bool),
+		commitInput:       commitInput,
 	}
 }
 

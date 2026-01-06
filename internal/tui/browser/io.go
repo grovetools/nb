@@ -1,9 +1,11 @@
 package browser
 
 import (
+	"path/filepath"
 	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/mattsolo1/grove-notebook/pkg/tree"
@@ -118,4 +120,41 @@ func fetchAllItemsCmd(svc *service.Service, showArtifacts bool) tea.Cmd {
 		})
 		return itemsLoadedMsg{items: items}
 	}
+}
+
+// gitStatusLoadedMsg is sent when git status for a repository has been fetched
+type gitStatusLoadedMsg struct {
+	repoPath   string
+	fileStatus map[string]string
+	err        error
+}
+
+// fetchGitStatusCmd fetches git status for a given repository path
+func fetchGitStatusCmd(itemPath string) tea.Cmd {
+	return func() tea.Msg {
+		// Use the directory of the file, not the file itself
+		dir := filepath.Dir(itemPath)
+
+		// Find git root from this item's directory
+		gitRoot, err := git.GetGitRoot(dir)
+		if err != nil {
+			// Not a git repo, return empty status
+			return gitStatusLoadedMsg{repoPath: "", fileStatus: nil, err: nil}
+		}
+
+		// Get file status
+		fileStatus, err := service.GetFileStatus(gitRoot)
+		if err != nil {
+			return gitStatusLoadedMsg{repoPath: gitRoot, fileStatus: nil, err: err}
+		}
+
+		return gitStatusLoadedMsg{repoPath: gitRoot, fileStatus: fileStatus, err: nil}
+	}
+}
+
+// commitFinishedMsg is sent when a commit operation completes
+type commitFinishedMsg struct {
+	success bool
+	message string
+	err     error
 }

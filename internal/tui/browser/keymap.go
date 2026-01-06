@@ -48,6 +48,7 @@ type KeyMap struct {
 	Rename           key.Binding
 	CreatePlan       key.Binding
 	FocusRecent      key.Binding
+	GitCommit        key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -100,6 +101,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.Copy,
 		k.Yank,
 		k.Paste,
+		k.GitCommit,
 	})
 }
 
@@ -264,5 +266,9 @@ var keys = KeyMap{
 	FocusRecent: key.NewBinding(
 		key.WithKeys("f"),
 		key.WithHelp("f", "focus recent"),
+	),
+	GitCommit: key.NewBinding(
+		key.WithKeys("C"),
+		key.WithHelp("C", "git commit"),
 	),
 }

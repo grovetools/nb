@@ -287,7 +287,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusChanged = false
 		}
 		m.updateViewsState()
+
+		// Trigger git status fetching for items in git repos
+		var gitCmds []tea.Cmd
+		for _, item := range msg.items {
+			gitCmds = append(gitCmds, fetchGitStatusCmd(item.Path))
+			// Only fetch status for first few items to find git roots
+			// The fetch will scan the whole repo once found
+			if len(gitCmds) > 5 {
+				break
+			}
+		}
+		if len(gitCmds) > 0 {
+			return m, tea.Batch(append(gitCmds, m.updatePreviewContent())...)
+		}
 		return m, m.updatePreviewContent()
+
+	case gitStatusLoadedMsg:
+		if msg.err == nil && msg.repoPath != "" && msg.fileStatus != nil {
+			// Only process if we haven't already scanned this repo
+			if !m.scannedGitRepos[msg.repoPath] {
+				m.scannedGitRepos[msg.repoPath] = true
+				// Merge file status into our map
+				for path, status := range msg.fileStatus {
+					m.gitFileStatus[path] = status
+				}
+				// Pass git status to views for rendering
+				m.views.SetGitFileStatus(m.gitFileStatus)
+			}
+		}
+		return m, nil
+
+	case commitFinishedMsg:
+		m.isCommitting = false
+		m.commitInput.Blur()
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Commit failed: %v", msg.err)
+		} else if msg.success {
+			m.statusMessage = fmt.Sprintf("Committed: %s", msg.message)
+			m.clearGitStatus()
+			// Trigger refresh to update git status
+			return m, func() tea.Msg { return refreshMsg{} }
+		} else {
+			m.statusMessage = msg.message
+		}
+		return m, nil
 
 	case syncFinishedMsg:
 		if msg.err != nil {
@@ -327,6 +371,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshMsg:
 		m.loadingCount = 2 // for workspaces and notes
+		m.clearGitStatus()
 
 		var notesCmd tea.Cmd
 		if m.focusedWorkspace != nil {
@@ -363,6 +408,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.views.ClearSelections()
 		// Rebuild display
 		m.updateViewsState()
+		m.clearGitStatus()
 		m.statusMessage = fmt.Sprintf("Deleted %d note(s)", len(msg.deletedPaths))
 		return m, nil
 
@@ -378,6 +424,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.views.SetCutPaths(make(map[string]struct{}))
 		}
 		m.statusMessage = fmt.Sprintf("Pasted %d note(s) successfully", msg.pastedCount)
+		m.clearGitStatus()
 		// Refresh notes to show the new locations
 		m.loadingCount++
 		if m.focusedWorkspace != nil {
@@ -418,6 +465,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMessage = fmt.Sprintf("Archived %d note(s)", len(msg.archivedPaths))
 		}
 
+		m.clearGitStatus()
 		// Refresh notes to show the updated archive structure
 		m.loadingCount++
 		if m.focusedWorkspace != nil {
@@ -434,6 +482,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.statusMessage = fmt.Sprintf("Created note: %s", msg.note.Title)
+		m.clearGitStatus()
 		// Refresh notes to show the new one
 		m.loadingCount++
 		if m.focusedWorkspace != nil {
@@ -451,6 +500,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.statusMessage = "Note renamed successfully"
+		m.clearGitStatus()
 		// Refresh notes to show the updated name
 		m.loadingCount++
 		if m.focusedWorkspace != nil {
@@ -532,6 +582,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateNoteRename(msg)
 		}
 
+		// Handle commit dialog mode
+		if m.isCommitting {
+			return m.updateCommitDialog(msg)
+		}
+
 		// Handle tag picker mode
 		if m.tagPickerMode {
 			switch msg.String() {
@@ -589,7 +644,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			key.Matches(msg, m.keys.FoldPrefix) ||
 			msg.String() == "a" ||
 			msg.String() == "o" || msg.String() == "O" ||
-			msg.String() == "c" || msg.String() == "C" ||
+			(msg.String() == "c" && m.lastKey == "z") || (msg.String() == "C" && m.lastKey == "z") ||
 			msg.String() == "M" || msg.String() == "R" ||
 			(msg.String() == "A" && m.lastKey == "z") || // zA fold command
 			key.Matches(msg, m.keys.ToggleSelect) ||
@@ -928,6 +983,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+		case key.Matches(msg, m.keys.GitCommit):
+			// Start commit dialog
+			m.isCommitting = true
+			m.commitInput.SetValue("")
+			m.commitInput.Focus()
+			return m, textinput.Blink
 		case key.Matches(msg, m.keys.Back):
 			if m.ecosystemPickerMode {
 				m.ecosystemPickerMode = false
@@ -1580,6 +1641,93 @@ func (m *Model) setCollapseStateForFocus() {
 // applyGrepFilter applies the grep-based content filter to the display nodes
 func (m *Model) applyGrepFilter() {
 	m.views.ApplyGrepFilter()
+}
+
+// clearGitStatus resets the git status state to force a re-fetch
+func (m *Model) clearGitStatus() {
+	m.gitFileStatus = make(map[string]string)
+	m.scannedGitRepos = make(map[string]bool)
+	m.views.SetGitFileStatus(m.gitFileStatus)
+}
+
+// updateCommitDialog handles input when the commit dialog is active.
+func (m *Model) updateCommitDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.isCommitting = false
+			m.commitInput.Blur()
+			return m, nil
+		case "enter":
+			return m, m.executeCommitCmd()
+		}
+	}
+
+	m.commitInput, cmd = m.commitInput.Update(msg)
+	return m, cmd
+}
+
+// executeCommitCmd creates a command to execute the git commit.
+func (m *Model) executeCommitCmd() tea.Cmd {
+	message := m.commitInput.Value()
+	if message == "" {
+		message = "Update notes"
+	}
+
+	return func() tea.Msg {
+		// Find a git repo from the current items
+		var gitRoot string
+		for _, item := range m.allItems {
+			root, err := findGitRoot(item.Path)
+			if err == nil && root != "" {
+				gitRoot = root
+				break
+			}
+		}
+
+		if gitRoot == "" {
+			return commitFinishedMsg{success: false, message: "No git repository found", err: nil}
+		}
+
+		// Stage all changes
+		gitAddCmd := exec.Command("git", "add", ".")
+		gitAddCmd.Dir = gitRoot
+		if output, err := gitAddCmd.CombinedOutput(); err != nil {
+			return commitFinishedMsg{success: false, message: "", err: fmt.Errorf("git add failed: %w\n%s", err, string(output))}
+		}
+
+		// Commit
+		gitCommitCmd := exec.Command("git", "commit", "-m", message)
+		gitCommitCmd.Dir = gitRoot
+		output, err := gitCommitCmd.CombinedOutput()
+		if err != nil {
+			// Check if there's nothing to commit
+			if strings.Contains(string(output), "nothing to commit") {
+				return commitFinishedMsg{success: false, message: "Nothing to commit", err: nil}
+			}
+			return commitFinishedMsg{success: false, message: "", err: fmt.Errorf("git commit failed: %w\n%s", err, string(output))}
+		}
+
+		return commitFinishedMsg{success: true, message: message, err: nil}
+	}
+}
+
+// findGitRoot finds the git root directory for a given path
+func findGitRoot(path string) (string, error) {
+	dir := filepath.Dir(path)
+	for {
+		gitDir := filepath.Join(dir, ".git")
+		if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("not a git repository")
+		}
+		dir = parent
+	}
 }
 
 

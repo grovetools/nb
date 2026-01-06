@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/spf13/cobra"
 )
@@ -20,11 +22,13 @@ func NewGitCmd(svc **service.Service, workspaceOverride *string) *cobra.Command 
 	}
 
 	cmd.AddCommand(newGitInitCmd(svc, workspaceOverride))
+	cmd.AddCommand(newGitCommitCmd(svc, workspaceOverride))
 	return cmd
 }
 
 func newGitInitCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var globalRepo bool
+	var rootRepo bool
 
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -32,11 +36,21 @@ func newGitInitCmd(svc **service.Service, workspaceOverride *string) *cobra.Comm
 		Long: `Initializes a Git repository in the notebook workspace directory for the current context.
 
 This command performs three actions:
-1. Runs 'git init' in the workspace's notebook directory (e.g., workspaces/my-project/).
+1. Runs 'git init' in the target notebook directory.
 2. Creates a '.gitignore' file with sensible defaults for notebook content.
-3. Creates a '.grove/notebook.yml' marker file to identify this as a notebook repository.`,
+3. Creates a '.grove/notebook.yml' marker file to identify this as a notebook repository.
+
+Target directory options:
+- Default: Current workspace's notebook directory (e.g., workspaces/my-project/)
+- --global: The global notebook directory (global/)
+- --root: The entire notebook root containing all workspaces`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s := *svc
+
+			// Validate flags are mutually exclusive
+			if globalRepo && rootRepo {
+				return fmt.Errorf("--global and --root flags are mutually exclusive")
+			}
 
 			// 1. Determine Target Directory
 			var targetCtx string
@@ -60,6 +74,21 @@ This command performs three actions:
 			}
 			// Go up one level from inbox to get the workspace directory
 			targetDir := filepath.Dir(samplePath)
+
+			// If --root flag is set, find the notebook root directory
+			if rootRepo {
+				// From workspace dir, go up to find the notebook root.
+				// Structure: <root>/workspaces/<name>/ or <root>/global/
+				parent := filepath.Dir(targetDir)
+				parentName := filepath.Base(parent)
+				if parentName == "workspaces" {
+					// We're in a workspace, go up one more level
+					targetDir = filepath.Dir(parent)
+				} else {
+					// We're in global or similar, parent is the root
+					targetDir = parent
+				}
+			}
 
 			fmt.Printf("Targeting notebook directory: %s\n", targetDir)
 
@@ -112,6 +141,76 @@ Thumbs.db
 		},
 	}
 
-	cmd.Flags().BoolVarP(&globalRepo, "global", "g", false, "Initialize in the global notebook instead of the current workspace's notebook")
+	cmd.Flags().BoolVarP(&globalRepo, "global", "g", false, "Initialize in the global notebook directory")
+	cmd.Flags().BoolVarP(&rootRepo, "root", "r", false, "Initialize in the notebook root (all workspaces in one repo)")
+	return cmd
+}
+
+func newGitCommitCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	var message string
+
+	cmd := &cobra.Command{
+		Use:   "commit [files...]",
+		Short: "Stage and commit changes in the current notebook's repository",
+		Long: `Convenience command to stage and commit changes in the notebook repository.
+If no files are specified, all changes are staged.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s := *svc
+
+			// 1. Determine the notebook directory for the current context.
+			wsCtx, err := s.GetWorkspaceContext(*workspaceOverride)
+			if err != nil {
+				return fmt.Errorf("getting workspace context: %w", err)
+			}
+
+			// We need a path inside the notebook to find the git root.
+			// Using the 'inbox' directory is a reliable way to get a path.
+			inboxPath, err := s.GetNotebookLocator().GetNotesDir(wsCtx.NotebookContextWorkspace, "inbox")
+			if err != nil {
+				return fmt.Errorf("could not resolve notebook path: %w", err)
+			}
+
+			// 2. Find the root of the git repository.
+			gitRoot, err := git.GetGitRoot(inboxPath)
+			if err != nil {
+				return fmt.Errorf("notebook directory is not a git repository. Run 'nb git init'")
+			}
+
+			// 3. Stage files.
+			stageArgs := []string{"add"}
+			if len(args) > 0 {
+				stageArgs = append(stageArgs, args...)
+			} else {
+				stageArgs = append(stageArgs, ".")
+			}
+
+			gitAddCmd := exec.Command("git", stageArgs...)
+			gitAddCmd.Dir = gitRoot
+			if output, err := gitAddCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("git add failed: %w\n%s", err, string(output))
+			}
+			fmt.Println("✓ Staged changes.")
+
+			// 4. Commit changes.
+			if message == "" {
+				message = "Update notes"
+			}
+			gitCommitCmd := exec.Command("git", "commit", "-m", message)
+			gitCommitCmd.Dir = gitRoot
+			if output, err := gitCommitCmd.CombinedOutput(); err != nil {
+				// Don't error if there's nothing to commit.
+				if strings.Contains(string(output), "nothing to commit") {
+					fmt.Println("No changes to commit.")
+					return nil
+				}
+				return fmt.Errorf("git commit failed: %w\n%s", err, string(output))
+			}
+
+			fmt.Printf("✓ Committed with message: \"%s\"\n", message)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Commit message (default: \"Update notes\")")
 	return cmd
 }

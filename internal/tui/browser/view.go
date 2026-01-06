@@ -149,6 +149,30 @@ func (m Model) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
 	}
 
+	// Render git commit dialog if active
+	if m.isCommitting {
+		contextLine := lipgloss.NewStyle().
+			Faint(true).
+			Render("Git Commit")
+
+		content := contextLine + "\n\nCommit Message:\n" + m.commitInput.View()
+
+		dialogBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(theme.DefaultTheme.Colors.Green).
+			Padding(1, 2).
+			Render(content)
+
+		helpText := lipgloss.NewStyle().
+			Faint(true).
+			Width(lipgloss.Width(dialogBox)).
+			Align(lipgloss.Center).
+			Render("\n\nEnter to commit • Esc to cancel")
+
+		overlay := lipgloss.JoinVertical(lipgloss.Left, dialogBox, helpText)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+	}
+
 	if m.columnSelectMode {
 		listView := m.columnList.View()
 		styledView := lipgloss.NewStyle().
