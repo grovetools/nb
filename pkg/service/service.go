@@ -982,6 +982,11 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, incl
 				return filepath.SkipDir
 			}
 
+			// Skip .grove directory which contains metadata
+			if info.IsDir() && info.Name() == ".grove" {
+				return filepath.SkipDir
+			}
+
 			// Ignore common dotfiles, but not special dot-directories like .archive
 			if !info.IsDir() && strings.HasPrefix(info.Name(), ".") {
 				return nil
@@ -1116,6 +1121,11 @@ func (s *Service) ListAllItems(ctx *WorkspaceContext, includeArchived bool, incl
 
 			// Skip .grove-worktrees directories - worktrees don't belong in notebooks
 			if info.IsDir() && info.Name() == ".grove-worktrees" {
+				return filepath.SkipDir
+			}
+
+			// Skip .grove directory which contains metadata
+			if info.IsDir() && info.Name() == ".grove" {
 				return filepath.SkipDir
 			}
 
@@ -1698,6 +1708,10 @@ func (s *Service) ListAllNotesInWorkspace(ws *coreworkspace.WorkspaceNode) ([]*m
 		}
 		// Skip .grove-worktrees directories - worktrees don't belong in notebooks
 		if info.IsDir() && info.Name() == ".grove-worktrees" {
+			return filepath.SkipDir
+		}
+		// Skip .grove directory which contains metadata
+		if info.IsDir() && info.Name() == ".grove" {
 			return filepath.SkipDir
 		}
 		if !info.IsDir() && strings.HasSuffix(path, ".md") {

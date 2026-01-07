@@ -148,7 +148,7 @@ func verifyNbGitInit(ctx *harness.Context) error {
 	}
 
 	// Verify marker file was created in the workspace directory
-	markerFile := filepath.Join(notebookWorkspaceDir, ".grove", "notebook.yml")
+	markerFile := filepath.Join(notebookWorkspaceDir, "notebook.yml")
 	if err := ctx.Check("notebook marker created in workspace directory",
 		assert.True(fs.Exists(markerFile))); err != nil {
 		return err
@@ -545,14 +545,14 @@ func verifyRootMarkerFile(ctx *harness.Context) error {
 	workspace1 := ctx.GetString("workspace1")
 
 	// Verify marker at notebook root
-	rootMarker := filepath.Join(notebookRoot, ".grove", "notebook.yml")
+	rootMarker := filepath.Join(notebookRoot, "notebook.yml")
 	if err := ctx.Check("marker file at notebook root",
 		assert.True(fs.Exists(rootMarker))); err != nil {
 		return err
 	}
 
 	// Verify NO marker at workspace level
-	workspaceMarker := filepath.Join(workspace1, ".grove", "notebook.yml")
+	workspaceMarker := filepath.Join(workspace1, "notebook.yml")
 	if err := ctx.Check("NO marker at workspace level",
 		assert.False(fs.Exists(workspaceMarker))); err != nil {
 		return fmt.Errorf("BUG: marker was created at workspace level instead of notebook root")
