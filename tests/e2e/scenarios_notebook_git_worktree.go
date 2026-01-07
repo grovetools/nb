@@ -397,3 +397,179 @@ func verifySetupOnly(ctx *harness.Context, projectDir, notebookWorkspaceDir stri
 
 	return nil
 }
+
+// NotebookGitRootScenario tests the `nb git init --root` flag which initializes git
+// at the notebook root level (all workspaces in one repo).
+func NotebookGitRootScenario() *harness.Scenario {
+	return harness.NewScenario(
+		"notebook-git-init-root",
+		"Tests nb git init --root flag to initialize git at notebook root level",
+		[]string{"notebook", "git", "root"},
+		[]harness.Step{
+			harness.NewStep("Setup notebook environment", setupRootTestEnvironment),
+			harness.NewStep("Run nb git init --root and verify it targets notebook root", verifyNbGitInitRoot),
+			harness.NewStep("Verify marker file at notebook root", verifyRootMarkerFile),
+		},
+	)
+}
+
+// setupRootTestEnvironment creates a notebook structure for testing --root flag
+func setupRootTestEnvironment(ctx *harness.Context) error {
+	// Configure centralized notebook
+	notebookRoot := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb")
+
+	// Create a project for context
+	projectDir := ctx.NewDir("root-test-project")
+	if err := fs.WriteString(filepath.Join(projectDir, "grove.yml"), "name: root-test-project\nversion: '1.0'"); err != nil {
+		return err
+	}
+	projectRepo, err := git.SetupTestRepo(projectDir)
+	if err != nil {
+		return fmt.Errorf("failed to setup project git repo: %w", err)
+	}
+	if err := projectRepo.AddCommit("initial commit"); err != nil {
+		return err
+	}
+
+	globalYAML := fmt.Sprintf(`
+version: "1.0"
+groves:
+  e2e-projects:
+    path: "%s"
+notebooks:
+  rules:
+    default: "main"
+  definitions:
+    main:
+      root_dir: "%s"
+`, ctx.RootDir, notebookRoot)
+
+	globalConfigDir := filepath.Join(ctx.HomeDir(), ".config", "grove")
+	if err := fs.CreateDir(globalConfigDir); err != nil {
+		return fmt.Errorf("failed to create global config dir: %w", err)
+	}
+	if err := fs.WriteString(filepath.Join(globalConfigDir, "grove.yml"), globalYAML); err != nil {
+		return err
+	}
+
+	// Create notebook structure with multiple workspaces
+	workspace1 := filepath.Join(notebookRoot, "workspaces", "root-test-project")
+	workspace2 := filepath.Join(notebookRoot, "workspaces", "another-project")
+	globalDir := filepath.Join(notebookRoot, "global")
+
+	for _, dir := range []string{workspace1, workspace2, globalDir} {
+		if err := fs.CreateDir(filepath.Join(dir, "inbox")); err != nil {
+			return fmt.Errorf("failed to create %s: %w", dir, err)
+		}
+	}
+
+	// Add some content
+	if err := fs.WriteString(filepath.Join(workspace1, "inbox", "note1.md"), "# Note 1"); err != nil {
+		return err
+	}
+	if err := fs.WriteString(filepath.Join(workspace2, "inbox", "note2.md"), "# Note 2"); err != nil {
+		return err
+	}
+	if err := fs.WriteString(filepath.Join(globalDir, "inbox", "global-note.md"), "# Global Note"); err != nil {
+		return err
+	}
+
+	ctx.Set("project_dir", projectDir)
+	ctx.Set("notebook_root", notebookRoot)
+	ctx.Set("workspace1", workspace1)
+	ctx.Set("workspace2", workspace2)
+
+	ctx.ShowCommandOutput("Setup Complete", fmt.Sprintf(`
+Notebook root: %s
+Workspace 1: %s
+Workspace 2: %s
+Global: %s
+`, notebookRoot, workspace1, workspace2, globalDir), "")
+
+	return nil
+}
+
+// verifyNbGitInitRoot runs `nb git init --root` and verifies it targets the notebook root
+func verifyNbGitInitRoot(ctx *harness.Context) error {
+	notebookRoot := ctx.GetString("notebook_root")
+	workspace1 := ctx.GetString("workspace1")
+	projectDir := ctx.GetString("project_dir")
+
+	nbBin, err := findProjectBinary()
+	if err != nil {
+		return err
+	}
+
+	// Run nb git init --root
+	cmd := ctx.Command(nbBin, "git", "init", "--root", "-W", projectDir).
+		Dir(workspace1).
+		Env("HOME=" + ctx.HomeDir())
+
+	result := cmd.Run()
+	ctx.ShowCommandOutput("nb git init --root", result.Stdout, result.Stderr)
+
+	if result.Error != nil {
+		return fmt.Errorf("nb git init --root failed: %w", result.Error)
+	}
+
+	// Verify output mentions the notebook root
+	if !strings.Contains(result.Stdout, notebookRoot) {
+		return fmt.Errorf("expected output to mention notebook root %s", notebookRoot)
+	}
+
+	// Verify .git was created at NOTEBOOK ROOT
+	rootGitDir := filepath.Join(notebookRoot, ".git")
+	if err := ctx.Check(".git created at notebook root",
+		assert.True(fs.Exists(rootGitDir))); err != nil {
+		return err
+	}
+
+	// Verify .git was NOT created at workspace level
+	workspaceGitDir := filepath.Join(workspace1, ".git")
+	if err := ctx.Check(".git NOT created at workspace level",
+		assert.False(fs.Exists(workspaceGitDir))); err != nil {
+		return fmt.Errorf("BUG: .git was created at workspace level instead of notebook root")
+	}
+
+	ctx.ShowCommandOutput("Verification", fmt.Sprintf(`
+Notebook root .git exists: %v (expected: true)
+Workspace .git exists: %v (expected: false)
+`, fs.Exists(rootGitDir), fs.Exists(workspaceGitDir)), "")
+
+	return nil
+}
+
+// verifyRootMarkerFile verifies the marker file was created at the notebook root
+func verifyRootMarkerFile(ctx *harness.Context) error {
+	notebookRoot := ctx.GetString("notebook_root")
+	workspace1 := ctx.GetString("workspace1")
+
+	// Verify marker at notebook root
+	rootMarker := filepath.Join(notebookRoot, ".grove", "notebook.yml")
+	if err := ctx.Check("marker file at notebook root",
+		assert.True(fs.Exists(rootMarker))); err != nil {
+		return err
+	}
+
+	// Verify NO marker at workspace level
+	workspaceMarker := filepath.Join(workspace1, ".grove", "notebook.yml")
+	if err := ctx.Check("NO marker at workspace level",
+		assert.False(fs.Exists(workspaceMarker))); err != nil {
+		return fmt.Errorf("BUG: marker was created at workspace level instead of notebook root")
+	}
+
+	// Verify .gitignore at notebook root
+	rootGitignore := filepath.Join(notebookRoot, ".gitignore")
+	if err := ctx.Check(".gitignore at notebook root",
+		assert.True(fs.Exists(rootGitignore))); err != nil {
+		return err
+	}
+
+	ctx.ShowCommandOutput("Root Marker Verification", fmt.Sprintf(`
+Root marker exists: %v (expected: true)
+Workspace marker exists: %v (expected: false)
+Root .gitignore exists: %v (expected: true)
+`, fs.Exists(rootMarker), fs.Exists(workspaceMarker), fs.Exists(rootGitignore)), "")
+
+	return nil
+}
