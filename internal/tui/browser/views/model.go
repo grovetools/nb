@@ -120,7 +120,8 @@ type Model struct {
 	showGitModifiedOnly  bool
 
 	// Git status for rendering indicators
-	gitFileStatus map[string]string // Key: normalized absolute path, Value: git status code
+	gitFileStatus   map[string]string // Key: normalized absolute path, Value: git status code
+	gitDeletedFiles []string          // Paths of deleted files (don't exist on disk)
 }
 
 // New creates a new view model.
@@ -426,6 +427,11 @@ func (m *Model) GetSelectedGroups() map[string]struct{} {
 // SetGitFileStatus updates the git file status map for rendering indicators.
 func (m *Model) SetGitFileStatus(status map[string]string) {
 	m.gitFileStatus = status
+}
+
+// SetGitDeletedFiles updates the list of deleted files.
+func (m *Model) SetGitDeletedFiles(paths []string) {
+	m.gitDeletedFiles = paths
 }
 
 // GetGitFileStatus returns the git status for a given file path.

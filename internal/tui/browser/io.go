@@ -126,9 +126,10 @@ func fetchAllItemsCmd(svc *service.Service, showArtifacts bool) tea.Cmd {
 
 // gitStatusLoadedMsg is sent when git status for a repository has been fetched
 type gitStatusLoadedMsg struct {
-	repoPath   string
-	fileStatus map[string]string
-	err        error
+	repoPath     string
+	fileStatus   map[string]string
+	deletedFiles []string // paths of deleted files that don't exist on disk
+	err          error
 }
 
 // fetchGitStatusCmd fetches git status for a given repository path
@@ -144,13 +145,18 @@ func fetchGitStatusCmd(itemPath string) tea.Cmd {
 			return gitStatusLoadedMsg{repoPath: "", fileStatus: nil, err: nil}
 		}
 
-		// Get file status
-		fileStatus, err := service.GetFileStatus(gitRoot)
+		// Get extended file status including deleted files
+		result, err := service.GetFileStatusExtended(gitRoot)
 		if err != nil {
 			return gitStatusLoadedMsg{repoPath: gitRoot, fileStatus: nil, err: err}
 		}
 
-		return gitStatusLoadedMsg{repoPath: gitRoot, fileStatus: fileStatus, err: nil}
+		return gitStatusLoadedMsg{
+			repoPath:     gitRoot,
+			fileStatus:   result.FileStatus,
+			deletedFiles: result.DeletedFiles,
+			err:          nil,
+		}
 	}
 }
 
@@ -175,6 +181,70 @@ type unstageFinishedMsg struct {
 	count         int
 	err           error
 	updatedStatus map[string]string // Updated status for unstaged files
+}
+
+// stageAllCmd stages all changes in the git repo
+func stageAllCmd(items []*tree.Item) tea.Cmd {
+	return func() tea.Msg {
+		if len(items) == 0 {
+			return stageFinishedMsg{success: false, count: 0, err: nil}
+		}
+
+		// Find git root from first item
+		var gitRoot string
+		for _, item := range items {
+			root, err := git.GetGitRoot(filepath.Dir(item.Path))
+			if err == nil && root != "" {
+				gitRoot = root
+				break
+			}
+		}
+
+		if gitRoot == "" {
+			return stageFinishedMsg{success: false, count: 0, err: nil}
+		}
+
+		// Stage all
+		cmd := exec.Command("git", "add", ".")
+		cmd.Dir = gitRoot
+		if _, err := cmd.CombinedOutput(); err != nil {
+			return stageFinishedMsg{success: false, count: 0, err: err}
+		}
+
+		return stageFinishedMsg{success: true, count: -1, err: nil} // -1 signals "all"
+	}
+}
+
+// unstageAllCmd unstages all staged changes in the git repo
+func unstageAllCmd(items []*tree.Item) tea.Cmd {
+	return func() tea.Msg {
+		if len(items) == 0 {
+			return unstageFinishedMsg{success: false, count: 0, err: nil}
+		}
+
+		// Find git root from first item
+		var gitRoot string
+		for _, item := range items {
+			root, err := git.GetGitRoot(filepath.Dir(item.Path))
+			if err == nil && root != "" {
+				gitRoot = root
+				break
+			}
+		}
+
+		if gitRoot == "" {
+			return unstageFinishedMsg{success: false, count: 0, err: nil}
+		}
+
+		// Unstage all
+		cmd := exec.Command("git", "reset", "HEAD")
+		cmd.Dir = gitRoot
+		if _, err := cmd.CombinedOutput(); err != nil {
+			return unstageFinishedMsg{success: false, count: 0, err: err}
+		}
+
+		return unstageFinishedMsg{success: true, count: -1, err: nil} // -1 signals "all"
+	}
 }
 
 // toggleStageFilesCmd toggles the stage status for the given files.
@@ -246,8 +316,9 @@ func toggleStageFilesCmd(paths []string, gitFileStatus map[string]string) tea.Cm
 				for _, info := range infos {
 					if info.oldStatus == "??" {
 						updatedStatus[info.normalized] = "A "
-					} else if len(info.oldStatus) >= 2 && info.oldStatus[1] == 'M' {
-						updatedStatus[info.normalized] = "M "
+					} else if len(info.oldStatus) >= 2 && info.oldStatus[1] == 'D' {
+						// Unstaged delete -> staged delete
+						updatedStatus[info.normalized] = "D "
 					} else {
 						updatedStatus[info.normalized] = "M "
 					}
@@ -282,6 +353,9 @@ func toggleStageFilesCmd(paths []string, gitFileStatus map[string]string) tea.Cm
 				for _, info := range infos {
 					if len(info.oldStatus) >= 2 && info.oldStatus[0] == 'A' {
 						updatedStatus[info.normalized] = "??"
+					} else if len(info.oldStatus) >= 2 && info.oldStatus[0] == 'D' {
+						// Staged delete -> unstaged delete
+						updatedStatus[info.normalized] = " D"
 					} else {
 						updatedStatus[info.normalized] = " M"
 					}

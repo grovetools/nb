@@ -559,14 +559,7 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 
 // renderGitStatusIndicator returns a styled string for the given git status code.
 // Git status codes: XY where X = staged (index), Y = unstaged (working tree)
-// Indicators:
-//   [S] = fully staged (green) - ready to commit
-//   [M] = modified but unstaged (orange) - needs staging
-//   [±] = partially staged (yellow) - has both staged and unstaged changes
-//   [+] = untracked new file (dim) - not yet added to git
-//   [A] = newly added and staged (green) - ready to commit
-//   [D] = deleted (red)
-//   [R] = renamed (cyan)
+// Uses icons from theme.IconGit* for visual indicators
 func renderGitStatusIndicator(status string) string {
 	if len(status) < 2 {
 		return ""
@@ -581,36 +574,40 @@ func renderGitStatusIndicator(status string) string {
 	switch {
 	case status == "??":
 		// Untracked file - not yet added to git
-		indicator = " [+]"
+		indicator = " " + theme.IconGitUntracked
 		color = theme.DefaultTheme.Colors.MutedText
 	case staged == 'A' && unstaged == ' ':
 		// Newly added and fully staged
-		indicator = " [A]"
+		indicator = " " + theme.IconGitStaged
 		color = theme.DefaultTheme.Colors.Green
 	case staged == 'M' && unstaged == 'M':
 		// Modified, staged, then modified again (partially staged)
-		indicator = " [±]"
+		indicator = " " + theme.IconGitPartiallyStaged
 		color = theme.DefaultTheme.Colors.Yellow
 	case staged == 'M' && unstaged == ' ':
 		// Modified and fully staged
-		indicator = " [S]"
+		indicator = " " + theme.IconGitStaged
 		color = theme.DefaultTheme.Colors.Green
 	case staged == ' ' && unstaged == 'M':
 		// Modified but not staged
-		indicator = " [M]"
+		indicator = " " + theme.IconGitModified
 		color = theme.DefaultTheme.Colors.Orange
-	case staged == 'D' || unstaged == 'D':
-		// Deleted
-		indicator = " [D]"
+	case staged == 'D' && unstaged == ' ':
+		// Staged deletion (fully staged for deletion)
+		indicator = " " + theme.IconGitStaged
+		color = theme.DefaultTheme.Colors.Green
+	case unstaged == 'D':
+		// Unstaged deletion
+		indicator = " " + theme.IconGitDeleted
 		color = theme.DefaultTheme.Colors.Red
 	case staged == 'R':
 		// Renamed
-		indicator = " [R]"
+		indicator = " " + theme.IconGitRenamed
 		color = theme.DefaultTheme.Colors.Cyan
 	default:
 		// Unknown or unhandled status - still show something
 		if staged != ' ' || unstaged != ' ' {
-			indicator = " [?]"
+			indicator = " " + theme.IconGitModified
 			color = theme.DefaultTheme.Colors.MutedText
 		} else {
 			return ""

@@ -631,6 +631,9 @@ func (m *Model) BuildDisplayTree() {
 		return
 	}
 
+	// Add deleted files to the tree
+	m.AddDeletedFilesToTree()
+
 	m.clampCursor()
 }
 
@@ -1832,7 +1835,123 @@ func (m *Model) FilterDisplayTreeByGitStatus() {
 	}
 
 	m.displayNodes = filteredTree
+
+	// Add deleted files to the filtered tree
+	m.AddDeletedFilesToTree()
+
 	m.clampCursor()
+}
+
+// AddDeletedFilesToTree inserts synthetic entries for git-deleted files into the display tree.
+// It places deleted files in their proper parent folder location in the tree.
+func (m *Model) AddDeletedFilesToTree() {
+	if len(m.gitDeletedFiles) == 0 {
+		return
+	}
+
+	// Build set of existing paths
+	existingPaths := make(map[string]bool)
+	for _, node := range m.displayNodes {
+		if node.Item != nil {
+			normalizedPath, err := pathutil.NormalizeForLookup(node.Item.Path)
+			if err == nil {
+				existingPaths[normalizedPath] = true
+			}
+		}
+	}
+
+	// Build map of parent paths to their node index, depth, and collapsed state
+	parentNodes := make(map[string]struct {
+		index     int
+		depth     int
+		collapsed bool
+	})
+	for i, node := range m.displayNodes {
+		if node.Item != nil && node.Item.IsDir {
+			normalizedPath, err := pathutil.NormalizeForLookup(node.Item.Path)
+			if err == nil {
+				nodeID := node.NodeID()
+				parentNodes[normalizedPath] = struct {
+					index     int
+					depth     int
+					collapsed bool
+				}{i, node.Depth, m.collapsedNodes[nodeID]}
+			}
+		}
+	}
+
+	// Collect deleted files to insert
+	type deletedEntry struct {
+		path        string
+		parentDepth int
+		insertAfter int
+	}
+	var deletedEntries []deletedEntry
+
+	for _, deletedPath := range m.gitDeletedFiles {
+		if existingPaths[deletedPath] {
+			continue
+		}
+		existingPaths[deletedPath] = true
+
+		parentPath := filepath.Dir(deletedPath)
+		normalizedParent, _ := pathutil.NormalizeForLookup(parentPath)
+
+		if parent, ok := parentNodes[normalizedParent]; ok {
+			// Skip if parent folder is collapsed - don't show deleted files under collapsed parents
+			if parent.collapsed {
+				continue
+			}
+			insertAfter := parent.index
+			for j := parent.index + 1; j < len(m.displayNodes); j++ {
+				if m.displayNodes[j].Depth <= parent.depth {
+					break
+				}
+				insertAfter = j
+			}
+			deletedEntries = append(deletedEntries, deletedEntry{
+				path:        deletedPath,
+				parentDepth: parent.depth,
+				insertAfter: insertAfter,
+			})
+		}
+		// If parent folder not found in display tree (ancestor collapsed), skip this deleted file
+	}
+
+	// Sort by insert position descending
+	sort.Slice(deletedEntries, func(i, j int) bool {
+		return deletedEntries[i].insertAfter > deletedEntries[j].insertAfter
+	})
+
+	// Insert deleted files
+	for _, entry := range deletedEntries {
+		name := filepath.Base(entry.path)
+		syntheticItem := &tree.Item{
+			Path:  entry.path,
+			Name:  name,
+			IsDir: false,
+			Type:  tree.TypeNote,
+		}
+
+		depth := entry.parentDepth + 1
+		if depth < 1 {
+			depth = 1
+		}
+
+		syntheticNode := &DisplayNode{
+			Item:         syntheticItem,
+			Prefix:       strings.Repeat("│ ", depth-1) + "│ ",
+			Depth:        depth,
+			RelativePath: entry.path,
+		}
+
+		insertPos := entry.insertAfter + 1
+		if insertPos >= len(m.displayNodes) {
+			m.displayNodes = append(m.displayNodes, syntheticNode)
+		} else {
+			m.displayNodes = append(m.displayNodes[:insertPos], append([]*DisplayNode{syntheticNode}, m.displayNodes[insertPos:]...)...)
+		}
+	}
 }
 
 // ApplyGrepFilter performs a content search using ripgrep and filters the tree.

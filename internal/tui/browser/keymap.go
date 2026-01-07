@@ -51,6 +51,8 @@ type KeyMap struct {
 	FocusRecent      key.Binding
 	GitCommit        key.Binding
 	GitStageToggle   key.Binding
+	GitStageAll      key.Binding
+	GitUnstageAll    key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -105,6 +107,8 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		k.Yank,
 		k.Paste,
 		k.GitStageToggle,
+		k.GitStageAll,
+		k.GitUnstageAll,
 		k.GitCommit,
 	})
 }
@@ -282,5 +286,13 @@ var keys = KeyMap{
 	GitStageToggle: key.NewBinding(
 		key.WithKeys("-"),
 		key.WithHelp("-", "toggle git stage"),
+	),
+	GitStageAll: key.NewBinding(
+		key.WithKeys("="),
+		key.WithHelp("=", "stage all"),
+	),
+	GitUnstageAll: key.NewBinding(
+		key.WithKeys("+"),
+		key.WithHelp("+", "unstage all"),
 	),
 }

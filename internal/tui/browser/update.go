@@ -319,11 +319,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				for path, status := range msg.fileStatus {
 					m.gitFileStatus[path] = status
 				}
-				// Pass git status to views for rendering
+				// Merge deleted files (deduplicate)
+				existingDeleted := make(map[string]bool)
+				for _, p := range m.gitDeletedFiles {
+					existingDeleted[p] = true
+				}
+				for _, p := range msg.deletedFiles {
+					if !existingDeleted[p] {
+						m.gitDeletedFiles = append(m.gitDeletedFiles, p)
+						existingDeleted[p] = true
+					}
+				}
+				// Pass git status and deleted files to views for rendering
 				m.views.SetGitFileStatus(m.gitFileStatus)
-				// Rebuild view if git filter is active (status changed)
+				m.views.SetGitDeletedFiles(m.gitDeletedFiles)
+				// Rebuild view to include deleted files and update status indicators
 				if m.showGitModifiedOnly {
 					m.updateViewsState()
+				} else if len(msg.deletedFiles) > 0 {
+					// Add deleted files to tree even in normal view
+					m.views.AddDeletedFilesToTree()
 				}
 			}
 		}
@@ -347,6 +362,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stageFinishedMsg:
 		if msg.err != nil {
 			m.statusMessage = fmt.Sprintf("Stage failed: %v", msg.err)
+		} else if msg.success && msg.count == -1 {
+			// Stage all - need full refresh
+			m.statusMessage = "Staged all changes"
+			m.scannedGitRepos = make(map[string]bool)
+			return m, func() tea.Msg { return refreshMsg{} }
 		} else if msg.success && msg.count > 0 {
 			m.statusMessage = fmt.Sprintf("Staged %d file(s)", msg.count)
 			// Optimistically update git status without full refresh
@@ -362,6 +382,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case unstageFinishedMsg:
 		if msg.err != nil {
 			m.statusMessage = fmt.Sprintf("Unstage failed: %v", msg.err)
+		} else if msg.success && msg.count == -1 {
+			// -1 signals "all" were unstaged
+			m.statusMessage = "Unstaged all changes"
+			// Clear cached git repos to force full refresh
+			m.scannedGitRepos = make(map[string]bool)
+			return m, func() tea.Msg { return refreshMsg{} }
 		} else if msg.success && msg.count > 0 {
 			m.statusMessage = fmt.Sprintf("Unstaged %d file(s)", msg.count)
 			// Optimistically update git status without full refresh
@@ -1047,6 +1073,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, toggleStageFilesCmd(paths, m.gitFileStatus)
+		case key.Matches(msg, m.keys.GitStageAll):
+			// Stage all changes
+			return m, stageAllCmd(m.allItems)
+		case key.Matches(msg, m.keys.GitUnstageAll):
+			// Unstage all changes
+			return m, unstageAllCmd(m.allItems)
 		case key.Matches(msg, m.keys.Back):
 			if m.ecosystemPickerMode {
 				m.ecosystemPickerMode = false
@@ -1704,8 +1736,14 @@ func (m *Model) applyGrepFilter() {
 // clearGitStatus resets the git status state to force a re-fetch
 func (m *Model) clearGitStatus() {
 	m.gitFileStatus = make(map[string]string)
+	m.gitDeletedFiles = nil
 	m.scannedGitRepos = make(map[string]bool)
 	m.views.SetGitFileStatus(m.gitFileStatus)
+	m.views.SetGitDeletedFiles(nil)
+	// Rebuild view to reflect cleared status
+	if m.showGitModifiedOnly {
+		m.updateViewsState()
+	}
 }
 
 // updateCommitDialog handles input when the commit dialog is active.

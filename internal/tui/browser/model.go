@@ -115,8 +115,9 @@ type Model struct {
 	previewFile    string // Path of the file currently in preview
 
 	// Git status state
-	gitFileStatus   map[string]string // Key: normalized absolute path, Value: git status code
-	scannedGitRepos map[string]bool   // Key: git root path
+	gitFileStatus    map[string]string // Key: normalized absolute path, Value: git status code
+	gitDeletedFiles  []string          // Paths of deleted files (don't exist on disk)
+	scannedGitRepos  map[string]bool   // Key: git root path
 
 	// Commit dialog state
 	isCommitting bool
