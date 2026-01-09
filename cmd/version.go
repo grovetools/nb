@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
@@ -20,7 +19,6 @@ func NewVersionCmd() *cobra.Command {
 		Short: "Print version information",
 		Long:  "Display the version, commit, branch, and build information for grove-notebook",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
 			info := version.GetInfo()
 
 			if jsonOutput {
@@ -34,7 +32,7 @@ func NewVersionCmd() *cobra.Command {
 					Field("branch", info.Branch).
 					Pretty(string(jsonData)).
 					PrettyOnly().
-					Log(ctx)
+					Emit()
 			} else {
 				versionUlog.Info("Version info").
 					Field("version", info.Version).
@@ -42,7 +40,7 @@ func NewVersionCmd() *cobra.Command {
 					Field("branch", info.Branch).
 					Pretty(info.String()).
 					PrettyOnly().
-					Log(ctx)
+					Emit()
 			}
 			return nil
 		},

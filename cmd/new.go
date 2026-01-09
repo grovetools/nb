@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -101,13 +100,13 @@ Examples:
 				if err != nil {
 					return err
 				}
-				bgCtx := context.Background()
+				
 				newUlog.Success("Concept created").
 					Field("path", note.Path).
 					Field("title", title).
 					Pretty(fmt.Sprintf("Created concept: %s", note.Path)).
 					PrettyOnly().
-					Log(bgCtx)
+					Emit()
 				return nil
 			}
 
@@ -137,14 +136,14 @@ Examples:
 				}
 			}
 
-			bgCtx := context.Background()
+			
 			newUlog.Success("Note created").
 				Field("path", note.Path).
 				Field("type", actualNoteType).
 				Field("title", title).
 				Pretty(fmt.Sprintf("Created: %s", note.Path)).
 				PrettyOnly().
-				Log(bgCtx)
+				Emit()
 			return nil
 		},
 	}

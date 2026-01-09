@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -23,8 +22,7 @@ This command will:
 - Register the current directory as a workspace
 - Create necessary directory structure`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bgCtx := context.Background()
-			s := *svc
+	s := *svc
 
 			if initMinimal {
 				// Verify global workspace context can be accessed
@@ -36,7 +34,7 @@ This command will:
 					Field("path", ctx.NotebookContextWorkspace.Path).
 					Pretty(fmt.Sprintf("Initialized with global workspace at %s", ctx.NotebookContextWorkspace.Path)).
 					PrettyOnly().
-					Log(bgCtx)
+					Emit()
 				return nil
 			}
 
@@ -62,7 +60,7 @@ This command will:
 						return ""
 					}())).
 				PrettyOnly().
-				Log(bgCtx)
+				Emit()
 
 			return nil
 		},

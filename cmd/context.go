@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -27,8 +26,7 @@ func NewContextCmd(svc **service.Service, workspaceOverride *string) *cobra.Comm
 
 This is useful for integration with other tools like Neovim.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bgCtx := context.Background()
-			s := *svc
+	s := *svc
 
 			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
@@ -43,7 +41,7 @@ This is useful for integration with other tools like Neovim.`,
 						Field("path", path).
 						Pretty(path).
 						PrettyOnly().
-						Log(bgCtx)
+						Emit()
 				} else {
 					return fmt.Errorf("unknown path type: %s", contextPath)
 				}
@@ -85,14 +83,14 @@ This is useful for integration with other tools like Neovim.`,
 				prettyOutput.WriteString(fmt.Sprintf("  %s: %s\n", key, path))
 			}
 
-			contextUlog.Info("Workspace context").
+	contextUlog.Info("Workspace context").
 				Field("current_workspace", ctx.CurrentWorkspace.Name).
 				Field("notebook_workspace", ctx.NotebookContextWorkspace.Name).
 				Field("branch", ctx.Branch).
 				Field("paths", ctx.Paths).
 				Pretty(prettyOutput.String()).
 				PrettyOnly().
-				Log(bgCtx)
+				Emit()
 
 			return nil
 		},

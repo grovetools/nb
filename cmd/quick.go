@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"time"
@@ -25,7 +24,6 @@ Examples:
   nb quick "Meeting at 3pm with team"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bgCtx := context.Background()
 			s := *svc
 
 			// Get workspace context
@@ -64,7 +62,7 @@ Examples:
 				Field("content", content).
 				Pretty(fmt.Sprintf("Created quick note: %s", note.Path)).
 				PrettyOnly().
-				Log(bgCtx)
+				Emit()
 			return nil
 		},
 	}

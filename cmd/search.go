@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -32,7 +31,6 @@ Examples:
   nb search "api" -t llm         # Search only LLM notes`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bgCtx := context.Background()
 			s := *svc
 
 			// Get workspace context
@@ -62,7 +60,7 @@ Examples:
 					Field("query", query).
 					Pretty("No results found").
 					PrettyOnly().
-					Log(bgCtx)
+					Emit()
 				return nil
 			}
 
@@ -71,7 +69,7 @@ Examples:
 				Field("result_count", len(results)).
 				Pretty(fmt.Sprintf("Found %d results:\n", len(results))).
 				PrettyOnly().
-				Log(bgCtx)
+				Emit()
 
 			for i, note := range results {
 				var prettyStr strings.Builder
@@ -94,7 +92,7 @@ Examples:
 					Field("branch", note.Branch).
 					Pretty(prettyStr.String()).
 					PrettyOnly().
-					Log(bgCtx)
+					Emit()
 			}
 
 			return nil

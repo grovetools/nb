@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -49,7 +48,6 @@ Target directory options:
 - --global: The global notebook directory (global/)
 - --root: The entire notebook root containing all workspaces`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
 			s := *svc
 
 			// Validate flags are mutually exclusive
@@ -99,7 +97,7 @@ Target directory options:
 				Field("target_dir", targetDir).
 				Pretty(fmt.Sprintf("Targeting notebook directory: %s", targetDir)).
 				PrettyOnly().
-				Log(ctx)
+				Emit()
 
 			// 2. Initialize Git Repository
 			gitDir := filepath.Join(targetDir, ".git")
@@ -108,7 +106,7 @@ Target directory options:
 					Field("target_dir", targetDir).
 					Pretty("Git repository already initialized.").
 					PrettyOnly().
-					Log(ctx)
+					Emit()
 			} else {
 				gitCmd := exec.Command("git", "init")
 				gitCmd.Dir = targetDir
@@ -119,7 +117,7 @@ Target directory options:
 					Field("target_dir", targetDir).
 					Pretty("✓ Git repository initialized.").
 					PrettyOnly().
-					Log(ctx)
+					Emit()
 			}
 
 			// 3. Create .gitignore
@@ -146,7 +144,7 @@ Thumbs.db
 				Field("gitignore_path", gitignorePath).
 				Pretty("✓ Created/updated .gitignore.").
 				PrettyOnly().
-				Log(ctx)
+				Emit()
 
 			// 4. Create notebook.yml Marker (at top level)
 			markerContent := fmt.Sprintf("type: notebook\ncreated: %s\n", time.Now().Format(time.RFC3339))
@@ -157,13 +155,13 @@ Thumbs.db
 				Field("target_dir", targetDir).
 				Pretty("✓ Created notebook.yml marker file.").
 				PrettyOnly().
-				Log(ctx)
+				Emit()
 
 			gitUlog.Success("Notebook initialized with Git").
 				Field("target_dir", targetDir).
 				Pretty("\nSuccess! Your notebook is now under Git version control.").
 				PrettyOnly().
-				Log(ctx)
+				Emit()
 			return nil
 		},
 	}
@@ -182,7 +180,6 @@ func newGitCommitCmd(svc **service.Service, workspaceOverride *string) *cobra.Co
 		Long: `Convenience command to stage and commit changes in the notebook repository.
 If no files are specified, all changes are staged.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
 			s := *svc
 
 			// 1. Determine the notebook directory for the current context.
@@ -222,7 +219,7 @@ If no files are specified, all changes are staged.`,
 				Field("files", args).
 				Pretty("✓ Staged changes.").
 				PrettyOnly().
-				Log(ctx)
+				Emit()
 
 			// 4. Commit changes.
 			if message == "" {
@@ -237,7 +234,7 @@ If no files are specified, all changes are staged.`,
 						Field("git_root", gitRoot).
 						Pretty("No changes to commit.").
 						PrettyOnly().
-						Log(ctx)
+						Emit()
 					return nil
 				}
 				return fmt.Errorf("git commit failed: %w\n%s", err, string(output))
@@ -248,7 +245,7 @@ If no files are specified, all changes are staged.`,
 				Field("message", message).
 				Pretty(fmt.Sprintf("✓ Committed with message: \"%s\"", message)).
 				PrettyOnly().
-				Log(ctx)
+				Emit()
 			return nil
 		},
 	}

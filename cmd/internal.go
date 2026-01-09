@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -39,8 +38,7 @@ func newUpdateNoteCmd(svc **service.Service) *cobra.Command {
 		Use:   "update-note",
 		Short: "Appends content to a specific note file",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
-			if notePath == "" {
+	if notePath == "" {
 				return fmt.Errorf("--path is required")
 			}
 			if appendContent == "" {
@@ -65,7 +63,7 @@ func newUpdateNoteCmd(svc **service.Service) *cobra.Command {
 				Field("content_length", len(appendContent)).
 				Pretty(fmt.Sprintf("✓ Content appended to %s", notePath)).
 				PrettyOnly().
-				Log(ctx)
+				Emit()
 			return nil
 		},
 	}
@@ -90,8 +88,7 @@ func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 		Use:   "update-frontmatter",
 		Short: "Updates a frontmatter field in a specific note file",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
-			if notePath == "" {
+	if notePath == "" {
 				return fmt.Errorf("--path is required")
 			}
 			if fieldName == "" {
@@ -151,7 +148,7 @@ func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 				Field("value", fieldValue).
 				Pretty(fmt.Sprintf("✓ Updated %s in %s", fieldName, notePath)).
 				PrettyOnly().
-				Log(ctx)
+				Emit()
 			return nil
 		},
 	}
