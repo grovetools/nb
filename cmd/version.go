@@ -1,12 +1,16 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/version"
 	"github.com/spf13/cobra"
 )
+
+var versionUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.version")
 
 func NewVersionCmd() *cobra.Command {
 	var jsonOutput bool
@@ -16,6 +20,7 @@ func NewVersionCmd() *cobra.Command {
 		Short: "Print version information",
 		Long:  "Display the version, commit, branch, and build information for grove-notebook",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
 			info := version.GetInfo()
 
 			if jsonOutput {
@@ -23,9 +28,21 @@ func NewVersionCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("failed to marshal version info to JSON: %w", err)
 				}
-				fmt.Println(string(jsonData))
+				versionUlog.Info("Version info").
+					Field("version", info.Version).
+					Field("commit", info.Commit).
+					Field("branch", info.Branch).
+					Pretty(string(jsonData)).
+					PrettyOnly().
+					Log(ctx)
 			} else {
-				fmt.Println(info.String())
+				versionUlog.Info("Version info").
+					Field("version", info.Version).
+					Field("commit", info.Commit).
+					Field("branch", info.Branch).
+					Pretty(info.String()).
+					PrettyOnly().
+					Log(ctx)
 			}
 			return nil
 		},

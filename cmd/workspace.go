@@ -1,13 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
+
+var workspaceUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.workspace")
 
 func NewWorkspaceCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	cmd := &cobra.Command{
@@ -31,6 +35,7 @@ func newWorkspaceCurrentCmd(svc **service.Service, workspaceOverride *string) *c
 		Short: "Show current workspace (use 'nb context' instead)",
 		Long: "This command is deprecated. Please use 'nb context' for more detailed information.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			bgCtx := context.Background()
 			s := *svc
 
 			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
@@ -38,8 +43,10 @@ func newWorkspaceCurrentCmd(svc **service.Service, workspaceOverride *string) *c
 				return err
 			}
 
-			fmt.Println("DEPRECATED: Please use 'nb context' for detailed workspace information.")
-			fmt.Println("---")
+			workspaceUlog.Info("Deprecated command used").
+				Pretty("DEPRECATED: Please use 'nb context' for detailed workspace information.\n---").
+				PrettyOnly().
+				Log(bgCtx)
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "PROPERTY\tVALUE")

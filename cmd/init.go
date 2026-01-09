@@ -1,11 +1,15 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
+
+var initUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.init")
 
 func NewInitCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var initMinimal bool
@@ -19,6 +23,7 @@ This command will:
 - Register the current directory as a workspace
 - Create necessary directory structure`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			bgCtx := context.Background()
 			s := *svc
 
 			if initMinimal {
@@ -27,7 +32,11 @@ This command will:
 				if err != nil {
 					return fmt.Errorf("could not access global workspace: %w", err)
 				}
-				fmt.Printf("Initialized with global workspace at %s\n", ctx.NotebookContextWorkspace.Path)
+				initUlog.Success("Initialized with global workspace").
+					Field("path", ctx.NotebookContextWorkspace.Path).
+					Pretty(fmt.Sprintf("Initialized with global workspace at %s", ctx.NotebookContextWorkspace.Path)).
+					PrettyOnly().
+					Log(bgCtx)
 				return nil
 			}
 
@@ -37,12 +46,23 @@ This command will:
 				return fmt.Errorf("could not determine workspace context: %w", err)
 			}
 
-			fmt.Printf("Initialized workspace '%s' at %s\n", ctx.NotebookContextWorkspace.Name, ctx.NotebookContextWorkspace.Path)
-			fmt.Printf("Kind: %s\n", ctx.NotebookContextWorkspace.Kind)
-			if ctx.Branch != "" {
-				fmt.Printf("Branch: %s\n", ctx.Branch)
-			}
-			fmt.Println("\nReady to use! Try 'nb new' to create your first note.")
+			initUlog.Success("Initialized workspace").
+				Field("name", ctx.NotebookContextWorkspace.Name).
+				Field("path", ctx.NotebookContextWorkspace.Path).
+				Field("kind", ctx.NotebookContextWorkspace.Kind).
+				Field("branch", ctx.Branch).
+				Pretty(fmt.Sprintf("Initialized workspace '%s' at %s\nKind: %s%s\n\nReady to use! Try 'nb new' to create your first note.",
+					ctx.NotebookContextWorkspace.Name,
+					ctx.NotebookContextWorkspace.Path,
+					ctx.NotebookContextWorkspace.Kind,
+					func() string {
+						if ctx.Branch != "" {
+							return fmt.Sprintf("\nBranch: %s", ctx.Branch)
+						}
+						return ""
+					}())).
+				PrettyOnly().
+				Log(bgCtx)
 
 			return nil
 		},

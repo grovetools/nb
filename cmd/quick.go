@@ -1,14 +1,18 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
+
+var quickUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.quick")
 
 func NewQuickCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	cmd := &cobra.Command{
@@ -21,6 +25,7 @@ Examples:
   nb quick "Meeting at 3pm with team"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			bgCtx := context.Background()
 			s := *svc
 
 			// Get workspace context
@@ -54,7 +59,12 @@ Examples:
 				return fmt.Errorf("update note content: %w", err)
 			}
 
-			fmt.Printf("Created quick note: %s\n", note.Path)
+			quickUlog.Success("Created quick note").
+				Field("path", note.Path).
+				Field("content", content).
+				Pretty(fmt.Sprintf("Created quick note: %s", note.Path)).
+				PrettyOnly().
+				Log(bgCtx)
 			return nil
 		},
 	}

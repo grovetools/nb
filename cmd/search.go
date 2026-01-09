@@ -1,14 +1,18 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
+
+var searchUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.search")
 
 func NewSearchCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
@@ -28,6 +32,7 @@ Examples:
   nb search "api" -t llm         # Search only LLM notes`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			bgCtx := context.Background()
 			s := *svc
 
 			// Get workspace context
@@ -53,23 +58,43 @@ Examples:
 			}
 
 			if len(results) == 0 {
-				fmt.Println("No results found")
+				searchUlog.Info("No results found").
+					Field("query", query).
+					Pretty("No results found").
+					PrettyOnly().
+					Log(bgCtx)
 				return nil
 			}
 
-			fmt.Printf("Found %d results:\n\n", len(results))
+			searchUlog.Info("Search results").
+				Field("query", query).
+				Field("result_count", len(results)).
+				Pretty(fmt.Sprintf("Found %d results:\n", len(results))).
+				PrettyOnly().
+				Log(bgCtx)
 
 			for i, note := range results {
-				fmt.Printf("%d. %s\n", i+1, note.Title)
-				fmt.Printf("   %s\n", note.Path)
+				var prettyStr strings.Builder
+				prettyStr.WriteString(fmt.Sprintf("%d. %s\n", i+1, note.Title))
+				prettyStr.WriteString(fmt.Sprintf("   %s", note.Path))
 				if note.Workspace != "" {
-					fmt.Printf("   Workspace: %s", note.Workspace)
+					prettyStr.WriteString(fmt.Sprintf("\n   Workspace: %s", note.Workspace))
 					if note.Branch != "" {
-						fmt.Printf(" (branch: %s)", note.Branch)
+						prettyStr.WriteString(fmt.Sprintf(" (branch: %s)", note.Branch))
 					}
-					fmt.Println()
 				}
-				fmt.Println()
+				prettyStr.WriteString("\n")
+
+				searchUlog.Info("Search result").
+					Field("query", query).
+					Field("result_index", i+1).
+					Field("title", note.Title).
+					Field("path", note.Path).
+					Field("workspace", note.Workspace).
+					Field("branch", note.Branch).
+					Pretty(prettyStr.String()).
+					PrettyOnly().
+					Log(bgCtx)
 			}
 
 			return nil

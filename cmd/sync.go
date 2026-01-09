@@ -1,13 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/mattsolo1/grove-notebook/pkg/sync"
 	"github.com/mattsolo1/grove-notebook/pkg/sync/github"
 	"github.com/spf13/cobra"
 )
+
+var syncUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.sync")
 
 // NewSyncCmd creates the `sync` subcommand.
 func NewSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
@@ -18,8 +22,9 @@ func NewSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 		Short: "Sync notes with remote services",
 		Long:  `Syncs notes with configured remote services like GitHub issues and pull requests.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
 			s := *svc
-			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
+			wsCtx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}
@@ -31,20 +36,38 @@ func NewSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 			})
 
 			// Run sync
-			reports, err := syncer.SyncWorkspace(ctx)
+			reports, err := syncer.SyncWorkspace(wsCtx)
 			if err != nil {
 				return err
 			}
 
 			// Display results
 			for _, report := range reports {
-				fmt.Printf("Synced with %s: %d created, %d updated, %d unchanged, %d failed.\n",
-					report.Provider, report.Created, report.Updated, report.Unchanged, report.Failed)
+				syncUlog.Success("Sync complete").
+					Field("provider", report.Provider).
+					Field("created", report.Created).
+					Field("updated", report.Updated).
+					Field("unchanged", report.Unchanged).
+					Field("failed", report.Failed).
+					Pretty(fmt.Sprintf("Synced with %s: %d created, %d updated, %d unchanged, %d failed.",
+						report.Provider, report.Created, report.Updated, report.Unchanged, report.Failed)).
+					PrettyOnly().
+					Log(ctx)
 				// Show error details if there were any failures
 				if len(report.Errors) > 0 {
-					fmt.Println("Errors:")
+					syncUlog.Error("Sync errors encountered").
+						Field("provider", report.Provider).
+						Field("error_count", len(report.Errors)).
+						Pretty("Errors:").
+						PrettyOnly().
+						Log(ctx)
 					for _, errMsg := range report.Errors {
-						fmt.Printf("  - %s\n", errMsg)
+						syncUlog.Error("Sync error").
+							Field("provider", report.Provider).
+							Field("error", errMsg).
+							Pretty(fmt.Sprintf("  - %s", errMsg)).
+							PrettyOnly().
+							Log(ctx)
 					}
 				}
 			}

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -8,9 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
+
+var newUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.new")
 
 func NewNewCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
@@ -97,7 +101,13 @@ Examples:
 				if err != nil {
 					return err
 				}
-				fmt.Printf("Created concept: %s\n", note.Path)
+				bgCtx := context.Background()
+				newUlog.Success("Concept created").
+					Field("path", note.Path).
+					Field("title", title).
+					Pretty(fmt.Sprintf("Created concept: %s", note.Path)).
+					PrettyOnly().
+					Log(bgCtx)
 				return nil
 			}
 
@@ -127,7 +137,14 @@ Examples:
 				}
 			}
 
-			fmt.Printf("Created: %s\n", note.Path)
+			bgCtx := context.Background()
+			newUlog.Success("Note created").
+				Field("path", note.Path).
+				Field("type", actualNoteType).
+				Field("title", title).
+				Pretty(fmt.Sprintf("Created: %s", note.Path)).
+				PrettyOnly().
+				Log(bgCtx)
 			return nil
 		},
 	}

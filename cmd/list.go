@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,10 +10,13 @@ import (
 	"github.com/spf13/cobra"
 
 	coreconfig "github.com/mattsolo1/grove-core/config"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-notebook/pkg/models"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
+
+var listUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.list")
 
 func NewListCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
@@ -37,21 +41,22 @@ Examples:
   nb list learn        # List learning notes
   nb list docs         # List documentation notes`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
 			s := *svc
 
 			// Get workspace context, potentially overridden
-			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
+			wsCtx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}
 
 			// Handle --all-branches flag
 			if listAllBranches {
-				if ctx.NotebookContextWorkspace.IsWorktree() {
+				if wsCtx.NotebookContextWorkspace.IsWorktree() {
 					return fmt.Errorf("--all-branches can only be used from a main project directory, not a worktree")
 				}
 
-				repoNotes, err := s.ListAllNotesInWorkspace(ctx.NotebookContextWorkspace)
+				repoNotes, err := s.ListAllNotesInWorkspace(wsCtx.NotebookContextWorkspace)
 				if err != nil {
 					return err
 				}
@@ -72,9 +77,17 @@ Examples:
 
 				if len(repoNotes) == 0 {
 					if !listJSON {
-						fmt.Printf("No notes found in any branch of the '%s' repository\n", ctx.NotebookContextWorkspace.Name)
+						listUlog.Info("No notes found in repository").
+							Field("repository", wsCtx.NotebookContextWorkspace.Name).
+							Pretty(fmt.Sprintf("No notes found in any branch of the '%s' repository", wsCtx.NotebookContextWorkspace.Name)).
+							PrettyOnly().
+							Log(ctx)
 					} else {
-						fmt.Println("[]")
+						listUlog.Info("No notes found in repository").
+							Field("repository", wsCtx.NotebookContextWorkspace.Name).
+							Pretty("[]").
+							PrettyOnly().
+							Log(ctx)
 					}
 					return nil
 				}
@@ -110,9 +123,15 @@ Examples:
 
 				if len(allNotes) == 0 {
 					if !listJSON {
-						fmt.Println("No notes found across all workspaces")
+						listUlog.Info("No notes found across all workspaces").
+							Pretty("No notes found across all workspaces").
+							PrettyOnly().
+							Log(ctx)
 					} else {
-						fmt.Println("[]")
+						listUlog.Info("No notes found across all workspaces").
+							Pretty("[]").
+							PrettyOnly().
+							Log(ctx)
 					}
 					return nil
 				}
@@ -134,7 +153,7 @@ Examples:
 				if listGlobal {
 					allNotes, err = s.ListAllGlobalNotes(false, false)
 				} else {
-					allNotes, err = s.ListAllNotes(ctx, false, false)
+					allNotes, err = s.ListAllNotes(wsCtx, false, false)
 				}
 
 				if err != nil {
@@ -157,9 +176,15 @@ Examples:
 
 				if len(allNotes) == 0 {
 					if !listJSON {
-						fmt.Println("No notes found")
+						listUlog.Info("No notes found").
+							Pretty("No notes found").
+							PrettyOnly().
+							Log(ctx)
 					} else {
-						fmt.Println("[]")
+						listUlog.Info("No notes found").
+							Pretty("[]").
+							PrettyOnly().
+							Log(ctx)
 					}
 					return nil
 				}
@@ -179,7 +204,7 @@ Examples:
 				noteType = args[0]
 			}
 
-			notes, err := s.ListNotes(ctx, models.NoteType(noteType))
+			notes, err := s.ListNotes(wsCtx, models.NoteType(noteType))
 			if err != nil {
 				return err
 			}
@@ -200,9 +225,17 @@ Examples:
 
 			if len(notes) == 0 {
 				if listJSON {
-					fmt.Println("[]")
+					listUlog.Info("No notes found").
+						Field("note_type", noteType).
+						Pretty("[]").
+						PrettyOnly().
+						Log(ctx)
 				} else {
-					fmt.Printf("No %s notes found\n", noteType)
+					listUlog.Info("No notes found").
+						Field("note_type", noteType).
+						Pretty(fmt.Sprintf("No %s notes found", noteType)).
+						PrettyOnly().
+						Log(ctx)
 				}
 				return nil
 			}

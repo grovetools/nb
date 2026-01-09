@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -8,7 +9,10 @@ import (
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 )
+
+var internalUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.internal")
 
 // NewInternalCmd creates the root 'internal' command, which is hidden from the user.
 func NewInternalCmd(svc **service.Service) *cobra.Command {
@@ -35,6 +39,7 @@ func newUpdateNoteCmd(svc **service.Service) *cobra.Command {
 		Use:   "update-note",
 		Short: "Appends content to a specific note file",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
 			if notePath == "" {
 				return fmt.Errorf("--path is required")
 			}
@@ -55,7 +60,12 @@ func newUpdateNoteCmd(svc **service.Service) *cobra.Command {
 			}
 
 			(*svc).Logger.WithField("path", notePath).Info("Appended content to note")
-			fmt.Printf("✓ Content appended to %s\n", notePath)
+			internalUlog.Success("Content appended").
+				Field("path", notePath).
+				Field("content_length", len(appendContent)).
+				Pretty(fmt.Sprintf("✓ Content appended to %s", notePath)).
+				PrettyOnly().
+				Log(ctx)
 			return nil
 		},
 	}
@@ -80,6 +90,7 @@ func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 		Use:   "update-frontmatter",
 		Short: "Updates a frontmatter field in a specific note file",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
 			if notePath == "" {
 				return fmt.Errorf("--path is required")
 			}
@@ -134,7 +145,13 @@ func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 				"field": fieldName,
 				"value": fieldValue,
 			}).Info("Updated note frontmatter")
-			fmt.Printf("✓ Updated %s in %s\n", fieldName, notePath)
+			internalUlog.Success("Frontmatter updated").
+				Field("path", notePath).
+				Field("field", fieldName).
+				Field("value", fieldValue).
+				Pretty(fmt.Sprintf("✓ Updated %s in %s", fieldName, notePath)).
+				PrettyOnly().
+				Log(ctx)
 			return nil
 		},
 	}
