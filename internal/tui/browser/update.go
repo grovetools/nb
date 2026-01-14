@@ -3,7 +3,6 @@ package browser
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/mattsolo1/grove-notebook/pkg/sync"
 	"github.com/mattsolo1/grove-notebook/pkg/sync/github"
+	"github.com/mattsolo1/grove-core/util/delegation"
 	"github.com/mattsolo1/grove-notebook/pkg/tree"
 )
 
@@ -102,8 +102,7 @@ func (m *Model) createPlanCmd(note *models.Note) tea.Cmd {
 		"--worktree", // Pre-selects the worktree option in the TUI
 	}
 
-	cmdArgs := append([]string{"flow"}, args...)
-	cmd := exec.Command("grove", cmdArgs...)
+	cmd := delegation.Command("flow", args...)
 
 	// This command takes over the terminal. When it exits, we want to refresh our state.
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
