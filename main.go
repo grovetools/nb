@@ -82,7 +82,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewGitCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewConceptCmd(&svc, &workspaceOverride))
 
-	if err := rootCmd.Execute(); err != nil {
+	if err := cli.Execute(rootCmd); err != nil {
 		os.Exit(1)
 	}
 }
