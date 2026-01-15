@@ -175,10 +175,11 @@ func verifyNbContext(ctx *harness.Context) error {
 
 	// Run nb context from the notebook workspace directory
 	// Use -W flag to specify the workspace context since we're in an isolated test environment
+	// Use NO_COLOR=1 to disable ANSI color codes which interfere with string matching
 	projectDir := ctx.GetString("project_dir")
 	cmd := ctx.Command(nbBin, "context", "-W", projectDir).
 		Dir(notebookWorkspaceDir).
-		Env("HOME=" + ctx.HomeDir())
+		Env("HOME="+ctx.HomeDir(), "NO_COLOR=1")
 
 	result := cmd.Run()
 	ctx.ShowCommandOutput("nb context", result.Stdout, result.Stderr)
@@ -195,7 +196,7 @@ func verifyNbContext(ctx *harness.Context) error {
 	// Verify paths point to the workspace directory
 	expectedPath := filepath.Join(notebookWorkspaceDir, "inbox")
 	if !strings.Contains(result.Stdout, expectedPath) {
-		return fmt.Errorf("BUG: nb context paths don't point to workspace directory. Expected to find: %s", expectedPath)
+		return fmt.Errorf("BUG: nb context paths don't point to workspace directory. Expected to find: %s\nGot output:\n%s", expectedPath, result.Stdout)
 	}
 
 	ctx.ShowCommandOutput("nb context verification", "Workspace name and paths correctly resolved", "")

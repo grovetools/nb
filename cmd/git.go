@@ -9,12 +9,9 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/git"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/spf13/cobra"
 )
-
-var gitUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.git")
 
 // NewGitCmd creates the `nb git` command and its subcommands.
 func NewGitCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
@@ -93,31 +90,20 @@ Target directory options:
 				}
 			}
 
-			gitUlog.Info("Targeting notebook directory").
-				Field("target_dir", targetDir).
-				Pretty(fmt.Sprintf("Targeting notebook directory: %s", targetDir)).
-				PrettyOnly().
-				Emit()
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Targeting notebook directory: %s\n", targetDir)
 
 			// 2. Initialize Git Repository
 			gitDir := filepath.Join(targetDir, ".git")
 			if _, err := os.Stat(gitDir); err == nil {
-				gitUlog.Info("Git repository already initialized").
-					Field("target_dir", targetDir).
-					Pretty("Git repository already initialized.").
-					PrettyOnly().
-					Emit()
+				fmt.Fprintln(out, "Git repository already initialized.")
 			} else {
 				gitCmd := exec.Command("git", "init")
 				gitCmd.Dir = targetDir
 				if output, err := gitCmd.CombinedOutput(); err != nil {
 					return fmt.Errorf("git init failed: %w\n%s", err, string(output))
 				}
-				gitUlog.Success("Git repository initialized").
-					Field("target_dir", targetDir).
-					Pretty("✓ Git repository initialized.").
-					PrettyOnly().
-					Emit()
+				fmt.Fprintln(out, "✓ Git repository initialized.")
 			}
 
 			// 3. Create .gitignore
@@ -139,29 +125,16 @@ Thumbs.db
 			if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
 				return fmt.Errorf("failed to write .gitignore: %w", err)
 			}
-			gitUlog.Success("Created .gitignore").
-				Field("target_dir", targetDir).
-				Field("gitignore_path", gitignorePath).
-				Pretty("✓ Created/updated .gitignore.").
-				PrettyOnly().
-				Emit()
+			fmt.Fprintln(out, "✓ Created/updated .gitignore.")
 
 			// 4. Create notebook.yml Marker (at top level)
 			markerContent := fmt.Sprintf("type: notebook\ncreated: %s\n", time.Now().Format(time.RFC3339))
 			if err := os.WriteFile(filepath.Join(targetDir, "notebook.yml"), []byte(markerContent), 0644); err != nil {
 				return fmt.Errorf("failed to create notebook marker: %w", err)
 			}
-			gitUlog.Success("Created notebook marker").
-				Field("target_dir", targetDir).
-				Pretty("✓ Created notebook.yml marker file.").
-				PrettyOnly().
-				Emit()
+			fmt.Fprintln(out, "✓ Created notebook.yml marker file.")
 
-			gitUlog.Success("Notebook initialized with Git").
-				Field("target_dir", targetDir).
-				Pretty("\nSuccess! Your notebook is now under Git version control.").
-				PrettyOnly().
-				Emit()
+			fmt.Fprintln(out, "\nSuccess! Your notebook is now under Git version control.")
 			return nil
 		},
 	}
@@ -209,17 +182,13 @@ If no files are specified, all changes are staged.`,
 				stageArgs = append(stageArgs, ".")
 			}
 
+			out := cmd.OutOrStdout()
 			gitAddCmd := exec.Command("git", stageArgs...)
 			gitAddCmd.Dir = gitRoot
 			if output, err := gitAddCmd.CombinedOutput(); err != nil {
 				return fmt.Errorf("git add failed: %w\n%s", err, string(output))
 			}
-			gitUlog.Success("Staged changes").
-				Field("git_root", gitRoot).
-				Field("files", args).
-				Pretty("✓ Staged changes.").
-				PrettyOnly().
-				Emit()
+			fmt.Fprintln(out, "✓ Staged changes.")
 
 			// 4. Commit changes.
 			if message == "" {
@@ -230,22 +199,13 @@ If no files are specified, all changes are staged.`,
 			if output, err := gitCommitCmd.CombinedOutput(); err != nil {
 				// Don't error if there's nothing to commit.
 				if strings.Contains(string(output), "nothing to commit") {
-					gitUlog.Info("No changes to commit").
-						Field("git_root", gitRoot).
-						Pretty("No changes to commit.").
-						PrettyOnly().
-						Emit()
+					fmt.Fprintln(out, "No changes to commit.")
 					return nil
 				}
 				return fmt.Errorf("git commit failed: %w\n%s", err, string(output))
 			}
 
-			gitUlog.Success("Committed changes").
-				Field("git_root", gitRoot).
-				Field("message", message).
-				Pretty(fmt.Sprintf("✓ Committed with message: \"%s\"", message)).
-				PrettyOnly().
-				Emit()
+			fmt.Fprintf(out, "✓ Committed with message: \"%s\"\n", message)
 			return nil
 		},
 	}

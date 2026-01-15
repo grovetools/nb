@@ -3,15 +3,11 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-notebook/pkg/service"
 )
-
-var contextUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.context")
 
 func NewContextCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
@@ -34,14 +30,9 @@ This is useful for integration with other tools like Neovim.`,
 			}
 
 			if contextPath != "" {
-				// Return specific path
+				// Return specific path to stdout
 				if path, ok := ctx.Paths[contextPath]; ok {
-					contextUlog.Info("Context path").
-						Field("path_type", contextPath).
-						Field("path", path).
-						Pretty(path).
-						PrettyOnly().
-						Emit()
+					fmt.Fprintln(cmd.OutOrStdout(), path)
 				} else {
 					return fmt.Errorf("unknown path type: %s", contextPath)
 				}
@@ -62,35 +53,26 @@ This is useful for integration with other tools like Neovim.`,
 				return encoder.Encode(output)
 			}
 
-			// Human-readable output
-			var prettyOutput strings.Builder
-			prettyOutput.WriteString("Current Location:\n")
-			prettyOutput.WriteString(fmt.Sprintf("  Name: %s\n", ctx.CurrentWorkspace.Name))
-			prettyOutput.WriteString(fmt.Sprintf("  Path: %s\n", ctx.CurrentWorkspace.Path))
-			prettyOutput.WriteString(fmt.Sprintf("  Kind: %s\n", ctx.CurrentWorkspace.Kind))
+			// Human-readable output to stdout
+			out := cmd.OutOrStdout()
+			fmt.Fprintln(out, "Current Location:")
+			fmt.Fprintf(out, "  Name: %s\n", ctx.CurrentWorkspace.Name)
+			fmt.Fprintf(out, "  Path: %s\n", ctx.CurrentWorkspace.Path)
+			fmt.Fprintf(out, "  Kind: %s\n", ctx.CurrentWorkspace.Kind)
 			if ctx.Branch != "" {
-				prettyOutput.WriteString(fmt.Sprintf("  Branch: %s\n", ctx.Branch))
+				fmt.Fprintf(out, "  Branch: %s\n", ctx.Branch)
 			}
 
-			prettyOutput.WriteString("\nNotebook Scope:\n")
-			prettyOutput.WriteString(fmt.Sprintf("  Name: %s\n", ctx.NotebookContextWorkspace.Name))
-			prettyOutput.WriteString(fmt.Sprintf("  Identifier: %s\n", ctx.NotebookContextWorkspace.Identifier()))
-			prettyOutput.WriteString(fmt.Sprintf("  Path: %s\n", ctx.NotebookContextWorkspace.Path))
-			prettyOutput.WriteString(fmt.Sprintf("  Kind: %s\n", ctx.NotebookContextWorkspace.Kind))
+			fmt.Fprintln(out, "\nNotebook Scope:")
+			fmt.Fprintf(out, "  Name: %s\n", ctx.NotebookContextWorkspace.Name)
+			fmt.Fprintf(out, "  Identifier: %s\n", ctx.NotebookContextWorkspace.Identifier())
+			fmt.Fprintf(out, "  Path: %s\n", ctx.NotebookContextWorkspace.Path)
+			fmt.Fprintf(out, "  Kind: %s\n", ctx.NotebookContextWorkspace.Kind)
 
-			prettyOutput.WriteString("\nPaths:\n")
+			fmt.Fprintln(out, "\nPaths:")
 			for key, path := range ctx.Paths {
-				prettyOutput.WriteString(fmt.Sprintf("  %s: %s\n", key, path))
+				fmt.Fprintf(out, "  %s: %s\n", key, path)
 			}
-
-	contextUlog.Info("Workspace context").
-				Field("current_workspace", ctx.CurrentWorkspace.Name).
-				Field("notebook_workspace", ctx.NotebookContextWorkspace.Name).
-				Field("branch", ctx.Branch).
-				Field("paths", ctx.Paths).
-				Pretty(prettyOutput.String()).
-				PrettyOnly().
-				Emit()
 
 			return nil
 		},

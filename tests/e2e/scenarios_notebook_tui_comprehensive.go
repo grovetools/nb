@@ -527,8 +527,9 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 		return err
 	}
 
-	// Frame 60: Press '-' to focus parent (go to global view)
-	session.SendKeys("-")
+	// Frame 60: Press 'ctrl+g' to clear focus (go to global view)
+	// Note: '-' was repurposed for git stage toggle, use ctrl+g for clear focus
+	session.SendKeys("\x07") // Ctrl+G
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
