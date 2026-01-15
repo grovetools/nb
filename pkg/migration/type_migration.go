@@ -33,7 +33,7 @@ func RenameCurrentToInbox(notebookRoot string, options MigrationOptions, output 
 					report.AddError(path, fmt.Errorf("failed to rename directory: %w", err))
 					return nil // Continue walking
 				}
-				fmt.Fprintf(output, "✓ Renamed directory: %s -> %s\n", path, inboxPath)
+				fmt.Fprintf(output, "* Renamed directory: %s -> %s\n", path, inboxPath)
 			}
 
 			// Now, process files inside the (potentially new) inbox directory

@@ -61,7 +61,7 @@ func newUpdateNoteCmd(svc **service.Service) *cobra.Command {
 			internalUlog.Success("Content appended").
 				Field("path", notePath).
 				Field("content_length", len(appendContent)).
-				Pretty(fmt.Sprintf("✓ Content appended to %s", notePath)).
+				Pretty(fmt.Sprintf("* Content appended to %s", notePath)).
 				PrettyOnly().
 				Emit()
 			return nil
@@ -146,7 +146,7 @@ func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 				Field("path", notePath).
 				Field("field", fieldName).
 				Field("value", fieldValue).
-				Pretty(fmt.Sprintf("✓ Updated %s in %s", fieldName, notePath)).
+				Pretty(fmt.Sprintf("* Updated %s in %s", fieldName, notePath)).
 				PrettyOnly().
 				Emit()
 			return nil

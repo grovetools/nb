@@ -379,7 +379,7 @@ func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bo
 	}
 
 	if hasOldTemplates && !skipConfirm {
-		fmt.Println("⚠️  WARNING: Your grove.yml contains old path templates that will NOT work after migration!")
+		fmt.Println("WARNING:  WARNING: Your grove.yml contains old path templates that will NOT work after migration!")
 		fmt.Println("\n   Current templates point to: repos/{workspace}/main/{noteType}")
 		fmt.Println("   After migration, files will be at: workspaces/{workspace}/{noteType}")
 		fmt.Println("\n   You MUST update your grove.yml after migration by removing these lines:")
@@ -395,11 +395,11 @@ func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bo
 			return nil
 		}
 	} else if hasOldTemplates && skipConfirm {
-		fmt.Println("⚠️  WARNING: Old path templates detected. Remember to update grove.yml after migration.")
+		fmt.Println("WARNING:  WARNING: Old path templates detected. Remember to update grove.yml after migration.")
 	}
 
 	if !isCopyOnly && !dryRun && !skipConfirm {
-		fmt.Println("\n⚠️  WARNING: This will migrate notes from the old `repos/` and `global/`")
+		fmt.Println("\nWARNING:  WARNING: This will migrate notes from the old `repos/` and `global/`")
 		fmt.Println("   structures to the new `workspaces/` structure. This is a destructive")
 		fmt.Println("   operation. Files will be moved, and upon successful completion, the")
 		fmt.Println("   old `repos/` and `global/` directories will be REMOVED.")
@@ -412,7 +412,7 @@ func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bo
 			return nil
 		}
 	} else if !isCopyOnly && !dryRun && skipConfirm {
-		fmt.Println("⚠️  WARNING: Running structural migration (confirmations skipped with -y)")
+		fmt.Println("WARNING:  WARNING: Running structural migration (confirmations skipped with -y)")
 	}
 
 	if err := sm.MigrateStructure(); err != nil {
@@ -427,7 +427,7 @@ func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bo
 	// Remind about config update if needed
 	if !dryRun && hasOldTemplates && report.MigratedFiles > 0 {
 		fmt.Println("\n" + strings.Repeat("=", 80))
-		fmt.Println("⚠️  IMPORTANT: Update your grove.yml config NOW!")
+		fmt.Println("WARNING:  IMPORTANT: Update your grove.yml config NOW!")
 		fmt.Println(strings.Repeat("=", 80))
 		fmt.Println("\nEdit ~/.config/grove/grove.yml and remove these lines from the 'nb' notebook:")
 		fmt.Println("  - chats_path_template: repos/{{ .Workspace.Name }}/main/current")

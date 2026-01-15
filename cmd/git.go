@@ -103,7 +103,7 @@ Target directory options:
 				if output, err := gitCmd.CombinedOutput(); err != nil {
 					return fmt.Errorf("git init failed: %w\n%s", err, string(output))
 				}
-				fmt.Fprintln(out, "✓ Git repository initialized.")
+				fmt.Fprintln(out, "* Git repository initialized.")
 			}
 
 			// 3. Create .gitignore
@@ -125,14 +125,14 @@ Thumbs.db
 			if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
 				return fmt.Errorf("failed to write .gitignore: %w", err)
 			}
-			fmt.Fprintln(out, "✓ Created/updated .gitignore.")
+			fmt.Fprintln(out, "* Created/updated .gitignore.")
 
 			// 4. Create notebook.yml Marker (at top level)
 			markerContent := fmt.Sprintf("type: notebook\ncreated: %s\n", time.Now().Format(time.RFC3339))
 			if err := os.WriteFile(filepath.Join(targetDir, "notebook.yml"), []byte(markerContent), 0644); err != nil {
 				return fmt.Errorf("failed to create notebook marker: %w", err)
 			}
-			fmt.Fprintln(out, "✓ Created notebook.yml marker file.")
+			fmt.Fprintln(out, "* Created notebook.yml marker file.")
 
 			fmt.Fprintln(out, "\nSuccess! Your notebook is now under Git version control.")
 			return nil
@@ -188,7 +188,7 @@ If no files are specified, all changes are staged.`,
 			if output, err := gitAddCmd.CombinedOutput(); err != nil {
 				return fmt.Errorf("git add failed: %w\n%s", err, string(output))
 			}
-			fmt.Fprintln(out, "✓ Staged changes.")
+			fmt.Fprintln(out, "* Staged changes.")
 
 			// 4. Commit changes.
 			if message == "" {
@@ -205,7 +205,7 @@ If no files are specified, all changes are staged.`,
 				return fmt.Errorf("git commit failed: %w\n%s", err, string(output))
 			}
 
-			fmt.Fprintf(out, "✓ Committed with message: \"%s\"\n", message)
+			fmt.Fprintf(out, "* Committed with message: \"%s\"\n", message)
 			return nil
 		},
 	}

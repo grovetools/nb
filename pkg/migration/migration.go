@@ -89,7 +89,7 @@ func Migrate(basePath string, options MigrationOptions, output io.Writer, logger
 	for _, path := range paths {
 		if err := migrator.MigrateFile(path); err != nil {
 			if options.Verbose {
-				fmt.Fprintf(output, "✗ Error processing %s: %v\n", path, err)
+				fmt.Fprintf(output, "x Error processing %s: %v\n", path, err)
 			}
 		}
 	}
@@ -208,7 +208,7 @@ func (sm *StructuralMigration) MigrateStructure() error {
 				workspace, branch, noteType, isArchived, parseErr := sm.parseLegacyPath(path, rootPath)
 				if parseErr != nil {
 					if sm.options.Verbose {
-						fmt.Fprintf(sm.output, "⚠ Skipping %s: %v\n", path, parseErr)
+						fmt.Fprintf(sm.output, "WARNING: Skipping %s: %v\n", path, parseErr)
 					}
 					sm.report.SkippedFiles++
 					return nil
@@ -242,7 +242,7 @@ func (sm *StructuralMigration) MigrateStructure() error {
 		if err := sm.migratePlanDirectory(ptm.path, ptm.isArchived); err != nil {
 			sm.report.AddError(ptm.path, err)
 			if sm.options.Verbose {
-				fmt.Fprintf(sm.output, "✗ Error migrating plan directory %s: %v\n", ptm.path, err)
+				fmt.Fprintf(sm.output, "x Error migrating plan directory %s: %v\n", ptm.path, err)
 			}
 		}
 	}
@@ -252,7 +252,7 @@ func (sm *StructuralMigration) MigrateStructure() error {
 		if err := sm.migrateFile(ftm); err != nil {
 			sm.report.AddError(ftm.oldPath, err)
 			if sm.options.Verbose {
-				fmt.Fprintf(sm.output, "✗ Error migrating note %s: %v\n", ftm.oldPath, err)
+				fmt.Fprintf(sm.output, "x Error migrating note %s: %v\n", ftm.oldPath, err)
 			}
 		}
 	}
@@ -459,7 +459,7 @@ func (sm *StructuralMigration) migrateFile(ftm fileToMigrate) error {
 		}
 
 		if sm.options.Verbose {
-			fmt.Fprintf(sm.output, "⚠ Collision: %s -> %s\n", filename, filepath.Base(newPath))
+			fmt.Fprintf(sm.output, "WARNING: Collision: %s -> %s\n", filename, filepath.Base(newPath))
 		}
 	}
 
@@ -488,7 +488,7 @@ func (sm *StructuralMigration) migrateFile(ftm fileToMigrate) error {
 	if err := os.Chtimes(newPath, stat.ModTime(), stat.ModTime()); err != nil {
 		// Non-fatal, just log
 		if sm.options.Verbose {
-			fmt.Fprintf(sm.output, "⚠ Failed to preserve timestamps for %s\n", newPath)
+			fmt.Fprintf(sm.output, "WARNING: Failed to preserve timestamps for %s\n", newPath)
 		}
 	}
 
@@ -503,7 +503,7 @@ func (sm *StructuralMigration) migrateFile(ftm fileToMigrate) error {
 	}
 
 	if sm.options.Verbose {
-		fmt.Fprintf(sm.output, "✓ Migrated: %s -> %s\n", ftm.oldPath, newPath)
+		fmt.Fprintf(sm.output, "* Migrated: %s -> %s\n", ftm.oldPath, newPath)
 	}
 
 	return nil
@@ -650,7 +650,7 @@ func (sm *StructuralMigration) migratePlanDirectory(planPath string, isArchived 
 		if sm.isCopyOnly {
 			operation = "Copied"
 		}
-		fmt.Fprintf(sm.output, "✓ %s plan: %s -> %s\n", operation, planPath, finalDestPath)
+		fmt.Fprintf(sm.output, "* %s plan: %s -> %s\n", operation, planPath, finalDestPath)
 	}
 	sm.report.MigratedFiles++
 

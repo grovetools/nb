@@ -120,7 +120,7 @@ Examples:
 				return fmt.Errorf("failed to create symlink: %w", err)
 			}
 
-			fmt.Printf("✓ Created development symlink for nb Obsidian plugin\n")
+			fmt.Printf("* Created development symlink for nb Obsidian plugin\n")
 			fmt.Printf("  Source: %s\n", pluginSource)
 			fmt.Printf("  Target: %s\n", pluginDest)
 			fmt.Printf("\nDevelopment setup:\n")
