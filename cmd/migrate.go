@@ -20,30 +20,33 @@ const (
 
 func NewMigrateCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
-		migrateDryRun       bool
-		migrateForce        bool
-		migrateRecursive    bool
-		fixTitles           bool
-		fixDates            bool
-		fixTags             bool
-		fixIDs              bool
-		fixFilenames        bool
-		preserveTimestamps  bool
-		migrateAll          bool
-		migrateGlobal       bool
-		migrateWorkspace    string
-		migrateBranch       string
-		migrateType         string
-		allWorkspaces       bool
-		migrateVerbose      bool
-		migrateShowReport   bool
-		migrateNoBackup     bool
+		migrateDryRun        bool
+		migrateForce         bool
+		migrateRecursive     bool
+		fixTitles            bool
+		fixDates             bool
+		fixTags              bool
+		fixIDs               bool
+		fixFilenames         bool
+		preserveTimestamps   bool
+		migrateAll           bool
+		migrateGlobal        bool
+		migrateWorkspace     string
+		migrateBranch        string
+		migrateType          string
+		allWorkspaces        bool
+		migrateVerbose       bool
+		migrateShowReport    bool
+		migrateNoBackup      bool
 		migrateStructure     bool
 		migrateTarget        string
 		migrateYes           bool
 		renameCurrentToInbox bool
 		ensureTypeInTags     bool
 		migrateNotebook      string
+		workspaceRenames     string
+		sourceNotebook       string
+		targetNotebook       string
 	)
 
 	cmd := &cobra.Command{
@@ -154,6 +157,102 @@ Examples:
 				return nil
 			}
 
+			// Handle workspace renames migration
+			if workspaceRenames != "" {
+				// Parse the renames (format: "old1=new1,old2=new2")
+				renames := make(map[string]string)
+				for _, pair := range strings.Split(workspaceRenames, ",") {
+					parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+					if len(parts) != 2 {
+						return fmt.Errorf("invalid rename format '%s', expected 'old=new'", pair)
+					}
+					renames[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+				}
+
+				if len(renames) == 0 {
+					return fmt.Errorf("no valid renames specified")
+				}
+
+				// Get source notebook root
+				var sourceRoot string
+				srcNotebookName := sourceNotebook
+				if srcNotebookName == "" && s.CoreConfig != nil && s.CoreConfig.Notebooks != nil && s.CoreConfig.Notebooks.Rules != nil {
+					srcNotebookName = s.CoreConfig.Notebooks.Rules.Default
+				}
+				if srcNotebookName == "" {
+					srcNotebookName = "nb"
+				}
+				if s.CoreConfig != nil && s.CoreConfig.Notebooks != nil && s.CoreConfig.Notebooks.Definitions != nil {
+					if notebook, exists := s.CoreConfig.Notebooks.Definitions[srcNotebookName]; exists && notebook != nil {
+						if notebook.RootDir != "" {
+							expandedPath, err := pathutil.Expand(notebook.RootDir)
+							if err != nil {
+								return fmt.Errorf("failed to expand source notebook root_dir '%s': %w", notebook.RootDir, err)
+							}
+							sourceRoot = expandedPath
+						}
+					}
+				}
+				if sourceRoot == "" {
+					sourceRoot = filepath.Join(os.Getenv("HOME"), "notebooks", srcNotebookName)
+				}
+
+				// Get target notebook root
+				var targetRoot string
+				if targetNotebook != "" {
+					if s.CoreConfig != nil && s.CoreConfig.Notebooks != nil && s.CoreConfig.Notebooks.Definitions != nil {
+						if notebook, exists := s.CoreConfig.Notebooks.Definitions[targetNotebook]; exists && notebook != nil {
+							if notebook.RootDir != "" {
+								expandedPath, err := pathutil.Expand(notebook.RootDir)
+								if err != nil {
+									return fmt.Errorf("failed to expand target notebook root_dir '%s': %w", notebook.RootDir, err)
+								}
+								targetRoot = expandedPath
+							}
+						}
+					}
+					if targetRoot == "" {
+						targetRoot = filepath.Join(os.Getenv("HOME"), "notebooks", targetNotebook)
+					}
+				} else {
+					// If no target specified, use source (in-place migration)
+					targetRoot = sourceRoot
+				}
+
+				fmt.Printf("Workspace Migration\n")
+				fmt.Printf("===================\n")
+				fmt.Printf("Source notebook: %s\n", sourceRoot)
+				fmt.Printf("Target notebook: %s\n", targetRoot)
+				fmt.Printf("Renames:\n")
+				for old, newName := range renames {
+					fmt.Printf("  %s -> %s\n", old, newName)
+				}
+				fmt.Println()
+
+				if !migrateDryRun && !migrateYes {
+					fmt.Print("Continue with workspace migration? [y/N] ")
+					var response string
+					_, _ = fmt.Scanln(&response)
+					if strings.ToLower(response) != "y" {
+						fmt.Println("Cancelled")
+						return nil
+					}
+				}
+
+				report, err := migration.MigrateWorkspaces(sourceRoot, targetRoot, renames, migration.MigrationOptions{
+					DryRun:     migrateDryRun,
+					Verbose:    migrateVerbose,
+					ShowReport: migrateShowReport,
+				}, os.Stdout)
+				if err != nil {
+					return fmt.Errorf("workspace migration failed: %w", err)
+				}
+				if migrateShowReport {
+					printMigrationReport(report, migrateDryRun)
+				}
+				return nil
+			}
+
 			if migrateAll {
 				fixTitles = true
 				fixDates = true
@@ -219,6 +318,9 @@ Examples:
 	cmd.Flags().BoolVar(&renameCurrentToInbox, "rename-current-to-inbox", false, "Rename 'current' note type directories to 'inbox' and update notes")
 	cmd.Flags().BoolVar(&ensureTypeInTags, "ensure-type-in-tags", false, "Ensure all notes have their type in the tags array")
 	cmd.Flags().StringVar(&migrateNotebook, "notebook", "", "Specify which notebook to migrate (default: uses default notebook from config)")
+	cmd.Flags().StringVar(&workspaceRenames, "workspaces", "", "Rename workspaces: 'old1=new1,old2=new2' (copies all files, updates frontmatter)")
+	cmd.Flags().StringVar(&sourceNotebook, "source-notebook", "", "Source notebook for workspace migration (default: default notebook)")
+	cmd.Flags().StringVar(&targetNotebook, "target-notebook", "", "Target notebook for workspace migration (default: same as source)")
 	cmd.Flags().StringVar(&migrateTarget, "target", "", "Target directory for migration (default: uses notebook root_dir from config)")
 	cmd.Flags().BoolVarP(&migrateYes, "yes", "y", false, "Skip confirmation prompts")
 	cmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Show what would be changed without modifying")
