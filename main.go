@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mattsolo1/grove-core/cli"
-	coreconfig "github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-notebook/cmd"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/grovetools/core/cli"
+	coreconfig "github.com/grovetools/core/config"
+	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/nb/cmd"
+	"github.com/grovetools/nb/pkg/service"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )

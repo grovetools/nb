@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/grovetools/nb/pkg/frontmatter"
+	"github.com/grovetools/nb/pkg/service"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
+	grovelogging "github.com/grovetools/core/logging"
 )
 
 var internalUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.internal")

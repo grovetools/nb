@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mattsolo1/grove-core/util/pathutil"
-	"github.com/mattsolo1/grove-notebook/pkg/models"
-	"github.com/mattsolo1/grove-notebook/pkg/tree"
+	"github.com/grovetools/core/util/pathutil"
+	"github.com/grovetools/nb/pkg/models"
+	"github.com/grovetools/nb/pkg/tree"
 )
 
 // ListNotesFromAllWorkspaces returns notes from all registered workspaces

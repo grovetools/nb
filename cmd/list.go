@@ -9,11 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	coreconfig "github.com/mattsolo1/grove-core/config"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-notebook/pkg/models"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
+	coreconfig "github.com/grovetools/core/config"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/nb/pkg/models"
+	"github.com/grovetools/nb/pkg/service"
 )
 
 var listUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.list")

@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/fs"
-	coreworkspace "github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
+	"github.com/grovetools/core/fs"
+	coreworkspace "github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )

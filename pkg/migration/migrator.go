@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
+	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/sirupsen/logrus"
 )
 

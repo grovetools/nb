@@ -5,11 +5,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mattsolo1/grove-tend/pkg/assert"
-	"github.com/mattsolo1/grove-tend/pkg/fs"
-	"github.com/mattsolo1/grove-tend/pkg/git"
-	"github.com/mattsolo1/grove-tend/pkg/harness"
-	"github.com/mattsolo1/grove-tend/pkg/tui"
+	"github.com/grovetools/tend/pkg/assert"
+	"github.com/grovetools/tend/pkg/fs"
+	"github.com/grovetools/tend/pkg/git"
+	"github.com/grovetools/tend/pkg/harness"
+	"github.com/grovetools/tend/pkg/tui"
 )
 
 // NotebookTUIScenario verifies the TUI launches with the new flexible-note-structure

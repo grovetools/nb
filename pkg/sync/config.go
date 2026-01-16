@@ -3,7 +3,7 @@ package sync
 import (
 	"fmt"
 
-	coreconfig "github.com/mattsolo1/grove-core/config"
+	coreconfig "github.com/grovetools/core/config"
 	"github.com/mitchellh/mapstructure"
 )
 

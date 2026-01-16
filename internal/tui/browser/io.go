@@ -6,11 +6,11 @@ import (
 	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/util/pathutil"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
-	"github.com/mattsolo1/grove-notebook/pkg/tree"
+	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/util/pathutil"
+	"github.com/grovetools/nb/pkg/service"
+	"github.com/grovetools/nb/pkg/tree"
 )
 
 type workspacesLoadedMsg struct {

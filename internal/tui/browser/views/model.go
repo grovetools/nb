@@ -1,9 +1,9 @@
 package views
 
 import (
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
-	"github.com/mattsolo1/grove-notebook/pkg/tree"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/nb/pkg/service"
+	"github.com/grovetools/nb/pkg/tree"
 )
 
 // ViewMode defines the different ways to display notes.

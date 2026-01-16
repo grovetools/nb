@@ -9,8 +9,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
-	"github.com/mattsolo1/grove-notebook/pkg/migration"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/grovetools/nb/pkg/migration"
+	"github.com/grovetools/nb/pkg/service"
 )
 
 func NewMoveCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {

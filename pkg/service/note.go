@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	coreconfig "github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
-	"github.com/mattsolo1/grove-notebook/pkg/models"
+	coreconfig "github.com/grovetools/core/config"
+	"github.com/grovetools/nb/pkg/frontmatter"
+	"github.com/grovetools/nb/pkg/models"
 	"github.com/sirupsen/logrus"
 )
 

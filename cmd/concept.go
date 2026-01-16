@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/grovetools/nb/pkg/service"
 	"github.com/spf13/cobra"
 )
 

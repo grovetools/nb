@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
+	"github.com/grovetools/nb/pkg/frontmatter"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )

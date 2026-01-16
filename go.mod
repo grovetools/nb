@@ -1,4 +1,4 @@
-module github.com/mattsolo1/grove-notebook
+module github.com/grovetools/nb
 
 go 1.24.4
 
@@ -8,8 +8,8 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/mattn/go-isatty v0.0.20
-	github.com/mattsolo1/grove-core v0.5.0
-	github.com/mattsolo1/grove-tend v0.4.0
+	github.com/grovetools/core v0.0.1
+	github.com/grovetools/tend v0.0.1
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1

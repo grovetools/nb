@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
-	"github.com/mattsolo1/grove-notebook/pkg/sync"
-	"github.com/mattsolo1/grove-notebook/pkg/sync/github"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/nb/pkg/service"
+	"github.com/grovetools/nb/pkg/sync"
+	"github.com/grovetools/nb/pkg/sync/github"
 	"github.com/spf13/cobra"
 )
 

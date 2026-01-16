@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/util/pathutil"
+	"github.com/grovetools/core/util/pathutil"
 )
 
 // GitStatusResult contains the parsed git status information

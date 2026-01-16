@@ -1,8 +1,8 @@
 package service
 
 import (
-	coreconfig "github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/tui/theme"
+	coreconfig "github.com/grovetools/core/config"
+	"github.com/grovetools/core/tui/theme"
 )
 
 // DefaultNoteTypes provides the built-in configuration for "special" note types.

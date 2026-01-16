@@ -6,8 +6,8 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/mattsolo1/grove-core/pkg/tmux"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/grovetools/core/pkg/tmux"
+	"github.com/grovetools/nb/pkg/service"
 	"github.com/spf13/cobra"
 )
 

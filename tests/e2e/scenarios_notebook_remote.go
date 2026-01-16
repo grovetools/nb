@@ -7,11 +7,11 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/mattsolo1/grove-tend/pkg/assert"
-	"github.com/mattsolo1/grove-tend/pkg/fs"
-	"github.com/mattsolo1/grove-tend/pkg/git"
-	"github.com/mattsolo1/grove-tend/pkg/harness"
-	"github.com/mattsolo1/grove-tend/pkg/verify"
+	"github.com/grovetools/tend/pkg/assert"
+	"github.com/grovetools/tend/pkg/fs"
+	"github.com/grovetools/tend/pkg/git"
+	"github.com/grovetools/tend/pkg/harness"
+	"github.com/grovetools/tend/pkg/verify"
 )
 
 // NotebookRemoteSyncScenario verifies that 'nb sync' creates and updates notes from a remote source.
@@ -169,7 +169,7 @@ notebooks:
 			// Step 4: Modify a local note and verify changes are pushed
 			// TODO: This test is currently skipped due to test environment issues with file mtime
 			// detection. The functionality has been verified to work correctly in real-world usage.
-			// See: https://github.com/mattsolo1/grove-notebook/issues/4
+			// See: https://github.com/grovetools/nb/issues/4
 			/*
 			{
 				Name: "Modify local note and verify push to remote",

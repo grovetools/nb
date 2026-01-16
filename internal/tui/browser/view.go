@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/theme"
 )
 
 // getNoteCreationContext returns a description of where the note will be created

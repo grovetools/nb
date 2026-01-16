@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mattsolo1/grove-core/util/pathutil"
-	"github.com/mattsolo1/grove-notebook/pkg/migration"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/grovetools/core/util/pathutil"
+	"github.com/grovetools/nb/pkg/migration"
+	"github.com/grovetools/nb/pkg/service"
 )
 
 const (

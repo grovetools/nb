@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
-	"github.com/mattsolo1/grove-notebook/pkg/models"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/grovetools/nb/pkg/frontmatter"
+	"github.com/grovetools/nb/pkg/models"
+	"github.com/grovetools/nb/pkg/service"
 	"github.com/sirupsen/logrus"
 )
 

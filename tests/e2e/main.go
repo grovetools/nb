@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/mattsolo1/grove-tend/pkg/app"
-	"github.com/mattsolo1/grove-tend/pkg/harness"
+	"github.com/grovetools/tend/pkg/app"
+	"github.com/grovetools/tend/pkg/harness"
 )
 
 func main() {

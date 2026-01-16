@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/nb/pkg/service"
 )
 
 var quickUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.quick")

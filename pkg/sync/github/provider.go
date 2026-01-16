@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-notebook/pkg/sync"
+	"github.com/grovetools/nb/pkg/sync"
 )
 
 // GitHubProvider implements the sync.Provider interface for GitHub.

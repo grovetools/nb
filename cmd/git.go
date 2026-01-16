@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
+	"github.com/grovetools/core/git"
+	"github.com/grovetools/nb/pkg/service"
 	"github.com/spf13/cobra"
 )
 

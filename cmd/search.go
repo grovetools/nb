@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-notebook/pkg/models"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/nb/pkg/models"
+	"github.com/grovetools/nb/pkg/service"
 )
 
 var searchUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.search")

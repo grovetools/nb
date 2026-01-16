@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-notebook/pkg/frontmatter"
-	"github.com/mattsolo1/grove-notebook/pkg/tree"
+	"github.com/grovetools/nb/pkg/frontmatter"
+	"github.com/grovetools/nb/pkg/tree"
 )
 
 // newItemFromFile creates a tree.Item from a given file path.

@@ -9,10 +9,10 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/util/pathutil"
-	"github.com/mattsolo1/grove-notebook/pkg/models"
-	"github.com/mattsolo1/grove-notebook/pkg/tree"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/util/pathutil"
+	"github.com/grovetools/nb/pkg/models"
+	"github.com/grovetools/nb/pkg/tree"
 )
 
 // groupTreeNode is a helper struct to build an in-memory tree of group paths.

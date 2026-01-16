@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	coreconfig "github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-core/util/pathutil"
-	"github.com/mattsolo1/grove-notebook/pkg/models"
-	"github.com/mattsolo1/grove-notebook/pkg/tree"
+	coreconfig "github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/core/util/pathutil"
+	"github.com/grovetools/nb/pkg/models"
+	"github.com/grovetools/nb/pkg/tree"
 )
 
 // nodeRenderInfo holds the unstyled components of a display node for rendering.

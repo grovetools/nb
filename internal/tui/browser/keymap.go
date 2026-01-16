@@ -2,7 +2,7 @@ package browser
 
 import (
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/mattsolo1/grove-core/tui/keymap"
+	"github.com/grovetools/core/tui/keymap"
 )
 
 // KeyMap defines the keybindings for the browser TUI
