@@ -5,7 +5,7 @@ BINARY_NAME=nb
 E2E_BINARY_NAME=tend
 BUILD_DIR=bin
 GO=go
-VERSION_PKG=github.com/mattsolo1/grove-core/version
+VERSION_PKG=github.com/grovetools/core/version
 
 # --- Versioning ---
 # For dev builds, we construct a version string from git info.
