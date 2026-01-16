@@ -1,5 +1,5 @@
 enabled: true
-title: Grove Notebook
+title: nb
 description: A command-line, workspace-aware note-taking system for developers that integrates with Git and provides powerful search capabilities.
 category: Developer Tools
 settings:
