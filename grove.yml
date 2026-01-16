@@ -1,5 +1,6 @@
-name: grove-notebook
+name: nb
 description: Notebook and documentation management
+managed: true
 binary:
   name: nb
   path: ./bin/nb
