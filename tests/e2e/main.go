@@ -28,6 +28,7 @@ func main() {
 		NotebookConceptContextResolutionScenario(),
 		NotebookGitWorktreeScenario(),
 		NotebookGitRootScenario(),
+		NotebookPasteIntoPlanScenario(),
 	}
 
 	// Setup signal handling for graceful shutdown.

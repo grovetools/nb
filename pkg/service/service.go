@@ -112,7 +112,7 @@ func (s *Service) DeleteNotes(paths []string) error {
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf(strings.Join(errs, "; "))
+		return fmt.Errorf("delete notes: %s", strings.Join(errs, "; "))
 	}
 	return nil
 }
@@ -141,7 +141,7 @@ func (s *Service) transferNotes(sourcePaths []string, destWorkspace *coreworkspa
 
 	for _, sourcePath := range sourcePaths {
 		filename := filepath.Base(sourcePath)
-		destDir, err := s.notebookLocator.GetNotesDir(destWorkspace, destGroup)
+		destDir, err := s.notebookLocator.GetGroupDir(destWorkspace, destGroup)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("failed to get dest dir for %s: %v", sourcePath, err))
 			continue
@@ -190,6 +190,13 @@ func (s *Service) transferNotes(sourcePaths []string, destWorkspace *coreworkspa
 			s.Logger.WithError(updateErr).WithField("path", destPath).Warn("Failed to update frontmatter")
 		}
 
+		// If pasted into a plan, add necessary flow job metadata
+		if strings.HasPrefix(destGroup, "plans/") {
+			if updateErr := s.addFlowJobMetadata(destPath, destDir, isCopyToSameLocation); updateErr != nil {
+				s.Logger.WithError(updateErr).WithField("path", destPath).Warn("Failed to add flow job metadata")
+			}
+		}
+
 		s.Logger.WithFields(logrus.Fields{
 			"source_path": sourcePath,
 			"dest_path":   destPath,
@@ -200,7 +207,7 @@ func (s *Service) transferNotes(sourcePaths []string, destWorkspace *coreworkspa
 	}
 
 	if len(errs) > 0 {
-		return nil, fmt.Errorf(strings.Join(errs, "; "))
+		return nil, fmt.Errorf("transfer notes: %s", strings.Join(errs, "; "))
 	}
 	return newPaths, nil
 }
@@ -255,8 +262,11 @@ func (s *Service) updateNoteFrontmatter(notePath string, destWorkspace *corework
 		body = strings.Join(bodyLines, "\n")
 	}
 
-	// Update the type field
-	fm.Type = newType
+	// Update the type field, but skip for plan destinations since addFlowJobMetadata
+	// will set the appropriate flow job type (type: file)
+	if !strings.HasPrefix(newType, "plans/") {
+		fm.Type = newType
+	}
 
 	// Update tags to reflect the new type/location
 	// Extract tags from the new type (e.g., "issues/bugs" -> ["issues", "bugs"])
@@ -1751,4 +1761,86 @@ func (s *Service) GetBranches(ws *coreworkspace.WorkspaceNode) ([]string, error)
 	}
 
 	return branches, nil
+}
+
+// addFlowJobMetadata adds default flow job metadata (type, status, worktree) to files
+// pasted into a plan directory. This makes pasted files valid flow jobs without requiring
+// manual frontmatter editing.
+func (s *Service) addFlowJobMetadata(filePath, planDir string, isCopy bool) error {
+	// Only operate on markdown files
+	if filepath.Ext(filePath) != ".md" {
+		return nil
+	}
+
+	// 1. Read the plan's default configuration to find the worktree
+	var planWorktree string
+	planConfigPath := filepath.Join(planDir, ".grove-plan.yml")
+	if _, err := os.Stat(planConfigPath); err == nil {
+		yamlFile, err := os.ReadFile(planConfigPath)
+		if err == nil {
+			var planConfig struct {
+				Worktree string `yaml:"worktree"`
+			}
+			if yaml.Unmarshal(yamlFile, &planConfig) == nil {
+				planWorktree = planConfig.Worktree
+			}
+		}
+	}
+
+	// 2. Read the file content and parse its existing frontmatter as a map
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("read note for metadata update: %w", err)
+	}
+
+	existingFM, _, err := parseFrontmatterToMap(content)
+	if err != nil {
+		// If frontmatter is malformed, we can't safely update it.
+		return fmt.Errorf("parse existing frontmatter: %w", err)
+	}
+
+	// 3. Build a map of updates, only adding fields that are missing
+	updates := make(map[string]interface{})
+
+	// Add type: file if missing (flow JobTypeFile)
+	if _, exists := existingFM["type"]; !exists {
+		updates["type"] = "file"
+	}
+
+	// Add status: completed if missing (flow JobStatusCompleted)
+	if _, exists := existingFM["status"]; !exists {
+		updates["status"] = "completed"
+	}
+
+	// Add worktree if the plan has one configured and the file doesn't have one
+	if _, exists := existingFM["worktree"]; !exists && planWorktree != "" {
+		updates["worktree"] = planWorktree
+	}
+
+	// If it's a copy operation, add a title if missing
+	if isCopy {
+		if _, exists := existingFM["title"]; !exists {
+			base := filepath.Base(filePath)
+			title := strings.TrimSuffix(base, filepath.Ext(base))
+			updates["title"] = title
+		}
+	}
+
+	// 4. If there are updates to apply, use the utility to update the file
+	if len(updates) > 0 {
+		newContent, err := updateFrontmatterFields(content, updates)
+		if err != nil {
+			return fmt.Errorf("update frontmatter: %w", err)
+		}
+
+		if err := os.WriteFile(filePath, newContent, 0644); err != nil {
+			return fmt.Errorf("write updated note with job metadata: %w", err)
+		}
+		s.Logger.WithFields(logrus.Fields{
+			"path":    filePath,
+			"updates": updates,
+		}).Debug("Added flow job metadata to pasted file")
+	}
+
+	return nil
 }

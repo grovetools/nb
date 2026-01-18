@@ -1164,7 +1164,13 @@ func (m *Model) pasteNotesCmd() tea.Cmd {
 			if wsName, ok := node.Item.Metadata["Workspace"].(string); ok {
 				destWorkspace, _ = m.findWorkspaceNodeByName(wsName)
 			}
-			destGroup = node.Item.Name
+			// Use the Group metadata which contains the full path (e.g., "plans/my-target-plan")
+			// Fall back to Item.Name if metadata is not present
+			if group, ok := node.Item.Metadata["Group"].(string); ok {
+				destGroup = group
+			} else {
+				destGroup = node.Item.Name
+			}
 		} else if node.IsNote() {
 			if wsName, ok := node.Item.Metadata["Workspace"].(string); ok {
 				destWorkspace, _ = m.findWorkspaceNodeByName(wsName)
