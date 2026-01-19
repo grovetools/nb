@@ -1,12 +1,6 @@
-# Grove Notebook
-
-<img src="./images/grove-notebook-inkscape.svg" width="60%" />
-
 `grove-notebook` (`nb`) is a command-line note-taking system that organizes notes in Markdown files based on project workspaces and Git branches.
 
 <!-- placeholder for animated gif -->
-
-## Central Knowledge Base
 
 The main notebook directory (default: `~/Documents/nb`) is intended to be stored outside of any specific Git repository. This design allows notes to persist across different projects, creating a central knowledge base that is not tied to a single repository's lifecycle.
 
