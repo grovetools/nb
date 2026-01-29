@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
@@ -753,11 +754,7 @@ type tuiState struct {
 
 // getStateFilePath returns the path to the TUI state file
 func getStateFilePath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	stateDir := filepath.Join(home, ".grove", "nb")
+	stateDir := filepath.Join(paths.StateDir(), "nb")
 	if err := os.MkdirAll(stateDir, 0755); err != nil {
 		return "", err
 	}

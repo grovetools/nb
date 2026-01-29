@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/nb/pkg/migration"
 	"github.com/grovetools/nb/pkg/service"
@@ -449,7 +450,7 @@ func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bo
 
 	// Fallback to default global path if not configured
 	if globalRoot == "" {
-		globalRoot = filepath.Join(os.Getenv("HOME"), ".grove", "notebooks", "global")
+		globalRoot = filepath.Join(paths.DataDir(), "notebooks", "global")
 		if verbose {
 			fmt.Printf("Using default global notebook path: %s\n", globalRoot)
 		}
