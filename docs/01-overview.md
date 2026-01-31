@@ -1,39 +1,62 @@
-`grove-notebook` (`nb`) is a command-line note-taking system that organizes notes in Markdown files based on project workspaces and Git branches.
+<p align="center">
+  <img src="https://grovetools.ai/docs/nb/images/nb-logo-with-text-dark.svg" alt="Grove Notebook">
+</p>
 
-<!-- placeholder for animated gif -->
+<!-- DOCGEN:OVERVIEW:START -->
 
-The main notebook directory (default: `~/Documents/nb`) is intended to be stored outside of any specific Git repository. This design allows notes to persist across different projects, creating a central knowledge base that is not tied to a single repository's lifecycle.
+`nb` is a command-line tool for managing Markdown notes within a structured, workspace-aware directory system. It creates a centralized storage layer for engineering notes, architectural concepts, and project plans, decoupled from the source code repositories they reference.
 
-## Key Features
+## Core Mechanisms
 
-*   **Note Organization**: Notes are stored as Markdown files.
-*   **Search**: Provides full-text search capabilities using ripgrep (with grep fallback).
-*   **`grove-flow` Storage**: Can be configured as a storage location for `grove-flow` plans and chat sessions.
-*   **Obsidian Compatibility**: The notebook directory can be opened as an Obsidian vault.
-*   **CLI**: A command-line interface for creating and managing notes.
+**Workspace Context**: `nb` utilizes the `grove` core discovery service to map the current working directory to a specific workspace. Commands executed in `~/code/my-project` automatically target `~/.grove/notebooks/nb/workspaces/my-project/`, ensuring notes are organized by project context without cluttering the source repository.
 
-## How It Works
+**Storage Structure**: Notes are stored as Markdown files with YAML frontmatter. The default hierarchy organizes files by workspace and note type (e.g., `inbox`, `daily`, `plans`).
+*   **Frontmatter**: Metadata such as `id`, `tags`, and `created` timestamps are maintained in the file header.
+*   **Centralization**: By default, all data resides in `~/.grove/notebooks/`, allowing for a unified knowledge base that can be backed up or version-controlled independently of project code.
 
-`nb` uses a SQLite database (`workspaces.db`) in its data directory (`~/.local/share/nb`) to register project directories as workspaces. When a command is run, `nb` detects the current workspace by traversing up from the current directory to find a registered path.
+**Integration**: Acts as the storage backend for other ecosystem tools. `flow` reads plans from the `plans/` directory and `docgen` can store draft documentation.
 
-Notes are stored in a hierarchical directory structure, typically `NOTEBOOK_DIR/TYPE/WORKSPACE_NAME/BRANCH_NAME/NOTE_TYPE/`. For example, a note of type `current` for the `main` branch of the `my-api` repository would be stored in `~/Documents/nb/repos/my-api/main/current/`. Search is performed directly on the filesystem using ripgrep or grep.
+## Features
 
-## Ecosystem Integration
+### Note Management
+*   **Creation**: `nb new` creates timestamped files in the `inbox` directory of the active workspace. Supports templates based on note type (e.g., `daily` generates a task list structure).
+*   **Organization**: Commands like `archive` and `move` manage file lifecycles.
+*   **Search**: `nb search` executes `ripgrep` (or `grep`) across the notebook directory, respecting workspace boundaries.
 
-`grove-notebook` can function as a storage backend for other tools in the Grove ecosystem.
+### Terminal Interface (TUI)
+`nb tui` launches a file browser for navigating the notebook structure.
+*   **Navigation**: Vim-style keybindings for traversing the workspace tree.
+*   **Filtering**: Supports filtering by tag (`&`) or content (`/`).
+*   **Preview**: Renders Markdown content in a side pane.
+*   **Git Status**: Visualizes file status if the notebook directory is a Git repository.
 
-*   **`grove-flow`**: The `plans_directory` and `chat_directory` in `grove-flow`'s configuration can be set to paths within the `nb` directory structure. This stores all `flow` plans and chat logs in the central notebook.
+### Concept Management
+`nb concept` manages architectural knowledge entities.
+*   **Structure**: Creates a directory containing a `concept-manifest.yml` and `overview.md`.
+*   **Linking**: Establishes relationships between concepts, plans, and notes via the manifest, enabling a graph-like structure for technical documentation.
 
-## Installation
+### Remote Synchronization
+`nb remote sync` synchronizes local Markdown notes with remote issue trackers (currently GitHub Issues and Pull Requests).
+*   **Bi-directional Sync**: Updates local files based on remote changes and pushes local edits to the remote provider based on modification timestamps.
+*   **Metadata Mapping**: Maps frontmatter fields (`remote.id`, `remote.state`) to GitHub API fields.
 
-Install via the Grove meta-CLI:
-```bash
-grove install nb
-```
+### Version Control
+`nb git` provides helpers for managing the notebook's own version control.
+*   **Initialization**: `nb git init` configures a Git repository in the notebook root or specific workspace directory, generating appropriate `.gitignore` files.
+*   **Operations**: `nb git commit` stages and commits changes within the notebook context.
 
-Verify installation:
-```bash
-nb version
-```
+## Integrations
 
-Requires the `grove` meta-CLI. See the [Grove Installation Guide](https://github.com/mattsolo1/grove-meta/blob/main/docs/02-installation.md) if you don't have it installed.
+*   **Obsidian**: The directory structure is compatible with Obsidian vaults. The `nb obsidian install-dev` command links local plugins for deeper integration (this is out of date currently).
+*   **Editors**: Opens notes in the system default `$EDITOR`.
+
+<!-- DOCGEN:OVERVIEW:END -->
+
+<!-- DOCGEN:TOC:START -->
+
+See the [documentation](docs/) for detailed usage instructions:
+- [Overview](docs/01-overview.md)
+- [Configuration](docs/02-configuration.md)
+- [Command Reference](docs/03-command-reference.md)
+
+<!-- DOCGEN:TOC:END -->
