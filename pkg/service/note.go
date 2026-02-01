@@ -23,7 +23,7 @@ func GenerateFilename(suffix string) string {
 	// Use YYYYMMDD format for cleaner filenames
 	date := time.Now().Format("20060102")
 	if suffix != "" {
-		return fmt.Sprintf("%s-%s.md", date, sanitizeFilename(suffix))
+		return fmt.Sprintf("%s-%s.md", date, SanitizeFilename(suffix))
 	}
 	return fmt.Sprintf("%s.md", date)
 }
@@ -32,13 +32,13 @@ func GenerateFilename(suffix string) string {
 func GenerateNoteID(suffix string) string {
 	timestamp := time.Now().Format("20060102-150405")
 	if suffix != "" {
-		return fmt.Sprintf("%s-%s", timestamp, sanitizeFilename(suffix))
+		return fmt.Sprintf("%s-%s", timestamp, SanitizeFilename(suffix))
 	}
 	return timestamp
 }
 
-// sanitizeFilename removes invalid characters from filename
-func sanitizeFilename(s string) string {
+// SanitizeFilename removes invalid characters from filename
+func SanitizeFilename(s string) string {
 	// Replace spaces with hyphens
 	s = strings.ReplaceAll(s, " ", "-")
 

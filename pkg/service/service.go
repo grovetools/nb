@@ -566,7 +566,7 @@ func (s *Service) CreateConcept(ctx *WorkspaceContext, title string, options ...
 		return nil, fmt.Errorf("get concepts directory path: %w", err)
 	}
 
-	conceptID := sanitizeFilename(title)
+	conceptID := SanitizeFilename(title)
 	conceptPath := filepath.Join(conceptsDir, conceptID)
 
 	if err := os.MkdirAll(conceptPath, 0755); err != nil {
@@ -634,9 +634,10 @@ related_notes: []
 
 // ConceptInfo represents metadata about a concept
 type ConceptInfo struct {
-	ID    string
-	Title string
-	Path  string
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Path      string `json:"path"`
+	Workspace string `json:"workspace"`
 }
 
 // ListConcepts lists all concepts in the workspace
@@ -652,6 +653,11 @@ func (s *Service) ListConcepts(ctx *WorkspaceContext) ([]ConceptInfo, error) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("read concepts directory: %w", err)
+	}
+
+	workspaceName := ""
+	if ctx.NotebookContextWorkspace != nil {
+		workspaceName = ctx.NotebookContextWorkspace.Name
 	}
 
 	var concepts []ConceptInfo
@@ -680,13 +686,578 @@ func (s *Service) ListConcepts(ctx *WorkspaceContext) ([]ConceptInfo, error) {
 		}
 
 		concepts = append(concepts, ConceptInfo{
-			ID:    conceptID,
-			Title: manifest.Title,
-			Path:  conceptPath,
+			ID:        conceptID,
+			Title:     manifest.Title,
+			Path:      conceptPath,
+			Workspace: workspaceName,
 		})
 	}
 
 	return concepts, nil
+}
+
+// ListAllConcepts lists concepts across all workspaces in the ecosystem
+func (s *Service) ListAllConcepts() ([]ConceptInfo, error) {
+	var allConcepts []ConceptInfo
+	seenPaths := make(map[string]bool)
+
+	allWorkspaces := s.workspaceProvider.All()
+	for _, ws := range allWorkspaces {
+		// Find the notebook context for this workspace
+		notebookContext, err := s.findNotebookContextNode(ws)
+		if err != nil {
+			continue
+		}
+
+		// Get concepts directory for this context
+		conceptsDir, err := s.notebookLocator.GetNotesDir(notebookContext, "concepts")
+		if err != nil {
+			continue
+		}
+
+		// Skip if we've already processed this concepts directory
+		if seenPaths[conceptsDir] {
+			continue
+		}
+		seenPaths[conceptsDir] = true
+
+		// Read concepts from this directory
+		entries, err := os.ReadDir(conceptsDir)
+		if err != nil {
+			continue
+		}
+
+		workspaceName := notebookContext.Name
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+
+			conceptID := entry.Name()
+			conceptPath := filepath.Join(conceptsDir, conceptID)
+			manifestPath := filepath.Join(conceptPath, "concept-manifest.yml")
+
+			// Read manifest to get title
+			manifestData, err := os.ReadFile(manifestPath)
+			if err != nil {
+				continue
+			}
+
+			var manifest struct {
+				Title string `yaml:"title"`
+			}
+			if err := yaml.Unmarshal(manifestData, &manifest); err != nil {
+				continue
+			}
+
+			allConcepts = append(allConcepts, ConceptInfo{
+				ID:        conceptID,
+				Title:     manifest.Title,
+				Path:      conceptPath,
+				Workspace: workspaceName,
+			})
+		}
+	}
+
+	return allConcepts, nil
+}
+
+// ListEcosystemConcepts lists concepts from all workspaces within the current ecosystem
+func (s *Service) ListEcosystemConcepts(ctx *WorkspaceContext) ([]ConceptInfo, error) {
+	// Determine the ecosystem root path
+	var ecosystemRootPath string
+
+	currentWs := ctx.CurrentWorkspace
+	if currentWs == nil {
+		return nil, fmt.Errorf("no current workspace context")
+	}
+
+	// Check if we're in an ecosystem context
+	switch currentWs.Kind {
+	case coreworkspace.KindEcosystemRoot:
+		ecosystemRootPath = currentWs.Path
+	case coreworkspace.KindEcosystemWorktree,
+		coreworkspace.KindEcosystemSubProject,
+		coreworkspace.KindEcosystemSubProjectWorktree,
+		coreworkspace.KindEcosystemWorktreeSubProject,
+		coreworkspace.KindEcosystemWorktreeSubProjectWorktree:
+		// Use RootEcosystemPath if available
+		if currentWs.RootEcosystemPath != "" {
+			ecosystemRootPath = currentWs.RootEcosystemPath
+		} else if currentWs.ParentEcosystemPath != "" {
+			ecosystemRootPath = currentWs.ParentEcosystemPath
+		}
+	default:
+		// Not in an ecosystem - fall back to current workspace only
+		return s.ListConcepts(ctx)
+	}
+
+	if ecosystemRootPath == "" {
+		// Couldn't determine ecosystem, fall back to current workspace
+		return s.ListConcepts(ctx)
+	}
+
+	// Normalize the ecosystem root path for comparison (case-insensitive on macOS)
+	ecosystemRootPath = strings.ToLower(filepath.Clean(ecosystemRootPath))
+
+	var allConcepts []ConceptInfo
+	seenPaths := make(map[string]bool)
+
+	allWorkspaces := s.workspaceProvider.All()
+	for _, ws := range allWorkspaces {
+		// Normalize paths for comparison (case-insensitive on macOS)
+		wsPath := strings.ToLower(filepath.Clean(ws.Path))
+		wsRootEco := strings.ToLower(filepath.Clean(ws.RootEcosystemPath))
+		wsParentEco := strings.ToLower(filepath.Clean(ws.ParentEcosystemPath))
+
+		// Filter: only include workspaces that belong to this ecosystem
+		isInEcosystem := false
+		if wsPath == ecosystemRootPath {
+			isInEcosystem = true
+		} else if wsRootEco == ecosystemRootPath {
+			isInEcosystem = true
+		} else if wsParentEco == ecosystemRootPath {
+			isInEcosystem = true
+		}
+
+		if !isInEcosystem {
+			continue
+		}
+
+		// Find the notebook context for this workspace
+		notebookContext, err := s.findNotebookContextNode(ws)
+		if err != nil {
+			continue
+		}
+
+		// Get concepts directory for this context
+		conceptsDir, err := s.notebookLocator.GetNotesDir(notebookContext, "concepts")
+		if err != nil {
+			continue
+		}
+
+		// Skip if we've already processed this concepts directory
+		if seenPaths[conceptsDir] {
+			continue
+		}
+		seenPaths[conceptsDir] = true
+
+		// Read concepts from this directory
+		entries, err := os.ReadDir(conceptsDir)
+		if err != nil {
+			continue
+		}
+
+		workspaceName := notebookContext.Name
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+
+			conceptID := entry.Name()
+			conceptPath := filepath.Join(conceptsDir, conceptID)
+			manifestPath := filepath.Join(conceptPath, "concept-manifest.yml")
+
+			// Read manifest to get title
+			manifestData, err := os.ReadFile(manifestPath)
+			if err != nil {
+				continue
+			}
+
+			var manifest struct {
+				Title string `yaml:"title"`
+			}
+			if err := yaml.Unmarshal(manifestData, &manifest); err != nil {
+				continue
+			}
+
+			allConcepts = append(allConcepts, ConceptInfo{
+				ID:        conceptID,
+				Title:     manifest.Title,
+				Path:      conceptPath,
+				Workspace: workspaceName,
+			})
+		}
+	}
+
+	return allConcepts, nil
+}
+
+// GetConceptsDir returns the absolute path to the concepts directory for the current workspace
+func (s *Service) GetConceptsDir(ctx *WorkspaceContext) (string, error) {
+	conceptsDir, err := s.getNotePathForContext(ctx, "concepts")
+	if err != nil {
+		return "", fmt.Errorf("get concepts directory: %w", err)
+	}
+	return conceptsDir, nil
+}
+
+// GetConceptPath returns the absolute path to a concept's directory
+func (s *Service) GetConceptPath(ctx *WorkspaceContext, conceptID string) (string, error) {
+	conceptsDir, err := s.GetConceptsDir(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	conceptPath := filepath.Join(conceptsDir, conceptID)
+
+	// Verify the concept exists
+	if _, err := os.Stat(conceptPath); err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("concept '%s' not found", conceptID)
+		}
+		return "", fmt.Errorf("stat concept directory: %w", err)
+	}
+
+	return conceptPath, nil
+}
+
+// ConceptSearchMatch represents a single line match within a file
+type ConceptSearchMatch struct {
+	LineNumber int    `json:"line"`
+	Text       string `json:"text"`
+}
+
+// ConceptSearchResult represents search matches grouped by file
+type ConceptSearchResult struct {
+	ConceptID string               `json:"concept_id"`
+	Workspace string               `json:"workspace"`
+	FilePath  string               `json:"file_path"`
+	Matches   []ConceptSearchMatch `json:"matches"`
+}
+
+// SearchConcepts searches for a query string across all concept files in the ecosystem
+func (s *Service) SearchConcepts(query string) ([]ConceptSearchResult, error) {
+	// Collect all concept directories across the ecosystem
+	var searchDirs []string
+	seenPaths := make(map[string]bool)
+	conceptToWorkspace := make(map[string]string) // map concept path to workspace name
+
+	allWorkspaces := s.workspaceProvider.All()
+	for _, ws := range allWorkspaces {
+		notebookContext, err := s.findNotebookContextNode(ws)
+		if err != nil {
+			continue
+		}
+
+		conceptsDir, err := s.notebookLocator.GetNotesDir(notebookContext, "concepts")
+		if err != nil {
+			continue
+		}
+
+		if seenPaths[conceptsDir] {
+			continue
+		}
+		seenPaths[conceptsDir] = true
+
+		// Read concept subdirectories
+		entries, err := os.ReadDir(conceptsDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			conceptPath := filepath.Join(conceptsDir, entry.Name())
+			searchDirs = append(searchDirs, conceptPath)
+			conceptToWorkspace[conceptPath] = notebookContext.Name
+		}
+	}
+
+	if len(searchDirs) == 0 {
+		return []ConceptSearchResult{}, nil
+	}
+
+	// Execute search command using ripgrep or grep
+	var cmd *exec.Cmd
+	rgPath, err := exec.LookPath("rg")
+	if err == nil {
+		// Use ripgrep
+		args := []string{"-n", "--ignore-case", query}
+		args = append(args, searchDirs...)
+		cmd = exec.Command(rgPath, args...)
+	} else {
+		// Fallback to grep
+		grepPath, err := exec.LookPath("grep")
+		if err != nil {
+			return nil, fmt.Errorf("neither 'rg' nor 'grep' found in PATH")
+		}
+		args := []string{"-rni", query}
+		args = append(args, searchDirs...)
+		cmd = exec.Command(grepPath, args...)
+	}
+
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			// Exit code 1 means no matches found
+			if exitErr.ExitCode() == 1 {
+				return []ConceptSearchResult{}, nil
+			}
+			return nil, fmt.Errorf("search command failed: %w, stderr: %s", err, exitErr.Stderr)
+		}
+		return nil, fmt.Errorf("search command failed: %w", err)
+	}
+
+	// Parse results and group by file
+	fileResults := make(map[string]*ConceptSearchResult) // keyed by file path
+	var fileOrder []string                               // preserve order of first occurrence
+
+	lines := strings.Split(string(output), "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Parse format: /path/to/file:linenum:matched content
+		// Find first colon (end of file path)
+		firstColon := strings.Index(line, ":")
+		if firstColon == -1 {
+			continue
+		}
+
+		filePath := line[:firstColon]
+		rest := line[firstColon+1:]
+
+		// Find second colon (end of line number)
+		secondColon := strings.Index(rest, ":")
+		if secondColon == -1 {
+			continue
+		}
+
+		lineNumStr := rest[:secondColon]
+		matchedLine := rest[secondColon+1:]
+
+		var lineNum int
+		fmt.Sscanf(lineNumStr, "%d", &lineNum)
+
+		// Extract concept ID from the file path
+		// Path format: /path/to/concepts/<concept-id>/file.md
+		conceptID := ""
+		workspaceName := ""
+		for conceptPath, wsName := range conceptToWorkspace {
+			if strings.HasPrefix(filePath, conceptPath) {
+				conceptID = filepath.Base(conceptPath)
+				workspaceName = wsName
+				break
+			}
+		}
+
+		// Group by file path
+		if existing, ok := fileResults[filePath]; ok {
+			existing.Matches = append(existing.Matches, ConceptSearchMatch{
+				LineNumber: lineNum,
+				Text:       strings.TrimSpace(matchedLine),
+			})
+		} else {
+			fileResults[filePath] = &ConceptSearchResult{
+				ConceptID: conceptID,
+				Workspace: workspaceName,
+				FilePath:  filePath,
+				Matches: []ConceptSearchMatch{
+					{LineNumber: lineNum, Text: strings.TrimSpace(matchedLine)},
+				},
+			}
+			fileOrder = append(fileOrder, filePath)
+		}
+	}
+
+	// Convert to slice preserving order
+	results := make([]ConceptSearchResult, 0, len(fileOrder))
+	for _, fp := range fileOrder {
+		results = append(results, *fileResults[fp])
+	}
+
+	return results, nil
+}
+
+// SearchEcosystemConcepts searches for a query within concepts in the current ecosystem only
+func (s *Service) SearchEcosystemConcepts(ctx *WorkspaceContext, query string) ([]ConceptSearchResult, error) {
+	// Determine the ecosystem root path
+	var ecosystemRootPath string
+
+	currentWs := ctx.CurrentWorkspace
+	if currentWs == nil {
+		return nil, fmt.Errorf("no current workspace context")
+	}
+
+	switch currentWs.Kind {
+	case coreworkspace.KindEcosystemRoot:
+		ecosystemRootPath = currentWs.Path
+	case coreworkspace.KindEcosystemWorktree,
+		coreworkspace.KindEcosystemSubProject,
+		coreworkspace.KindEcosystemSubProjectWorktree,
+		coreworkspace.KindEcosystemWorktreeSubProject,
+		coreworkspace.KindEcosystemWorktreeSubProjectWorktree:
+		if currentWs.RootEcosystemPath != "" {
+			ecosystemRootPath = currentWs.RootEcosystemPath
+		} else if currentWs.ParentEcosystemPath != "" {
+			ecosystemRootPath = currentWs.ParentEcosystemPath
+		}
+	default:
+		// Not in an ecosystem - search current workspace only
+		return s.searchConceptsInWorkspaces(query, []*coreworkspace.WorkspaceNode{currentWs})
+	}
+
+	if ecosystemRootPath == "" {
+		return s.searchConceptsInWorkspaces(query, []*coreworkspace.WorkspaceNode{currentWs})
+	}
+
+	// Normalize for case-insensitive comparison (macOS)
+	ecosystemRootPath = strings.ToLower(filepath.Clean(ecosystemRootPath))
+
+	// Filter workspaces to those in this ecosystem
+	var ecosystemWorkspaces []*coreworkspace.WorkspaceNode
+	for _, ws := range s.workspaceProvider.All() {
+		wsPath := strings.ToLower(filepath.Clean(ws.Path))
+		wsRootEco := strings.ToLower(filepath.Clean(ws.RootEcosystemPath))
+		wsParentEco := strings.ToLower(filepath.Clean(ws.ParentEcosystemPath))
+
+		if wsPath == ecosystemRootPath || wsRootEco == ecosystemRootPath || wsParentEco == ecosystemRootPath {
+			ecosystemWorkspaces = append(ecosystemWorkspaces, ws)
+		}
+	}
+
+	return s.searchConceptsInWorkspaces(query, ecosystemWorkspaces)
+}
+
+// searchConceptsInWorkspaces searches for a query within concepts of the given workspaces
+func (s *Service) searchConceptsInWorkspaces(query string, workspaces []*coreworkspace.WorkspaceNode) ([]ConceptSearchResult, error) {
+	var searchDirs []string
+	seenPaths := make(map[string]bool)
+	conceptToWorkspace := make(map[string]string)
+
+	for _, ws := range workspaces {
+		notebookContext, err := s.findNotebookContextNode(ws)
+		if err != nil {
+			continue
+		}
+
+		conceptsDir, err := s.notebookLocator.GetNotesDir(notebookContext, "concepts")
+		if err != nil {
+			continue
+		}
+
+		if seenPaths[conceptsDir] {
+			continue
+		}
+		seenPaths[conceptsDir] = true
+
+		entries, err := os.ReadDir(conceptsDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			conceptPath := filepath.Join(conceptsDir, entry.Name())
+			searchDirs = append(searchDirs, conceptPath)
+			conceptToWorkspace[conceptPath] = notebookContext.Name
+		}
+	}
+
+	if len(searchDirs) == 0 {
+		return []ConceptSearchResult{}, nil
+	}
+
+	// Execute search
+	var cmd *exec.Cmd
+	rgPath, err := exec.LookPath("rg")
+	if err == nil {
+		args := []string{"-n", "--ignore-case", query}
+		args = append(args, searchDirs...)
+		cmd = exec.Command(rgPath, args...)
+	} else {
+		grepPath, err := exec.LookPath("grep")
+		if err != nil {
+			return nil, fmt.Errorf("neither 'rg' nor 'grep' found in PATH")
+		}
+		args := []string{"-rni", query}
+		args = append(args, searchDirs...)
+		cmd = exec.Command(grepPath, args...)
+	}
+
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 1 {
+				return []ConceptSearchResult{}, nil
+			}
+			return nil, fmt.Errorf("search command failed: %w, stderr: %s", err, exitErr.Stderr)
+		}
+		return nil, fmt.Errorf("search command failed: %w", err)
+	}
+
+	// Parse and group results
+	fileResults := make(map[string]*ConceptSearchResult)
+	var fileOrder []string
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		firstColon := strings.Index(line, ":")
+		if firstColon == -1 {
+			continue
+		}
+		filePath := line[:firstColon]
+		rest := line[firstColon+1:]
+
+		secondColon := strings.Index(rest, ":")
+		if secondColon == -1 {
+			continue
+		}
+		lineNumStr := rest[:secondColon]
+		matchedLine := rest[secondColon+1:]
+
+		var lineNum int
+		fmt.Sscanf(lineNumStr, "%d", &lineNum)
+
+		conceptID := ""
+		workspaceName := ""
+		for conceptPath, wsName := range conceptToWorkspace {
+			if strings.HasPrefix(filePath, conceptPath) {
+				conceptID = filepath.Base(conceptPath)
+				workspaceName = wsName
+				break
+			}
+		}
+
+		if existing, ok := fileResults[filePath]; ok {
+			existing.Matches = append(existing.Matches, ConceptSearchMatch{
+				LineNumber: lineNum,
+				Text:       strings.TrimSpace(matchedLine),
+			})
+		} else {
+			fileResults[filePath] = &ConceptSearchResult{
+				ConceptID: conceptID,
+				Workspace: workspaceName,
+				FilePath:  filePath,
+				Matches: []ConceptSearchMatch{
+					{LineNumber: lineNum, Text: strings.TrimSpace(matchedLine)},
+				},
+			}
+			fileOrder = append(fileOrder, filePath)
+		}
+	}
+
+	results := make([]ConceptSearchResult, 0, len(fileOrder))
+	for _, fp := range fileOrder {
+		results = append(results, *fileResults[fp])
+	}
+
+	return results, nil
 }
 
 // LinkPlanToConcept adds a plan reference to a concept's manifest
