@@ -166,6 +166,7 @@ func newConceptLinkCmd(svc **service.Service, workspaceOverride *string) *cobra.
 	cmd.AddCommand(newConceptLinkPlanCmd(svc, workspaceOverride))
 	cmd.AddCommand(newConceptLinkNoteCmd(svc, workspaceOverride))
 	cmd.AddCommand(newConceptLinkConceptCmd(svc, workspaceOverride))
+	cmd.AddCommand(newConceptLinkSkillCmd(svc, workspaceOverride))
 
 	return cmd
 }
@@ -287,6 +288,48 @@ func newConceptLinkConceptCmd(svc **service.Service, workspaceOverride *string) 
 				fmt.Println(string(data))
 			} else {
 				fmt.Printf("Linked concept '%s' to concept '%s'\n", targetID, sourceID)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output result as JSON")
+	return cmd
+}
+
+func newConceptLinkSkillCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	var jsonOutput bool
+
+	cmd := &cobra.Command{
+		Use:   "skill <concept-id> <skill-name>",
+		Short: "Link a skill to a concept",
+		Long:  `Add a skill reference to a concept's manifest. Use 'grove skills list' to see available skills.`,
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			conceptID := args[0]
+			skillName := args[1]
+
+			ctx, err := (*svc).GetWorkspaceContext(*workspaceOverride)
+			if err != nil {
+				return fmt.Errorf("get workspace context: %w", err)
+			}
+
+			if err := (*svc).LinkSkillToConcept(ctx, conceptID, skillName); err != nil {
+				return err
+			}
+
+			if jsonOutput {
+				result := map[string]interface{}{
+					"success": true,
+					"message": fmt.Sprintf("Linked skill '%s' to concept '%s'", skillName, conceptID),
+				}
+				data, err := json.Marshal(result)
+				if err != nil {
+					return fmt.Errorf("marshal json: %w", err)
+				}
+				fmt.Println(string(data))
+			} else {
+				fmt.Printf("Linked skill '%s' to concept '%s'\n", skillName, conceptID)
 			}
 			return nil
 		},

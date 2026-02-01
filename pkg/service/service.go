@@ -582,6 +582,7 @@ status: active
 related_concepts: []
 related_plans: []
 related_notes: []
+related_skills: []
 `, conceptID, title)
 	if err := os.WriteFile(filepath.Join(conceptPath, "concept-manifest.yml"), []byte(manifestContent), 0644); err != nil {
 		return nil, fmt.Errorf("create concept-manifest.yml: %w", err)
@@ -1293,6 +1294,17 @@ func (s *Service) LinkConceptToConcept(ctx *WorkspaceContext, sourceID, targetID
 	return s.addToManifestList(manifestPath, "related_concepts", targetID)
 }
 
+// LinkSkillToConcept adds a skill reference to a concept's manifest
+func (s *Service) LinkSkillToConcept(ctx *WorkspaceContext, conceptID, skillName string) error {
+	conceptsDir, err := s.getNotePathForContext(ctx, "concepts")
+	if err != nil {
+		return fmt.Errorf("get concepts directory: %w", err)
+	}
+
+	manifestPath := filepath.Join(conceptsDir, conceptID, "concept-manifest.yml")
+	return s.addToManifestList(manifestPath, "related_skills", skillName)
+}
+
 // addToManifestList adds a value to a list field in a YAML manifest file
 func (s *Service) addToManifestList(manifestPath, fieldName, value string) error {
 	// Read the manifest
@@ -1329,7 +1341,16 @@ func (s *Service) addToManifestList(manifestPath, fieldName, value string) error
 	}
 
 	if sequenceNode == nil {
-		return fmt.Errorf("field %s not found in manifest", fieldName)
+		// Field doesn't exist, create it
+		keyNode := &yaml.Node{
+			Kind:  yaml.ScalarNode,
+			Value: fieldName,
+		}
+		sequenceNode = &yaml.Node{
+			Kind:    yaml.SequenceNode,
+			Content: []*yaml.Node{},
+		}
+		mappingNode.Content = append(mappingNode.Content, keyNode, sequenceNode)
 	}
 
 	// Check if value already exists
