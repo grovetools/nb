@@ -13,6 +13,20 @@ func NewConceptCmd(svc **service.Service, workspaceOverride *string) *cobra.Comm
 		Use:   "concept",
 		Short: "Manage project concepts and architectural memory",
 		Long:  `Create, list, and link project concepts to maintain durable architectural knowledge.`,
+		Example: `  # Find concepts related to authentication
+  nb concept search "auth" --ecosystem --files-only --json
+
+  # List all concepts in the ecosystem
+  nb concept list --ecosystem --json
+
+  # Get the path to a concept and read it
+  nb concept path authentication
+  cat $(nb concept path authentication)/overview.md
+
+  # Create a new concept and link it
+  nb concept new "Rate Limiter" --json
+  nb concept link plan rate-limiter myproject:plans/implement-rate-limit
+  nb concept link concept rate-limiter core:workspace-model`,
 	}
 
 	cmd.AddCommand(newConceptNewCmd(svc, workspaceOverride))
@@ -33,7 +47,10 @@ func newConceptNewCmd(svc **service.Service, workspaceOverride *string) *cobra.C
 		Use:   "new <title>",
 		Short: "Create a new concept",
 		Long:  `Create a new concept with manifest and overview files.`,
-		Args:  cobra.ExactArgs(1),
+		Example: `  nb concept new "Rate Limiter"
+  nb concept new "Authentication System" --json
+  nb concept new "Shared Utils" --global`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			title := args[0]
 			ctx, err := (*svc).GetWorkspaceContext(*workspaceOverride)
@@ -97,6 +114,9 @@ func newConceptListCmd(svc **service.Service, workspaceOverride *string) *cobra.
 By default, lists concepts in the current workspace only.
 Use --ecosystem to list concepts from all projects within the current ecosystem.
 Use --all-workspaces to list concepts from all discovered workspaces globally.`,
+		Example: `  nb concept list
+  nb concept list --ecosystem --json
+  nb concept list --all-workspaces --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var concepts []service.ConceptInfo
 			var err error
@@ -161,6 +181,10 @@ func newConceptLinkCmd(svc **service.Service, workspaceOverride *string) *cobra.
 		Use:   "link",
 		Short: "Link concepts, plans, and notes",
 		Long:  `Link a concept to related concepts, plans, or notes.`,
+		Example: `  nb concept link plan auth myproject:plans/jwt-refactor
+  nb concept link note auth myproject:inbox/auth-history.md
+  nb concept link concept auth grovetools:session-tracking
+  nb concept link skill auth concept-maintainer`,
 	}
 
 	cmd.AddCommand(newConceptLinkPlanCmd(svc, workspaceOverride))
@@ -178,7 +202,9 @@ func newConceptLinkPlanCmd(svc **service.Service, workspaceOverride *string) *co
 		Use:   "plan <concept-id> <plan-alias>",
 		Short: "Link a plan to a concept",
 		Long:  `Add a plan reference to a concept's manifest using an alias.`,
-		Args:  cobra.ExactArgs(2),
+		Example: `  nb concept link plan rate-limiter myproject:plans/implement-rate-limit
+  nb concept link plan authentication flow:plans/jwt-refactor --json`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			conceptID := args[0]
 			planAlias := args[1]
@@ -220,7 +246,9 @@ func newConceptLinkNoteCmd(svc **service.Service, workspaceOverride *string) *co
 		Use:   "note <concept-id> <note-alias>",
 		Short: "Link a note to a concept",
 		Long:  `Add a note reference to a concept's manifest using an alias.`,
-		Args:  cobra.ExactArgs(2),
+		Example: `  nb concept link note authentication myproject:inbox/auth-history.md
+  nb concept link note rate-limiter myproject:inbox/rfc.md --json`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			conceptID := args[0]
 			noteAlias := args[1]
@@ -261,8 +289,11 @@ func newConceptLinkConceptCmd(svc **service.Service, workspaceOverride *string) 
 	cmd := &cobra.Command{
 		Use:   "concept <source-concept-id> <target-concept-id>",
 		Short: "Link a concept to another concept",
-		Long:  `Add a concept-to-concept reference in the source concept's manifest.`,
-		Args:  cobra.ExactArgs(2),
+		Long: `Add a concept-to-concept reference in the source concept's manifest.
+Use workspace:concept-id format to link concepts across workspaces.`,
+		Example: `  nb concept link concept auth grovetools:session-tracking
+  nb concept link concept rate-limiter core:workspace-model --json`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sourceID := args[0]
 			targetID := args[1]
@@ -304,7 +335,10 @@ func newConceptLinkSkillCmd(svc **service.Service, workspaceOverride *string) *c
 		Use:   "skill <concept-id> <skill-name>",
 		Short: "Link a skill to a concept",
 		Long:  `Add a skill reference to a concept's manifest. Use 'grove skills list' to see available skills.`,
-		Args:  cobra.ExactArgs(2),
+		Example: `  grove skills list                              # discover available skills
+  nb concept link skill auth concept-maintainer
+  nb concept link skill flow-execution flow-qb --json`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			conceptID := args[0]
 			skillName := args[1]
@@ -344,6 +378,8 @@ func newConceptDirCmd(svc **service.Service, workspaceOverride *string) *cobra.C
 		Use:   "dir",
 		Short: "Get the concepts directory for the current workspace",
 		Long:  `Returns the absolute path to the concepts directory in the notebook linked to the current workspace.`,
+		Example: `  nb concept dir
+  ls $(nb concept dir)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, err := (*svc).GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
@@ -370,7 +406,10 @@ func newConceptPathCmd(svc **service.Service, workspaceOverride *string) *cobra.
 		Use:   "path <concept-id>",
 		Short: "Get the path to a concept directory",
 		Long:  `Returns the absolute path to a concept's directory.`,
-		Args:  cobra.ExactArgs(1),
+		Example: `  nb concept path authentication
+  cat $(nb concept path authentication)/overview.md
+  nb concept path auth --json | jq -r .path`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			conceptID := args[0]
 
@@ -411,7 +450,10 @@ func newConceptSearchCmd(svc **service.Service, workspaceOverride *string) *cobr
 		Use:   "search <query>",
 		Short: "Search concepts across all workspaces",
 		Long:  `Search for a query string within concept files across the entire ecosystem.`,
-		Args:  cobra.ExactArgs(1),
+		Example: `  nb concept search "auth"
+  nb concept search "session" --ecosystem --json
+  nb concept search "workspace" --ecosystem --files-only --json`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query := args[0]
 
