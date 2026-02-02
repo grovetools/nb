@@ -1,0 +1,10 @@
+name = "nb"
+description = "Notebook and documentation management"
+managed = true
+
+[binary]
+name = "nb"
+path = "./bin/nb"
+
+[context]
+default_rules_path = ".cx/dev-no-tests.rules"
