@@ -1,3 +1,61 @@
+## v0.6.0 (2026-02-02)
+
+This release enhances the concept management system with ecosystem-wide discovery, search capabilities, and skill linking support (407a497, 8d6be38). It also includes fixes for path resolution when pasting into plan directories (af5831e) and updates internal utilities for format-preserving frontmatter modifications (7f6c18c). Infrastructure changes include migrating configuration to `grove.toml` (a2d48d9) and adopting XDG-compliant paths (a01e8cb).
+
+### Features
+- Add ecosystem-wide discovery, search, and JSON output for concepts (407a497)
+- Add skill linking support to concept commands (8d6be38)
+- Add frontmatter updater utilities for format-preserving YAML updates (7f6c18c)
+
+### Bug Fixes
+- Correct paste destination path and metadata for plan directories (af5831e)
+- Update VERSION_PKG to grovetools/core path for correct build versions (84397e5)
+- Remove headers and images from overview documentation (dfab7a3)
+
+### Documentation
+- Add examples to all concept command help text (83a32c6)
+- Add concept lookup instructions to developer guide (7da2217)
+- Update README and overview content (db0d31e)
+
+### Maintenance
+- Restore release workflow (a336f66)
+- Add MIT License (7633a33)
+- Migrate grove.yml configuration to grove.toml (a2d48d9)
+- Migrate to XDG-compliant paths package from grove-core (a01e8cb)
+- Move documentation generation templates and rules to notebook structure (2d07b89)
+- Remove legacy docgen files from repository (3f7fee5)
+- Move docs.rules to .cx directory (a2e09d3)
+- Update module dependencies for grovetools migration (c514f26)
+
+### File Changes
+```
+ .cx/docs.rules                        |   6 +
+ .github/workflows/release.yml         | 103 +----
+ CLAUDE.md                             |  15 +-
+ LICENSE                               |  21 +
+ Makefile                              |   2 +-
+ README.md                             |  73 ++--
+ cmd/concept.go                        | 398 ++++++++++++++++++-
+ cmd/migrate.go                        |   3 +-
+ docs/01-overview.md                   |  73 ++--
+ docs/README.md.tpl                    |   5 -
+ docs/docgen.config.yml                |  54 ---
+ docs/docs.rules                       |   1 -
+ go.mod                                |   7 +-
+ go.sum                                |  41 +-
+ grove.toml                            |  10 +
+ grove.yml                             |   9 -
+ internal/tui/browser/model.go         |   7 +-
+ internal/tui/browser/update.go        |   8 +-
+ pkg/docs/docs.json                    |  68 +---
+ pkg/service/frontmatter_updater.go    | 233 +++++++++++
+ pkg/service/note.go                   |   8 +-
+ pkg/service/service.go                | 710 +++++++++++++++++++++++++++++++++-
+ tests/e2e/main.go                     |   1 +
+ tests/e2e/scenarios_notebook_paste.go | 690 +++++++++++++++++++++++++++++++++
+ 24 files changed, 2226 insertions(+), 320 deletions(-)
+```
+
 ## v0.3.1-nightly.403ebaa (2025-10-03)
 
 ## v0.2.14 (2025-10-01)
