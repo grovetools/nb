@@ -249,3 +249,15 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 
 	return km
 }
+
+// KeymapInfo returns the keymap metadata for the nb browser TUI.
+// Used by the grove keys registry generator to aggregate all TUI keybindings.
+func KeymapInfo() keymap.TUIInfo {
+	km := NewKeyMap(nil)
+	return keymap.MakeTUIInfo(
+		"nb-browser",
+		"nb",
+		"Notebook browser and note manager",
+		km,
+	)
+}
