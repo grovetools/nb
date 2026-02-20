@@ -55,47 +55,52 @@ func (k KeyMap) ShortHelp() []key.Binding {
 }
 
 // Sections returns all keybinding sections for the browser TUI.
-// It includes the base sections plus browser-specific sections.
+// Only includes sections that the browser actually implements.
 func (k KeyMap) Sections() []keymap.Section {
-	return append(k.Base.Sections(),
-		keymap.Section{
+	return []keymap.Section{
+		k.Base.NavigationSection(),
+		k.Base.SelectionSection(),
+		k.Base.SearchSection(),
+		k.Base.FoldSection(),
+		{
 			Name: "Focus",
 			Bindings: []key.Binding{
 				k.FocusEcosystem, k.ClearFocus, k.FocusParent,
 				k.FocusSelected, k.FocusRecent, k.JumpToWorkspace,
 			},
 		},
-		keymap.Section{
+		{
 			Name: "Filter",
 			Bindings: []key.Binding{k.FilterByTag, k.ToggleGitChanges, k.Sort},
 		},
-		keymap.Section{
+		{
 			Name: "Toggle",
 			Bindings: []key.Binding{
 				k.ToggleArchives, k.ToggleArtifacts, k.ToggleGlobal,
 				k.ToggleHold, k.ToggleColumns,
 			},
 		},
-		keymap.Section{
+		{
 			Name: "Notes",
 			Bindings: []key.Binding{
 				k.CreateNote, k.CreateNoteInbox, k.CreateNoteGlobal,
 				k.CreatePlan, k.Rename,
 			},
 		},
-		keymap.Section{
+		{
 			Name: "Clipboard",
 			Bindings: []key.Binding{k.Cut, k.Copy, k.Paste, k.Archive},
 		},
-		keymap.Section{
+		{
 			Name: "Git",
 			Bindings: []key.Binding{k.GitStageToggle, k.GitStageAll, k.GitUnstageAll, k.GitCommit},
 		},
-		keymap.Section{
+		{
 			Name: "Misc",
 			Bindings: []key.Binding{k.Preview, k.Refresh, k.Sync},
 		},
-	)
+		k.Base.SystemSection(),
+	}
 }
 
 // NewKeyMap creates a new KeyMap with user configuration applied.
