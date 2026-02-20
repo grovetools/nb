@@ -21,6 +21,7 @@ import (
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
+	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/nb/internal/tui/browser/components/confirm"
 	"github.com/grovetools/nb/internal/tui/browser/views"
@@ -40,7 +41,7 @@ type Model struct {
 	width      int
 	height     int
 	filterInput textinput.Model
-	lastKey             string // For detecting 'gg' and 'z' sequences
+	sequence    *keymap.SequenceState // For detecting multi-key sequences (gg, dd, z*)
 	showArchives        bool   // Whether to show .archive and .closed directories
 	showArtifacts       bool   // Whether to show .artifacts directories
 	hideGlobal          bool   // Whether to hide the global workspace node
@@ -138,6 +139,9 @@ type quitPopupMsg struct{}
 
 // New creates a new TUI model.
 func New(svc *service.Service, initialFocus *workspace.WorkspaceNode, ctx *service.WorkspaceContext) Model {
+	// Load user-configurable keybindings
+	keys := NewKeyMap(svc.CoreConfig)
+
 	helpModel := help.NewBuilder().
 		WithKeys(keys).
 		WithTitle("Notebook Browser - Help").
@@ -239,16 +243,21 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode, ctx *servi
 	tagPicker.SetShowPagination(false)
 
 	// Initialize views with KeyMap converted to views.KeyMap
+	// Use Base fields for standard navigation/fold bindings
 	viewsKeys := views.KeyMap{
 		Up:           keys.Up,
 		Down:         keys.Down,
+		Left:         keys.Left,
+		Right:        keys.Right,
 		PageUp:       keys.PageUp,
 		PageDown:     keys.PageDown,
-		GoToTop:      keys.GoToTop,
-		GoToBottom:   keys.GoToBottom,
-		Fold:         keys.Fold,
-		Unfold:       keys.Unfold,
-		FoldPrefix:   keys.FoldPrefix,
+		Top:          keys.Top,
+		Bottom:       keys.Bottom,
+		FoldOpen:     keys.FoldOpen,
+		FoldClose:    keys.FoldClose,
+		FoldToggle:   keys.FoldToggle,
+		FoldOpenAll:  keys.FoldOpenAll,
+		FoldCloseAll: keys.FoldCloseAll,
 		ToggleSelect: keys.ToggleSelect,
 		SelectNone:   keys.SelectNone,
 	}
@@ -265,6 +274,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode, ctx *servi
 		keys:              keys,
 		help:              helpModel,
 		filterInput:       ti,
+		sequence:          keymap.NewSequenceState(),
 		spinner:           s,
 		loadingCount:      2, // For initial workspaces + notes load
 		showArchives:      false, // Default to hiding archives

@@ -15,16 +15,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/nb/internal/tui/browser/components/confirm"
 	"github.com/grovetools/nb/internal/tui/browser/views"
-	"github.com/sirupsen/logrus"
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/sync"
 	"github.com/grovetools/nb/pkg/sync/github"
-	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/nb/pkg/tree"
+	"github.com/sirupsen/logrus"
 )
 
 // updateViewsState synchronizes the view state with the browser model
@@ -578,8 +579,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.help.ShowAll {
-			m.help.Toggle()
-			return m, nil
+			// Let help component handle keys (scrolling, close on ?/q/esc)
+			var cmd tea.Cmd
+			m.help, cmd = m.help.Update(msg)
+			return m, cmd
 		}
 
 		// Handle active components first
@@ -701,27 +704,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Process sequence state for browser-level sequences (dd for delete)
+		sequenceBindings := keymap.CommonSequenceBindings(m.keys.Base)
+		seqResult, _ := m.sequence.Process(msg, sequenceBindings...)
+		buffer := m.sequence.Buffer()
+
 		// Try delegating to views for navigation, folding, and selection
-		// Views.Update handles: Up, Down, PageUp, PageDown, GoToTop, GoToBottom,
-		// Fold (h), Unfold (l), FoldPrefix (z), all z* fold commands,
+		// Views.Update handles: Up, Down, Left, Right, PageUp, PageDown, Top, Bottom,
+		// FoldOpen (zo), FoldClose (zc), FoldToggle (za), FoldOpenAll (zR), FoldCloseAll (zM),
 		// ToggleSelect (space), SelectNone (N)
+		isFoldPrefix := keymap.IsPrefixOfAny(buffer, m.keys.FoldOpen, m.keys.FoldClose, m.keys.FoldToggle, m.keys.FoldOpenAll, m.keys.FoldCloseAll)
+		isFoldMatch := keymap.Matches(buffer, m.keys.FoldOpen) || keymap.Matches(buffer, m.keys.FoldClose) ||
+			keymap.Matches(buffer, m.keys.FoldToggle) || keymap.Matches(buffer, m.keys.FoldOpenAll) ||
+			keymap.Matches(buffer, m.keys.FoldCloseAll)
+		isTopSequence := keymap.IsPrefixOfAny(buffer, m.keys.Top) || keymap.Matches(buffer, m.keys.Top)
+
 		if key.Matches(msg, m.keys.Up) || key.Matches(msg, m.keys.Down) ||
+			key.Matches(msg, m.keys.Left) || key.Matches(msg, m.keys.Right) ||
 			key.Matches(msg, m.keys.PageUp) || key.Matches(msg, m.keys.PageDown) ||
-			key.Matches(msg, m.keys.GoToTop) || key.Matches(msg, m.keys.GoToBottom) ||
-			key.Matches(msg, m.keys.Fold) || key.Matches(msg, m.keys.Unfold) ||
-			key.Matches(msg, m.keys.FoldPrefix) ||
-			msg.String() == "a" ||
-			msg.String() == "o" || msg.String() == "O" ||
-			(msg.String() == "c" && m.lastKey == "z") || (msg.String() == "C" && m.lastKey == "z") ||
-			msg.String() == "M" || msg.String() == "R" ||
-			(msg.String() == "A" && m.lastKey == "z") || // zA fold command
+			key.Matches(msg, m.keys.Bottom) ||
+			isFoldPrefix || isFoldMatch || isTopSequence ||
 			key.Matches(msg, m.keys.ToggleSelect) ||
 			key.Matches(msg, m.keys.SelectNone) {
-			// Track 'z' for fold sequences
-			if key.Matches(msg, m.keys.FoldPrefix) {
-				m.lastKey = "z"
-			} else if m.lastKey == "z" {
-				m.lastKey = "" // Reset after any z* sequence
+			// Clear browser sequence only when we've completed a sequence or it's a non-sequence key
+			// Don't clear when we're in the middle of a fold/top sequence (prefix match)
+			if !isFoldPrefix && !keymap.IsPrefixOfAny(buffer, m.keys.Top) && !key.Matches(msg, m.keys.Delete) {
+				m.sequence.Clear()
 			}
 			m.views, cmd = m.views.Update(msg)
 			// After any view update that could change the cursor, update the preview.
@@ -802,7 +810,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Re-fetch notes for the newly focused workspace
 				return m, tea.Batch(fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
 			}
-		case key.Matches(msg, m.keys.ToggleView):
+		case key.Matches(msg, m.keys.SwitchView):
 			m.views.ToggleViewMode()
 		case key.Matches(msg, m.keys.FocusRecent):
 			m.recentNotesMode = !m.recentNotesMode
@@ -895,17 +903,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.ToggleGlobal):
 			m.hideGlobal = !m.hideGlobal
 			m.updateViewsState()
-		case key.Matches(msg, m.keys.Delete):
-			if m.lastKey == "d" { // This is the second 'd'
-				pathsToDelete := m.views.GetTargetedNotePaths()
-				if len(pathsToDelete) > 0 {
-					prompt := fmt.Sprintf("Permanently delete %d note(s)? This cannot be undone.", len(pathsToDelete))
-					m.confirmDialog.Activate(prompt)
-				}
-				m.lastKey = "" // Reset sequence
-			} else {
-				m.lastKey = "d" // This is the first 'd'
+		case seqResult == keymap.SequenceMatch && keymap.Matches(buffer, m.keys.Delete):
+			// dd - delete selected notes
+			pathsToDelete := m.views.GetTargetedNotePaths()
+			if len(pathsToDelete) > 0 {
+				prompt := fmt.Sprintf("Permanently delete %d note(s)? This cannot be undone.", len(pathsToDelete))
+				m.confirmDialog.Activate(prompt)
 			}
+			m.sequence.Clear()
+		case key.Matches(msg, m.keys.Delete):
+			// First 'd' press - sequence state is tracking it, just wait
 		case key.Matches(msg, m.keys.Cut):
 			paths := m.views.GetTargetedNotePaths()
 			if len(paths) > 0 {
@@ -1104,9 +1111,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		default:
-			// Reset lastKey for any other key press (for gg, dd and z* detection)
-			if !key.Matches(msg, m.keys.GoToTop) && !key.Matches(msg, m.keys.FoldPrefix) && !key.Matches(msg, m.keys.Delete) {
-				m.lastKey = ""
+			// Clear sequence buffer for keys that aren't part of sequences
+			// unless we're in the middle of a potential sequence
+			if seqResult != keymap.SequencePending {
+				m.sequence.Clear()
 			}
 		}
 

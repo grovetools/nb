@@ -2,6 +2,7 @@ package views
 
 import (
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/tree"
 )
@@ -97,9 +98,9 @@ type Model struct {
 	selectedGroups   map[string]struct{}
 	cutPaths         map[string]struct{}
 	columnVisibility map[string]bool
-	width            int
-	height           int
-	lastKey          string // For detecting 'gg' and 'z' sequences
+	width    int
+	height   int
+	sequence *keymap.SequenceState // For detecting multi-key sequences (gg, z*)
 
 	// References to parent (browser) state for rendering
 	service             *service.Service
@@ -136,6 +137,7 @@ func New(keys KeyMap, columnVisibility map[string]bool) Model {
 		selectedGroups:   make(map[string]struct{}),
 		cutPaths:         make(map[string]struct{}),
 		columnVisibility: columnVisibility,
+		sequence:         keymap.NewSequenceState(),
 	}
 }
 

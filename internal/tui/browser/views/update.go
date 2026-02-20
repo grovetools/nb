@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/tree"
@@ -47,18 +48,37 @@ type treeRenderConfig struct {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Define bindings that use sequences
+		sequenceBindings := []key.Binding{
+			m.keys.Top,          // gg
+			m.keys.FoldOpen,     // zo
+			m.keys.FoldClose,    // zc
+			m.keys.FoldToggle,   // za
+			m.keys.FoldOpenAll,  // zR
+			m.keys.FoldCloseAll, // zM
+		}
+
+		// Process the key through sequence state
+		result, _ := m.sequence.Process(msg, sequenceBindings...)
+
+		// Get the current buffer for checking fold sequences
+		buffer := m.sequence.Buffer()
+
 		switch {
 		case key.Matches(msg, m.keys.Up):
+			m.sequence.Clear()
 			if m.cursor > 0 {
 				m.cursor--
 				m.adjustScroll()
 			}
 		case key.Matches(msg, m.keys.Down):
+			m.sequence.Clear()
 			if m.cursor < len(m.displayNodes)-1 {
 				m.cursor++
 				m.adjustScroll()
 			}
 		case key.Matches(msg, m.keys.PageUp):
+			m.sequence.Clear()
 			pageSize := m.getViewportHeight() / 2
 			if pageSize < 1 {
 				pageSize = 1
@@ -69,6 +89,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			m.adjustScroll()
 		case key.Matches(msg, m.keys.PageDown):
+			m.sequence.Clear()
 			pageSize := m.getViewportHeight() / 2
 			if pageSize < 1 {
 				pageSize = 1
@@ -78,60 +99,52 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.cursor = len(m.displayNodes) - 1
 			}
 			m.adjustScroll()
-		case key.Matches(msg, m.keys.GoToTop):
-			// Handle 'gg' - go to top when g is pressed twice
-			if m.lastKey == "g" {
-				m.cursor = 0
-				m.adjustScroll()
-				m.lastKey = ""
-			} else {
-				m.lastKey = "g"
-			}
-		case key.Matches(msg, m.keys.GoToBottom):
+		case result == keymap.SequenceMatch && keymap.Matches(buffer, m.keys.Top):
+			// gg - go to top
+			m.cursor = 0
+			m.adjustScroll()
+			m.sequence.Clear()
+		case key.Matches(msg, m.keys.Bottom):
+			m.sequence.Clear()
 			if len(m.displayNodes) > 0 {
 				m.cursor = len(m.displayNodes) - 1
 				m.adjustScroll()
 			}
-		case key.Matches(msg, m.keys.Fold):
+		case key.Matches(msg, m.keys.Left):
+			m.sequence.Clear()
 			m.closeFold()
-		case key.Matches(msg, m.keys.Unfold):
+		case key.Matches(msg, m.keys.Right):
+			m.sequence.Clear()
 			m.openFold()
-		case key.Matches(msg, m.keys.FoldPrefix):
-			// Handle 'z' prefix for fold commands
-			m.lastKey = "z"
-		case msg.String() == "a" && m.lastKey == "z":
-			// za - toggle fold
+		// Fold sequence commands (z*)
+		case result == keymap.SequenceMatch && keymap.Matches(buffer, m.keys.FoldToggle):
 			m.toggleFold()
-			m.lastKey = ""
-		case msg.String() == "A" && m.lastKey == "z":
-			// zA - toggle fold recursively
+			m.sequence.Clear()
+		case buffer == "zA":
 			m.toggleFoldRecursive(m.cursor)
-			m.lastKey = ""
-		case msg.String() == "o" && m.lastKey == "z":
-			// zo - open fold
+			m.sequence.Clear()
+		case result == keymap.SequenceMatch && keymap.Matches(buffer, m.keys.FoldOpen):
 			m.openFold()
-			m.lastKey = ""
-		case msg.String() == "O" && m.lastKey == "z":
-			// zO - open fold recursively
+			m.sequence.Clear()
+		case buffer == "zO":
 			m.openFoldRecursive(m.cursor)
-			m.lastKey = ""
-		case msg.String() == "c" && m.lastKey == "z":
-			// zc - close fold
+			m.sequence.Clear()
+		case result == keymap.SequenceMatch && keymap.Matches(buffer, m.keys.FoldClose):
 			m.closeFold()
-			m.lastKey = ""
-		case msg.String() == "C" && m.lastKey == "z":
-			// zC - close fold recursively
+			m.sequence.Clear()
+		case buffer == "zC":
 			m.closeFoldRecursive(m.cursor)
-			m.lastKey = ""
-		case msg.String() == "M" && m.lastKey == "z":
-			// zM - close all folds
+			m.sequence.Clear()
+		case result == keymap.SequenceMatch && keymap.Matches(buffer, m.keys.FoldCloseAll):
 			m.closeAllFolds()
-			m.lastKey = ""
-		case msg.String() == "R" && m.lastKey == "z":
-			// zR - open all folds
+			m.sequence.Clear()
+		case result == keymap.SequenceMatch && keymap.Matches(buffer, m.keys.FoldOpenAll):
 			m.openAllFolds()
-			m.lastKey = ""
+			m.sequence.Clear()
+		case result == keymap.SequencePending:
+			// z was pressed, sequence state already has it, just wait for more input
 		case key.Matches(msg, m.keys.ToggleSelect):
+			m.sequence.Clear()
 			// Toggle selection for the current note or plan group
 			if m.cursor < len(m.displayNodes) {
 				node := m.displayNodes[m.cursor]
@@ -153,13 +166,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 		case key.Matches(msg, m.keys.SelectNone):
+			m.sequence.Clear()
 			// Clear all selections
 			m.selected = make(map[string]struct{})
 			m.selectedGroups = make(map[string]struct{})
 		default:
-			// Reset lastKey for any other key press (for gg and z* detection)
-			if !key.Matches(msg, m.keys.GoToTop) && !key.Matches(msg, m.keys.FoldPrefix) {
-				m.lastKey = ""
+			// Clear sequence buffer for keys that aren't part of sequences
+			// unless we're in the middle of a potential sequence
+			if result != keymap.SequencePending {
+				m.sequence.Clear()
 			}
 		}
 	}
