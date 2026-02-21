@@ -712,7 +712,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Try delegating to views for navigation, folding, and selection
 		// Views.Update handles: Up, Down, Left, Right, PageUp, PageDown, Top, Bottom,
 		// FoldOpen (zo), FoldClose (zc), FoldToggle (za), FoldOpenAll (zR), FoldCloseAll (zM),
-		// ToggleSelect (space), SelectNone (N)
+		// Select (space), SelectNone (N)
 		isFoldPrefix := keymap.IsPrefixOfAny(buffer, m.keys.FoldOpen, m.keys.FoldClose, m.keys.FoldToggle, m.keys.FoldOpenAll, m.keys.FoldCloseAll)
 		isFoldMatch := keymap.Matches(buffer, m.keys.FoldOpen) || keymap.Matches(buffer, m.keys.FoldClose) ||
 			keymap.Matches(buffer, m.keys.FoldToggle) || keymap.Matches(buffer, m.keys.FoldOpenAll) ||
@@ -724,7 +724,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			key.Matches(msg, m.keys.PageUp) || key.Matches(msg, m.keys.PageDown) ||
 			key.Matches(msg, m.keys.Bottom) ||
 			isFoldPrefix || isFoldMatch || isTopSequence ||
-			key.Matches(msg, m.keys.ToggleSelect) ||
+			key.Matches(msg, m.keys.Select) ||
 			key.Matches(msg, m.keys.SelectNone) {
 			// Clear browser sequence only when we've completed a sequence or it's a non-sequence key
 			// Don't clear when we're in the middle of a fold/top sequence (prefix match)

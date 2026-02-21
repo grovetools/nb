@@ -258,7 +258,7 @@ func New(svc *service.Service, initialFocus *workspace.WorkspaceNode, ctx *servi
 		FoldToggle:   keys.FoldToggle,
 		FoldOpenAll:  keys.FoldOpenAll,
 		FoldCloseAll: keys.FoldCloseAll,
-		ToggleSelect: keys.ToggleSelect,
+		Select: keys.Select,
 		SelectNone:   keys.SelectNone,
 	}
 	viewsModel := views.New(viewsKeys, columnVisibility)

@@ -186,8 +186,8 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("P", "promote note to plan"),
 		),
 		Rename: key.NewBinding(
-			key.WithKeys("r"),
-			key.WithHelp("r", "rename note"),
+			key.WithKeys("R"),
+			key.WithHelp("R", "rename note"),
 		),
 		// Clipboard operations
 		Cut: key.NewBinding(

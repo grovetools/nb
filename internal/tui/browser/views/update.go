@@ -143,7 +143,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.sequence.Clear()
 		case result == keymap.SequencePending:
 			// z was pressed, sequence state already has it, just wait for more input
-		case key.Matches(msg, m.keys.ToggleSelect):
+		case key.Matches(msg, m.keys.Select):
 			m.sequence.Clear()
 			// Toggle selection for the current note or plan group
 			if m.cursor < len(m.displayNodes) {

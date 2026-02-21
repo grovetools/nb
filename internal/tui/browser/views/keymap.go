@@ -18,6 +18,6 @@ type KeyMap struct {
 	FoldToggle   key.Binding // za
 	FoldOpenAll  key.Binding // zR
 	FoldCloseAll key.Binding // zM
-	ToggleSelect key.Binding
+	Select key.Binding
 	SelectNone   key.Binding
 }
