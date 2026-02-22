@@ -933,14 +933,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.views.SetCutPaths(make(map[string]struct{})) // Clear cut visual
 				m.statusMessage = fmt.Sprintf("Copied %d note(s) to clipboard", len(paths))
 			}
-		case key.Matches(msg, m.keys.Yank):
+		case key.Matches(msg, m.keys.Yank), key.Matches(msg, m.keys.CopyPath):
 			node := m.views.GetCurrentNode()
 			if node != nil && node.Item != nil {
 				path := node.Item.Path
+				// For workspace roots, get the notebook workspace path (parent of notes dir)
+				if node.Item.Type == tree.TypeWorkspace {
+					for _, ws := range m.workspaces {
+						if ws.Name == node.Item.Name {
+							if notesDir, err := m.service.GetNotebookLocator().GetNotesDir(ws, ""); err == nil {
+								path = filepath.Dir(notesDir) // Parent of notes dir is workspace root
+							}
+							break
+						}
+					}
+				}
 				if err := clipboard.WriteAll(path); err != nil {
-					m.statusMessage = fmt.Sprintf("Error yanking path: %v", err)
+					m.statusMessage = fmt.Sprintf("Error copying path: %v", err)
 				} else {
-					m.statusMessage = fmt.Sprintf("Yanked: %s", shortenPath(path))
+					m.statusMessage = fmt.Sprintf("Copied: %s", shortenPath(path))
 				}
 			}
 			return m, nil

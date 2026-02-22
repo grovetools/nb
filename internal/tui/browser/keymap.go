@@ -89,7 +89,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		},
 		{
 			Name: "Clipboard",
-			Bindings: []key.Binding{k.Cut, k.Copy, k.Paste, k.Archive},
+			Bindings: []key.Binding{k.Cut, k.Copy, k.Paste, k.Archive, k.CopyPath},
 		},
 		{
 			Name: "Git",
