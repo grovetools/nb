@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/core/tui/theme"
 )
 
 // KeyMap defines the keybindings for the browser TUI.
@@ -62,43 +63,32 @@ func (k KeyMap) Sections() []keymap.Section {
 		k.Base.SelectionSection(),
 		k.Base.SearchSection(),
 		k.Base.FoldSection(),
-		{
-			Name: "Focus",
-			Bindings: []key.Binding{
-				k.FocusEcosystem, k.ClearFocus, k.FocusParent,
-				k.FocusSelected, k.FocusRecent, k.JumpToWorkspace,
-			},
-		},
-		{
-			Name: "Filter",
-			Bindings: []key.Binding{k.FilterByTag, k.ToggleGitChanges, k.Sort},
-		},
-		{
-			Name: "Toggle",
-			Bindings: []key.Binding{
-				k.ToggleArchives, k.ToggleArtifacts, k.ToggleGlobal,
-				k.ToggleHold, k.ToggleColumns,
-			},
-		},
-		{
-			Name: "Notes",
-			Bindings: []key.Binding{
-				k.CreateNote, k.CreateNoteInbox, k.CreateNoteGlobal,
-				k.CreatePlan, k.Rename,
-			},
-		},
-		{
-			Name: "Clipboard",
-			Bindings: []key.Binding{k.Cut, k.Copy, k.Paste, k.Archive, k.CopyPath},
-		},
-		{
-			Name: "Git",
-			Bindings: []key.Binding{k.GitStageToggle, k.GitStageAll, k.GitUnstageAll, k.GitCommit},
-		},
-		{
-			Name: "Misc",
-			Bindings: []key.Binding{k.Preview, k.Refresh, k.Sync},
-		},
+		// Common sections use standard constants (icons auto-resolved)
+		keymap.NewSection(keymap.SectionFocus,
+			k.FocusEcosystem, k.ClearFocus, k.FocusParent,
+			k.FocusSelected, k.FocusRecent, k.JumpToWorkspace,
+		),
+		keymap.NewSection(keymap.SectionFilter,
+			k.FilterByTag, k.ToggleGitChanges, k.Sort,
+		),
+		keymap.NewSection(keymap.SectionToggle,
+			k.ToggleArchives, k.ToggleArtifacts, k.ToggleGlobal,
+			k.ToggleHold, k.ToggleColumns,
+		),
+		// TUI-specific sections use explicit icons
+		keymap.NewSectionWithIcon("Notes", theme.IconNote,
+			k.CreateNote, k.CreateNoteInbox, k.CreateNoteGlobal,
+			k.CreatePlan, k.Rename,
+		),
+		keymap.NewSectionWithIcon("Clipboard", theme.IconArchive,
+			k.Cut, k.Copy, k.Paste, k.Archive, k.CopyPath,
+		),
+		keymap.NewSection(keymap.SectionGit,
+			k.GitStageToggle, k.GitStageAll, k.GitUnstageAll, k.GitCommit,
+		),
+		keymap.NewSectionWithIcon("Misc", theme.IconGear,
+			k.Preview, k.Refresh, k.Sync,
+		),
 		k.Base.SystemSection(),
 	}
 }
