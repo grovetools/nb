@@ -230,7 +230,8 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 
 	// Apply TUI-specific overrides from config (uses reflection to map all bindings)
 	if cfg != nil && cfg.TUI != nil && cfg.TUI.Keybindings != nil {
-		if nbOverrides, ok := cfg.TUI.Keybindings.Overrides["nb"]; ok {
+		tuiOverrides := cfg.TUI.Keybindings.GetTUIOverrides()
+		if nbOverrides, ok := tuiOverrides["nb"]; ok {
 			if overrides, ok := nbOverrides["browser"]; ok {
 				keymap.ApplyOverrides(&km, overrides)
 			}
