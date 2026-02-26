@@ -81,6 +81,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewRemoteCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewGitCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewConceptCmd(&svc, &workspaceOverride))
+	rootCmd.AddCommand(cmd.NewSyncthingCmd(&svc, &workspaceOverride))
 
 	if err := cli.Execute(rootCmd); err != nil {
 		os.Exit(1)

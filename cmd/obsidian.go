@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -18,7 +20,178 @@ func NewObsidianCmd(svc **service.Service, workspaceOverride *string) *cobra.Com
 	}
 
 	cmd.AddCommand(newObsidianInstallCmd())
+	cmd.AddCommand(newObsidianSetupCmd(svc, workspaceOverride))
 
+	return cmd
+}
+
+func newObsidianSetupCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	var notebookLevel bool
+
+	cmd := &cobra.Command{
+		Use:   "setup",
+		Short: "Initialize an Obsidian vault",
+		Long: `Initializes the current workspace (or entire notebook root) as an Obsidian vault.
+It creates the .obsidian directory and sets up default preferences (like strict line breaks).`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s := *svc
+
+			// 1. Resolve Target Directory
+			wsCtx, err := s.GetWorkspaceContext(*workspaceOverride)
+			if err != nil {
+				return fmt.Errorf("getting workspace context: %w", err)
+			}
+
+			locator := s.GetNotebookLocator()
+			samplePath, err := locator.GetNotesDir(wsCtx.NotebookContextWorkspace, "inbox")
+			if err != nil {
+				return fmt.Errorf("could not resolve notebook path: %w", err)
+			}
+
+			// Target the workspace directory
+			targetDir := filepath.Dir(samplePath)
+
+			if notebookLevel {
+				parent := filepath.Dir(targetDir)
+				if filepath.Base(parent) == "workspaces" {
+					targetDir = filepath.Dir(parent)
+				} else {
+					targetDir = parent
+				}
+			}
+
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Initializing Obsidian vault at: %s\n", targetDir)
+
+			// 2. Get notebook config
+			nbName := wsCtx.NotebookContextWorkspace.NotebookName
+			if nbName == "" {
+				if s.CoreConfig.Notebooks.Rules != nil && s.CoreConfig.Notebooks.Rules.Default != "" {
+					nbName = s.CoreConfig.Notebooks.Rules.Default
+				} else {
+					nbName = "main"
+				}
+			}
+
+			obsidianDir := filepath.Join(targetDir, ".obsidian")
+
+			// 3. Check if template_repo is configured
+			var templateRepo string
+			if nbDef, ok := s.CoreConfig.Notebooks.Definitions[nbName]; ok && nbDef.Obsidian != nil {
+				templateRepo = nbDef.Obsidian.TemplateRepo
+			}
+
+			if templateRepo != "" {
+				// Clone template repo and copy .obsidian contents
+				fmt.Fprintf(out, "* Using template from: %s\n", templateRepo)
+
+				// Create temp directory
+				tempDir, err := os.MkdirTemp("", "obsidian-template-")
+				if err != nil {
+					return fmt.Errorf("failed to create temp directory: %w", err)
+				}
+				defer os.RemoveAll(tempDir)
+
+				// Clone the repo
+				cloneCmd := exec.Command("git", "clone", "--depth", "1", templateRepo, tempDir)
+				cloneCmd.Stdout = io.Discard
+				cloneCmd.Stderr = out
+				if err := cloneCmd.Run(); err != nil {
+					return fmt.Errorf("failed to clone template repo: %w", err)
+				}
+
+				// Copy .obsidian contents (or root if no .obsidian dir)
+				sourceDir := filepath.Join(tempDir, ".obsidian")
+				if _, err := os.Stat(sourceDir); os.IsNotExist(err) {
+					// No .obsidian subdir, use repo root (excluding .git)
+					sourceDir = tempDir
+				}
+
+				// Create target .obsidian directory
+				if err := os.MkdirAll(obsidianDir, 0755); err != nil {
+					return fmt.Errorf("failed to create .obsidian directory: %w", err)
+				}
+
+				// Copy files from template
+				err = filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
+					if err != nil {
+						return err
+					}
+
+					// Skip .git directory
+					if info.IsDir() && info.Name() == ".git" {
+						return filepath.SkipDir
+					}
+
+					relPath, err := filepath.Rel(sourceDir, path)
+					if err != nil {
+						return err
+					}
+
+					destPath := filepath.Join(obsidianDir, relPath)
+
+					if info.IsDir() {
+						return os.MkdirAll(destPath, info.Mode())
+					}
+
+					// Copy file
+					srcFile, err := os.Open(path)
+					if err != nil {
+						return err
+					}
+					defer srcFile.Close()
+
+					destFile, err := os.Create(destPath)
+					if err != nil {
+						return err
+					}
+					defer destFile.Close()
+
+					if _, err := io.Copy(destFile, srcFile); err != nil {
+						return err
+					}
+
+					return os.Chmod(destPath, info.Mode())
+				})
+				if err != nil {
+					return fmt.Errorf("failed to copy template files: %w", err)
+				}
+
+				fmt.Fprintln(out, "* Copied template configuration")
+			} else {
+				// No template - create basic .obsidian with default app.json
+				if err := os.MkdirAll(obsidianDir, 0755); err != nil {
+					return fmt.Errorf("failed to create .obsidian directory: %w", err)
+				}
+
+				appJsonPath := filepath.Join(obsidianDir, "app.json")
+				appJsonContent := `{
+  "strictLineBreaks": true,
+  "attachmentFolderPath": ".attachments",
+  "newFileLocation": "current"
+}`
+				// Only write if it doesn't exist so we don't overwrite user settings
+				if _, err := os.Stat(appJsonPath); os.IsNotExist(err) {
+					if err := os.WriteFile(appJsonPath, []byte(appJsonContent), 0644); err != nil {
+						return fmt.Errorf("failed to write app.json: %w", err)
+					}
+					fmt.Fprintln(out, "* Created default app.json")
+				}
+			}
+
+			// 4. Handle AutoLinkPlugin if configured
+			if nbDef, ok := s.CoreConfig.Notebooks.Definitions[nbName]; ok && nbDef.Obsidian != nil {
+				if nbDef.Obsidian.AutoLinkPlugin {
+					fmt.Fprintln(out, "Note: auto_link_plugin is enabled in config, but plugin linking must currently be done manually using 'nb obsidian install-dev'.")
+				}
+			}
+
+			fmt.Fprintln(out, "\nSuccess! You can now open this folder as a vault in Obsidian.")
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&notebookLevel, "notebook", "n", false, "Initialize vault at the entire notebook root rather than just the current workspace")
 	return cmd
 }
 
