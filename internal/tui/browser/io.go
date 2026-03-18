@@ -1,12 +1,16 @@
 package browser
 
 import (
+	"context"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/nb/pkg/service"
@@ -23,6 +27,18 @@ type itemsLoadedMsg struct {
 
 func fetchFocusedItemsCmd(svc *service.Service, focusedWS *workspace.WorkspaceNode, showArtifacts bool) tea.Cmd {
 	return func() tea.Msg {
+		// Try daemon index first for fast startup
+		if items := tryDaemonIndex(focusedWS, svc); len(items) > 0 {
+			if !showArtifacts {
+				items = filterOutArtifacts(items)
+			}
+			sort.Slice(items, func(i, j int) bool {
+				return items[i].ModTime.After(items[j].ModTime)
+			})
+			return itemsLoadedMsg{items: items}
+		}
+
+		// Fall back to filesystem walk
 		var itemsToLoad []*workspace.WorkspaceNode
 		itemsToLoad = append(itemsToLoad, focusedWS)
 
@@ -77,6 +93,123 @@ func fetchFocusedItemsCmd(svc *service.Service, focusedWS *workspace.WorkspaceNo
 		})
 		return itemsLoadedMsg{items: allItems}
 	}
+}
+
+// tryDaemonIndex attempts to fetch note index entries from the daemon.
+// Returns nil if the daemon is unavailable or returns no entries.
+func tryDaemonIndex(focusedWS *workspace.WorkspaceNode, svc *service.Service) []*tree.Item {
+	client := daemon.New()
+	defer client.Close()
+
+	if !client.IsRunning() {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var allEntries []*models.NoteIndexEntry
+
+	if focusedWS.IsEcosystem() {
+		// For ecosystems, fetch all entries at once (no workspace filter)
+		// and also load children — the ecosystem name itself won't match any entries
+		// since they're stored under child workspace names.
+		all, err := client.GetNoteIndex(ctx, "")
+		if err != nil {
+			return nil
+		}
+		// Build set of child workspace names for filtering
+		childNames := make(map[string]bool)
+		childNames[focusedWS.Name] = true
+		allWorkspaces := svc.GetWorkspaceProvider().All()
+		for _, ws := range allWorkspaces {
+			if ws.IsChildOf(focusedWS.Path) {
+				childNames[ws.Name] = true
+			}
+		}
+		for _, e := range all {
+			if childNames[e.Workspace] {
+				allEntries = append(allEntries, e)
+			}
+		}
+	} else {
+		// Single workspace — direct filtered fetch
+		entries, err := client.GetNoteIndex(ctx, focusedWS.Name)
+		if err != nil || len(entries) == 0 {
+			return nil
+		}
+		allEntries = append(allEntries, entries...)
+	}
+
+	// Also fetch global items
+	globalEntries, err := client.GetNoteIndex(ctx, "global")
+	if err == nil {
+		allEntries = append(allEntries, globalEntries...)
+	}
+
+	if len(allEntries) == 0 {
+		return nil
+	}
+
+	return convertIndexToItems(allEntries)
+}
+
+// convertIndexToItems maps NoteIndexEntry slices to tree.Item slices.
+func convertIndexToItems(entries []*models.NoteIndexEntry) []*tree.Item {
+	seen := make(map[string]bool, len(entries))
+	items := make([]*tree.Item, 0, len(entries))
+
+	for _, e := range entries {
+		if seen[e.Path] {
+			continue
+		}
+		seen[e.Path] = true
+
+		itemType := tree.TypeNote
+		switch e.Type {
+		case "plan":
+			itemType = tree.TypePlan
+		case "artifact":
+			itemType = tree.TypeArtifact
+		case "generic":
+			itemType = tree.TypeGeneric
+		}
+
+		item := &tree.Item{
+			Path:    e.Path,
+			Name:    e.Name,
+			ModTime: e.ModTime,
+			Type:    itemType,
+			Metadata: map[string]interface{}{
+				"Title":     e.Title,
+				"Tags":      e.Tags,
+				"ID":        e.ID,
+				"PlanRef":   e.PlanRef,
+				"Group":     e.Group,
+				"Workspace": e.Workspace,
+				"Path":      e.Path,
+			},
+		}
+
+		if !e.Created.IsZero() {
+			item.Metadata["Created"] = e.Created
+		}
+
+		items = append(items, item)
+	}
+
+	return items
+}
+
+// filterOutArtifacts removes artifact-type items from the slice.
+func filterOutArtifacts(items []*tree.Item) []*tree.Item {
+	filtered := make([]*tree.Item, 0, len(items))
+	for _, item := range items {
+		if item.Type != tree.TypeArtifact {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
 func fetchWorkspacesCmd(provider *workspace.Provider) tea.Cmd {

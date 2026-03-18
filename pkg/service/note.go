@@ -8,6 +8,7 @@ import (
 	"time"
 
 	coreconfig "github.com/grovetools/core/config"
+	coremodels "github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/sirupsen/logrus"
@@ -715,6 +716,15 @@ func (s *Service) RenameNote(oldPath, newTitle string) (string, error) {
 		"new_path": newPath,
 		"title":    newTitle,
 	}).Info("Renamed note")
+
+	ws, _, noteType := GetNoteMetadata(newPath)
+	notifyDaemonNoteEvent(coremodels.NoteEvent{
+		Event:     coremodels.NoteEventRenamed,
+		Workspace: ws,
+		NoteType:  noteType,
+		Path:      newPath,
+		PrevPath:  oldPath,
+	})
 
 	return newPath, nil
 }

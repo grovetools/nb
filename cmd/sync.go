@@ -72,6 +72,8 @@ func NewSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 				}
 			}
 
+			notifyDaemonRefreshCmd()
+
 			return nil
 		},
 	}

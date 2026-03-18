@@ -7,10 +7,14 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"sort"
+
 	"github.com/spf13/cobra"
 
 	coreconfig "github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/daemon"
+	coremodels "github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/service"
@@ -27,6 +31,7 @@ func NewListCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 		listAllWorkspaces bool
 		listAllBranches   bool
 		listTag           string
+		listCounts        bool
 	)
 
 	cmd := &cobra.Command{
@@ -98,6 +103,24 @@ Examples:
 					printNotesTable(repoNotes, s.NoteTypes)
 				}
 				return nil
+			}
+
+			// Fast-path: --workspaces --counts reads cached counts from daemon
+			if listAllWorkspaces && listCounts {
+				client := daemon.New()
+				defer client.Close()
+
+				if client.IsRunning() {
+					counts, err := client.GetNoteCounts(ctx)
+					if err == nil && len(counts) > 0 {
+						if listJSON {
+							return outputJSON_Counts(counts)
+						}
+						printCountsTable(counts)
+						return nil
+					}
+				}
+				// Fallback: daemon not available, fall through to filesystem walk
 			}
 
 			// Handle --workspaces flag first (list from all workspaces)
@@ -258,6 +281,7 @@ Examples:
 	cmd.Flags().BoolVarP(&listAllWorkspaces, "workspaces", "w", false, "List notes from all workspaces")
 	cmd.Flags().BoolVar(&listAllBranches, "all-branches", false, "List notes from all branches in the current repository")
 	cmd.Flags().StringVar(&listTag, "tag", "", "Filter notes by a specific tag")
+	cmd.Flags().BoolVar(&listCounts, "counts", false, "Show aggregate counts per workspace (fast, uses daemon cache with --workspaces)")
 
 	return cmd
 }
@@ -340,4 +364,34 @@ func outputJSON(notes []*models.Note) error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(notes)
+}
+
+func outputJSON_Counts(counts map[string]*coremodels.NoteCounts) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(counts)
+}
+
+func printCountsTable(counts map[string]*coremodels.NoteCounts) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "WORKSPACE\tINBOX\tISSUES\tDOCS\tREVIEW\tIN-PROG\tCOMPL\tOTHER")
+	fmt.Fprintln(w, "---------\t-----\t------\t----\t------\t-------\t-----\t-----")
+
+	// Sort workspace names for stable output
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		c := counts[name]
+		total := c.Inbox + c.Issues + c.Docs + c.Review + c.InProgress + c.Completed + c.Other
+		if total == 0 {
+			continue
+		}
+		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+			name, c.Inbox, c.Issues, c.Docs, c.Review, c.InProgress, c.Completed, c.Other)
+	}
+	w.Flush()
 }

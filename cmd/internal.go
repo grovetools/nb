@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"os"
 
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	grovelogging "github.com/grovetools/core/logging"
 )
 
 var internalUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.internal")
@@ -58,6 +59,15 @@ func newUpdateNoteCmd(svc **service.Service) *cobra.Command {
 			}
 
 			(*svc).Logger.WithField("path", notePath).Info("Appended content to note")
+
+			ws, _, noteType := service.GetNoteMetadata(notePath)
+			notifyDaemonNoteEventCmd(models.NoteEvent{
+				Event:     models.NoteEventUpdated,
+				Workspace: ws,
+				NoteType:  noteType,
+				Path:      notePath,
+			})
+
 			internalUlog.Success("Content appended").
 				Field("path", notePath).
 				Field("content_length", len(appendContent)).
@@ -142,6 +152,15 @@ func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 				"field": fieldName,
 				"value": fieldValue,
 			}).Info("Updated note frontmatter")
+
+			ws, _, noteType := service.GetNoteMetadata(notePath)
+			notifyDaemonNoteEventCmd(models.NoteEvent{
+				Event:     models.NoteEventUpdated,
+				Workspace: ws,
+				NoteType:  noteType,
+				Path:      notePath,
+			})
+
 			internalUlog.Success("Frontmatter updated").
 				Field("path", notePath).
 				Field("field", fieldName).

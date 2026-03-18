@@ -311,6 +311,10 @@ Examples:
 				printMigrationReport(report, migrateDryRun)
 			}
 
+			if !migrateDryRun {
+				notifyDaemonRefreshCmd()
+			}
+
 			return nil
 		},
 	}

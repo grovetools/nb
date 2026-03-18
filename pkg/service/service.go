@@ -11,6 +11,7 @@ import (
 
 	coreconfig "github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
+	coremodels "github.com/grovetools/core/pkg/models"
 	coreworkspace "github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/nb/pkg/frontmatter"
@@ -63,6 +64,14 @@ func (s *Service) CreateNoteWithContent(
 	if err != nil {
 		return nil, fmt.Errorf("parse created note: %w", err)
 	}
+
+	notifyDaemonNoteEvent(coremodels.NoteEvent{
+		Event:     coremodels.NoteEventCreated,
+		Workspace: ctx.NotebookContextWorkspace.Name,
+		NoteType:  string(noteType),
+		Path:      notePath,
+	})
+
 	return note, nil
 }
 
@@ -95,6 +104,14 @@ func (s *Service) UpdateNoteWithContent(
 		}
 	}
 
+	ws, _, noteType := GetNoteMetadata(notePath)
+	notifyDaemonNoteEvent(coremodels.NoteEvent{
+		Event:     coremodels.NoteEventUpdated,
+		Workspace: ws,
+		NoteType:  noteType,
+		Path:      notePath,
+	})
+
 	return nil
 }
 
@@ -104,11 +121,18 @@ func (s *Service) DeleteNotes(paths []string) error {
 
 	var errs []string
 	for _, path := range paths {
+		ws, _, noteType := GetNoteMetadata(path)
 		if err := os.Remove(path); err != nil {
 			s.Logger.WithError(err).WithField("path", path).Error("Failed to delete note")
 			errs = append(errs, fmt.Sprintf("failed to delete %s: %v", path, err))
 		} else {
 			s.Logger.WithField("path", path).Warn("Deleted note")
+			notifyDaemonNoteEvent(coremodels.NoteEvent{
+				Event:     coremodels.NoteEventDeleted,
+				Workspace: ws,
+				NoteType:  noteType,
+				Path:      path,
+			})
 		}
 	}
 	if len(errs) > 0 {
@@ -202,6 +226,21 @@ func (s *Service) transferNotes(sourcePaths []string, destWorkspace *coreworkspa
 			"dest_path":   destPath,
 			"operation":   mode,
 		}).Debug("Successfully transferred note")
+
+		srcWs, _, srcType := GetNoteMetadata(sourcePath)
+		eventType := coremodels.NoteEventMoved
+		if mode == "copy" {
+			eventType = coremodels.NoteEventCreated
+		}
+		notifyDaemonNoteEvent(coremodels.NoteEvent{
+			Event:         eventType,
+			Workspace:     destWorkspace.Name,
+			NoteType:      destGroup,
+			Path:          destPath,
+			PrevWorkspace: srcWs,
+			PrevNoteType:  srcType,
+			PrevPath:      sourcePath,
+		})
 
 		newPaths = append(newPaths, destPath)
 	}
@@ -522,6 +561,12 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 	note.Branch = currentContext.Branch
 	note.Type = noteType
 
+	notifyDaemonNoteEvent(coremodels.NoteEvent{
+		Event:     coremodels.NoteEventCreated,
+		Workspace: currentContext.NotebookContextWorkspace.Name,
+		NoteType:  string(noteType),
+		Path:      notePath,
+	})
 
 	// Open in editor if requested
 	if opts.openEditor && s.Config.Editor != "" {
@@ -624,6 +669,13 @@ related_skills: []
 	if err := os.WriteFile(filepath.Join(conceptPath, "overview.md"), []byte(overviewContent), 0644); err != nil {
 		return nil, fmt.Errorf("create overview.md: %w", err)
 	}
+
+	notifyDaemonNoteEvent(coremodels.NoteEvent{
+		Event:     coremodels.NoteEventCreated,
+		Workspace: currentContext.NotebookContextWorkspace.Name,
+		NoteType:  "concepts",
+		Path:      conceptPath,
+	})
 
 	// Return a synthetic Note object representing the concept directory
 	return &models.Note{
@@ -1846,6 +1898,14 @@ func (s *Service) ArchiveNotes(ctx *WorkspaceContext, paths []string) error {
 			"source_path":  path,
 			"archive_path": dest,
 		}).Debug("Archived note")
+
+		ws, _, noteType := GetNoteMetadata(path)
+		notifyDaemonNoteEvent(coremodels.NoteEvent{
+			Event:     coremodels.NoteEventArchived,
+			Workspace: ws,
+			NoteType:  noteType,
+			Path:      path,
+		})
 	}
 	return nil
 }
@@ -2143,6 +2203,13 @@ func (s *Service) UpdateNoteContent(path string, content string) error {
 	note.Type = models.NoteType(noteType)
 
 	s.Logger.WithField("path", path).Info("Updated note content")
+
+	notifyDaemonNoteEvent(coremodels.NoteEvent{
+		Event:     coremodels.NoteEventUpdated,
+		Workspace: ws,
+		NoteType:  noteType,
+		Path:      path,
+	})
 
 	return nil
 }
