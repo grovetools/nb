@@ -235,11 +235,28 @@ func fetchWorkspacesCmd(provider *workspace.Provider) tea.Cmd {
 
 func fetchAllItemsCmd(svc *service.Service, showArtifacts bool) tea.Cmd {
 	return func() tea.Msg {
-		// Fetch items from all provider-known workspaces (including archived)
+		// Try daemon index first — fetch all entries (no workspace filter)
+		client := daemon.New()
+		defer client.Close()
+		if client.IsRunning() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			entries, err := client.GetNoteIndex(ctx, "")
+			if err == nil && len(entries) > 0 {
+				items := convertIndexToItems(entries)
+				if !showArtifacts {
+					items = filterOutArtifacts(items)
+				}
+				sort.Slice(items, func(i, j int) bool {
+					return items[i].ModTime.After(items[j].ModTime)
+				})
+				return itemsLoadedMsg{items: items}
+			}
+		}
+
+		// Fall back to filesystem walk
 		items, err := svc.ListItemsFromAllWorkspaces(true, showArtifacts)
 		if err != nil {
-			// In a real app, we'd return an error message.
-			// For now, we return an empty list.
 			return itemsLoadedMsg{items: []*tree.Item{}}
 		}
 

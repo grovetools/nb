@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"text/tabwriter"
+	"time"
 
 	"sort"
 
@@ -125,7 +128,12 @@ Examples:
 
 			// Handle --workspaces flag first (list from all workspaces)
 			if listAllWorkspaces {
-				allNotes, err := s.ListNotesFromAllWorkspaces(false, false)
+				// Try daemon index first for fast listing
+				allNotes, err := tryDaemonListNotes(ctx, "", listTag)
+				if allNotes == nil && err == nil {
+					// Fallback to filesystem
+					allNotes, err = s.ListNotesFromAllWorkspaces(false, false)
+				}
 				if err != nil {
 					return err
 				}
@@ -173,10 +181,19 @@ Examples:
 				var allNotes []*models.Note
 				var err error
 
+				// Try daemon index first
+				wsFilter := wsCtx.NotebookContextWorkspace.Name
 				if listGlobal {
-					allNotes, err = s.ListAllGlobalNotes(false, false)
-				} else {
-					allNotes, err = s.ListAllNotes(wsCtx, false, false)
+					wsFilter = "global"
+				}
+				allNotes, err = tryDaemonListNotes(ctx, wsFilter, listTag)
+				if allNotes == nil && err == nil {
+					// Fallback to filesystem
+					if listGlobal {
+						allNotes, err = s.ListAllGlobalNotes(false, false)
+					} else {
+						allNotes, err = s.ListAllNotes(wsCtx, false, false)
+					}
 				}
 
 				if err != nil {
@@ -370,6 +387,80 @@ func outputJSON_Counts(counts map[string]*coremodels.NoteCounts) error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(counts)
+}
+
+// tryDaemonListNotes attempts to list notes from the daemon's cached index.
+// Returns nil, nil if the daemon is unavailable (caller should fall back to filesystem).
+// If tagFilter is non-empty, the --workspaces caller can skip its own tag filtering
+// since we filter here.
+func tryDaemonListNotes(ctx context.Context, wsFilter, tagFilter string) ([]*models.Note, error) {
+	client := daemon.New()
+	defer client.Close()
+
+	if !client.IsRunning() {
+		return nil, nil
+	}
+
+	fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	entries, err := client.GetNoteIndex(fetchCtx, wsFilter)
+	if err != nil || len(entries) == 0 {
+		return nil, nil // Fallback to filesystem
+	}
+
+	notes := make([]*models.Note, 0, len(entries))
+	for _, e := range entries {
+		// Skip non-note types for nb list (artifacts, generic files)
+		if e.Type != "note" {
+			continue
+		}
+
+		// Apply tag filter if specified
+		if tagFilter != "" {
+			hasTag := false
+			for _, t := range e.Tags {
+				if t == tagFilter {
+					hasTag = true
+					break
+				}
+			}
+			if !hasTag {
+				continue
+			}
+		}
+
+		noteType := models.NoteType(e.Group)
+		// For notes content dir, group is the subdirectory name (inbox, issues, etc.)
+		// For plans/chats, strip the prefix
+		if e.ContentDir == "plans" {
+			noteType = "plan"
+		} else if e.ContentDir == "chats" {
+			noteType = "chat"
+		} else if parts := strings.SplitN(e.Group, "/", 2); len(parts) > 0 {
+			noteType = models.NoteType(parts[0])
+		}
+
+		note := &models.Note{
+			Path:             e.Path,
+			Title:            filepath.Base(e.Path),
+			FrontmatterTitle: e.Title,
+			Type:             noteType,
+			Group:            e.Group,
+			Workspace:        e.Workspace,
+			CreatedAt:        e.Created,
+			ModifiedAt:       e.ModTime,
+			ID:               e.ID,
+			Tags:             e.Tags,
+			PlanRef:          e.PlanRef,
+		}
+		notes = append(notes, note)
+	}
+
+	if len(notes) == 0 {
+		return nil, nil
+	}
+	return notes, nil
 }
 
 func printCountsTable(counts map[string]*coremodels.NoteCounts) {
