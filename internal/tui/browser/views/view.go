@@ -937,7 +937,7 @@ func (m *Model) GetPlanStatus(workspaceName, planGroup string) string {
 	planName := strings.TrimPrefix(planGroup, "plans/")
 
 	// Construct path to .grove-plan.yml file
-	planFile := filepath.Join(plansBaseDir, planName, ".grove-plan.yml")
+	planFile := filepath.Join(plansBaseDir, planName, models.PlanConfigFilename)
 
 	// Read and parse the file
 	data, err := os.ReadFile(planFile)

@@ -11,6 +11,7 @@ import (
 	"github.com/grovetools/core/fs"
 	coreworkspace "github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/nb/pkg/frontmatter"
+	"github.com/grovetools/nb/pkg/models"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
@@ -558,7 +559,7 @@ func (sm *StructuralMigration) isPlanDirectory(path string) bool {
 	}
 
 	// Check for .grove-plan.yml file (definitive indicator)
-	if _, err := os.Stat(filepath.Join(path, ".grove-plan.yml")); err == nil {
+	if _, err := os.Stat(filepath.Join(path, models.PlanConfigFilename)); err == nil {
 		return true
 	}
 

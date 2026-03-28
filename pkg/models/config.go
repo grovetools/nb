@@ -3,6 +3,9 @@ package models
 // FilenameFormat defines how files should be named
 type FilenameFormat string
 
+// PlanConfigFilename is the name of the plan configuration file within a plan directory.
+const PlanConfigFilename = ".grove-plan.yml"
+
 const (
 	// FilenameFormatTimestampTitle uses YYYYMMDD-HHMMSS-title.md
 	FilenameFormatTimestampTitle FilenameFormat = "timestamp-title"

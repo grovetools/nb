@@ -2440,7 +2440,7 @@ func (s *Service) addFlowJobMetadata(filePath, planDir string, isCopy bool) erro
 
 	// 1. Read the plan's default configuration to find the worktree
 	var planWorktree string
-	planConfigPath := filepath.Join(planDir, ".grove-plan.yml")
+	planConfigPath := filepath.Join(planDir, models.PlanConfigFilename)
 	if _, err := os.Stat(planConfigPath); err == nil {
 		yamlFile, err := os.ReadFile(planConfigPath)
 		if err == nil {
