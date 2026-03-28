@@ -2157,6 +2157,13 @@ func (s *Service) buildPathsMap(notebookContext *coreworkspace.WorkspaceNode) (m
 	}
 	paths["recipes"] = recipesPath
 
+	// Add context directory
+	contextPath, err := s.notebookLocator.GetContextDir(notebookContext)
+	if err != nil {
+		return nil, fmt.Errorf("get context dir: %w", err)
+	}
+	paths["context"] = contextPath
+
 	return paths, nil
 }
 

@@ -124,4 +124,10 @@ var DefaultNoteTypes = map[string]*coreconfig.NoteTypeConfig{
 		DefaultExpand: true,
 		Description:   "Project concepts and architectural memory.",
 	},
+	"context": {
+		Icon:          theme.IconFolderEye,
+		SortOrder:     95,
+		DefaultExpand: false,
+		Description:   "Context rules and presets.",
+	},
 }

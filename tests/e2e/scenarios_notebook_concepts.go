@@ -523,7 +523,7 @@ notebooks:
 				}
 
 				// 11. Read the generated context file
-				contextPath := filepath.Join(projectDir, ".grove", "context")
+				contextPath := filepath.Join(ctx.HomeDir(), ".grove", "notebooks", "nb", "workspaces", "test-project", "context", "generated", "context")
 				contextContent, err := fs.ReadString(contextPath)
 				if err != nil {
 					return fmt.Errorf("failed to read context file: %w", err)
