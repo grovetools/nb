@@ -1646,6 +1646,15 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, incl
 				return nil
 			}
 
+			// Skip grove config files - these are project configs, not notes
+			if !info.IsDir() {
+				switch info.Name() {
+				case "grove.toml", "grove.yml", "grove.yaml",
+					"grove.override.toml", "grove.override.yml", "grove.override.yaml":
+					return nil
+				}
+			}
+
 			if !info.IsDir() {
 				var note *models.Note
 				var err error
@@ -1786,6 +1795,15 @@ func (s *Service) ListAllItems(ctx *WorkspaceContext, includeArchived bool, incl
 			// Ignore common dotfiles
 			if !info.IsDir() && strings.HasPrefix(info.Name(), ".") {
 				return nil
+			}
+
+			// Skip grove config files - these are project configs, not notes
+			if !info.IsDir() {
+				switch info.Name() {
+				case "grove.toml", "grove.yml", "grove.yaml",
+					"grove.override.toml", "grove.override.yml", "grove.override.yaml":
+					return nil
+				}
 			}
 
 			if !info.IsDir() {
