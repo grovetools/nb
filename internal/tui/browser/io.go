@@ -175,6 +175,22 @@ func convertIndexToItems(entries []*models.NoteIndexEntry) []*tree.Item {
 			itemType = tree.TypeGeneric
 		}
 
+		group := e.Group
+		name := e.Name
+		if group == "quick" && (name == "grove.toml" || name == "grove.yml" || name == "grove.yaml" || name == "grove.override.toml" || name == "grove.override.yml" || name == "grove.override.yaml") {
+			group = ""
+		}
+
+		// Derive the note type for icon display.
+		// The daemon stores coarse types ("note", "plan", "generic"),
+		// but the view needs the file extension for icon selection.
+		noteType := e.Type
+		if noteType == "generic" {
+			if ext := filepath.Ext(e.Name); ext != "" {
+				noteType = ext[1:] // strip leading dot
+			}
+		}
+
 		item := &tree.Item{
 			Path:    e.Path,
 			Name:    e.Name,
@@ -182,10 +198,11 @@ func convertIndexToItems(entries []*models.NoteIndexEntry) []*tree.Item {
 			Type:    itemType,
 			Metadata: map[string]interface{}{
 				"Title":     e.Title,
+				"Type":      noteType,
 				"Tags":      e.Tags,
 				"ID":        e.ID,
 				"PlanRef":   e.PlanRef,
-				"Group":     e.Group,
+				"Group":     group,
 				"Workspace": e.Workspace,
 				"Path":      e.Path,
 			},

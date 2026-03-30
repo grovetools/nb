@@ -1646,15 +1646,6 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, incl
 				return nil
 			}
 
-			// Skip grove config files - these are project configs, not notes
-			if !info.IsDir() {
-				switch info.Name() {
-				case "grove.toml", "grove.yml", "grove.yaml",
-					"grove.override.toml", "grove.override.yml", "grove.override.yaml":
-					return nil
-				}
-			}
-
 			if !info.IsDir() {
 				var note *models.Note
 				var err error
@@ -1714,11 +1705,22 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, incl
 						if len(parts) > 1 {
 							note.Group = strings.Join(parts[:len(parts)-1], "/")
 						} else if len(parts) == 1 {
-							note.Group = "quick"
+							name := info.Name()
+							if name == "grove.toml" || name == "grove.yml" || name == "grove.yaml" ||
+								name == "grove.override.toml" || name == "grove.override.yml" || name == "grove.override.yaml" {
+								note.Group = ""
+							} else {
+								// A file at the root of a notes directory is considered 'quick'
+								note.Group = "quick"
+							}
 						}
 						// Set Type from directory if not already set from frontmatter (for backwards compatibility)
 						if note.Type == "" {
-							note.Type = models.NoteType(note.Group)
+							if note.Group == "" {
+								// Type was already set to file extension by ParseGenericFile
+							} else {
+								note.Type = models.NoteType(note.Group)
+							}
 						}
 					}
 
@@ -1797,15 +1799,6 @@ func (s *Service) ListAllItems(ctx *WorkspaceContext, includeArchived bool, incl
 				return nil
 			}
 
-			// Skip grove config files - these are project configs, not notes
-			if !info.IsDir() {
-				switch info.Name() {
-				case "grove.toml", "grove.yml", "grove.yaml",
-					"grove.override.toml", "grove.override.yml", "grove.override.yaml":
-					return nil
-				}
-			}
-
 			if !info.IsDir() {
 				item, err := s.newItemFromFile(path, info)
 				if err == nil {
@@ -1835,8 +1828,14 @@ func (s *Service) ListAllItems(ctx *WorkspaceContext, includeArchived bool, incl
 						if len(parts) > 1 {
 							group = strings.Join(parts[:len(parts)-1], "/")
 						} else if len(parts) == 1 {
-							// A file at the root of a notes directory is considered 'quick'
-							group = "quick"
+							name := info.Name()
+							if name == "grove.toml" || name == "grove.yml" || name == "grove.yaml" ||
+								name == "grove.override.toml" || name == "grove.override.yml" || name == "grove.override.yaml" {
+								group = ""
+							} else {
+								// A file at the root of a notes directory is considered 'quick'
+								group = "quick"
+							}
 						}
 						item.Metadata["Group"] = group
 					}

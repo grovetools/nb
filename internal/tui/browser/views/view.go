@@ -898,8 +898,12 @@ func getNoteIcon(noteType string) string {
 		return theme.IconShell
 	case "artifact":
 		return theme.IconDocs
+	case "toml", "yml", "yaml", "json":
+		return theme.IconGear
+	case "md", "txt", "csv", "log":
+		return theme.IconFile
 	default:
-		return theme.IconDocs // Default to a generic file icon
+		return theme.IconFile // Default to a generic file icon
 	}
 }
 

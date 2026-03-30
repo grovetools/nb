@@ -408,6 +408,7 @@ func (m *Model) BuildDisplayTree() {
 			// artifactSubgroups maps "parent" -> notes
 			// e.g., "plans/binary-test" -> [artifacts in plans/binary-test/.artifacts/]
 			var regularGroups []string
+			var rootNotes []*models.Note
 			planGroups := make(map[string][]*models.Note)
 			holdPlanGroups := make(map[string][]*models.Note)
 			archiveSubgroups := make(map[string]map[string][]*models.Note)
@@ -415,6 +416,12 @@ func (m *Model) BuildDisplayTree() {
 			artifactSubgroups := make(map[string][]*models.Note)
 
 			for name, notes := range noteGroups {
+				// Handle root notes (e.g. grove.toml)
+				if name == "" {
+					rootNotes = append(rootNotes, notes...)
+					continue
+				}
+
 				// Check if this is an archived or closed group - skip if archives are hidden
 				isArchived := strings.Contains(name, "/.archive")
 				isClosed := strings.Contains(name, "/.closed")
@@ -572,7 +579,7 @@ func (m *Model) BuildDisplayTree() {
 				// Render groups before plans
 				if len(groupsBeforePlans) > 0 {
 					rootGroupNode := buildGroupTree(noteGroups, groupsBeforePlans)
-					hasFollowingTopLevelSiblings := hasPlans || len(groupsAfterPlans) > 0 || hasHoldPlans
+					hasFollowingTopLevelSiblings := hasPlans || len(groupsAfterPlans) > 0 || hasHoldPlans || len(rootNotes) > 0
 					config := treeRenderConfig{
 						itemType:            tree.TypeGroup,
 						groupMetadataPrefix: "",
@@ -586,14 +593,14 @@ func (m *Model) BuildDisplayTree() {
 
 				// Render Plans Group in its sorted position
 				if hasPlans {
-					hasGroupsAfter := len(groupsAfterPlans) > 0 || hasHoldPlans
+					hasGroupsAfter := len(groupsAfterPlans) > 0 || hasHoldPlans || len(rootNotes) > 0
 					m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, artifactSubgroups, hasSearchFilter, workspacePathMap, hasGroupsAfter)
 				}
 
 				// Render groups after plans
 				if len(groupsAfterPlans) > 0 {
 					rootGroupNode := buildGroupTree(noteGroups, groupsAfterPlans)
-					hasFollowingTopLevelSiblings := hasHoldPlans
+					hasFollowingTopLevelSiblings := hasHoldPlans || len(rootNotes) > 0
 					config := treeRenderConfig{
 						itemType:            tree.TypeGroup,
 						groupMetadataPrefix: "",
@@ -605,9 +612,37 @@ func (m *Model) BuildDisplayTree() {
 					m.renderTree(&nodes, ws, rootGroupNode, ws.TreePrefix+"  ", ws.Depth+1, hasSearchFilter, workspacePathMap, notesRootDir, config, hasFollowingTopLevelSiblings, archiveSubgroups, closedSubgroups, artifactSubgroups)
 				}
 
-				// Render On-Hold Plans (always last)
+				// Render On-Hold Plans (always last before root notes)
 				if hasHoldPlans {
-					m.addHoldPlansGroup(&nodes, ws, holdPlanGroups, hasSearchFilter, workspacePathMap, false)
+					m.addHoldPlansGroup(&nodes, ws, holdPlanGroups, hasSearchFilter, workspacePathMap, len(rootNotes) > 0)
+				}
+
+				// Render root notes (e.g. grove.toml) directly under workspace
+				if len(rootNotes) > 0 {
+					sort.SliceStable(rootNotes, func(i, j int) bool {
+						if m.sortAscending {
+							return rootNotes[i].CreatedAt.Before(rootNotes[j].CreatedAt)
+						}
+						return rootNotes[i].CreatedAt.After(rootNotes[j].CreatedAt)
+					})
+					for ni, note := range rootNotes {
+						isLastRootNote := ni == len(rootNotes)-1
+						var notePrefix strings.Builder
+						noteIndent := strings.ReplaceAll(ws.TreePrefix, "├ ", "│ ")
+						noteIndent = strings.ReplaceAll(noteIndent, "└ ", "  ")
+						notePrefix.WriteString(noteIndent)
+						if isLastRootNote {
+							notePrefix.WriteString("└ ")
+						} else {
+							notePrefix.WriteString("├ ")
+						}
+						nodes = append(nodes, &DisplayNode{
+							Item:         noteToItem(note),
+							Prefix:       notePrefix.String(),
+							Depth:        ws.Depth + 1,
+							RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace),
+						})
+					}
 				}
 			}
 		}
@@ -1257,7 +1292,7 @@ func (m *Model) addPlansArchiveGroup(nodes *[]*DisplayNode, ws *workspace.Worksp
 	}
 }
 
-func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, holdPlanGroups map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasCompleted bool) {
+func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, holdPlanGroups map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasFollowingSiblings bool) {
 	// Calculate .hold parent prefix
 	var holdPrefix strings.Builder
 	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├ ", "│ ")
@@ -1266,10 +1301,10 @@ func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 	if ws.Depth > 0 || ws.TreePrefix != "" {
 		holdPrefix.WriteString("  ")
 	}
-	if hasCompleted {
-		holdPrefix.WriteString("├ ") // Not last if completed exists
+	if hasFollowingSiblings {
+		holdPrefix.WriteString("├ ") // Not last if other siblings exist after
 	} else {
-		holdPrefix.WriteString("└ ") // .hold is last if no completed
+		holdPrefix.WriteString("└ ") // .hold is last if no other siblings
 	}
 
 	// Use GetNotesDir to get the base path for notes, then create .hold virtual path
@@ -2353,6 +2388,9 @@ func ItemToNote(item *tree.Item) *models.Note {
 	if title, ok := item.Metadata["Title"].(string); ok {
 		note.Title = title
 	}
+	if noteType, ok := item.Metadata["Type"].(string); ok {
+		note.Type = models.NoteType(noteType)
+	}
 	if ws, ok := item.Metadata["Workspace"].(string); ok {
 		note.Workspace = ws
 	}
@@ -2405,6 +2443,7 @@ func noteToItem(note *models.Note) *tree.Item {
 
 	// Populate metadata
 	item.Metadata["Title"] = note.Title
+	item.Metadata["Type"] = string(note.Type)
 	item.Metadata["Workspace"] = note.Workspace
 	item.Metadata["Group"] = note.Group
 	item.Metadata["Branch"] = note.Branch
