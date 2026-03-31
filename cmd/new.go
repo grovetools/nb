@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
 	grovelogging "github.com/grovetools/core/logging"
@@ -65,6 +66,15 @@ Examples:
 				if err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
 					// stdin is piped/redirected, auto-enable
 					fromStdin = true
+				}
+			}
+
+			// Auto-disable editor in non-interactive contexts
+			if !noEdit {
+				if os.Getenv("NB_NO_EDIT") == "1" {
+					noEdit = true
+				} else if !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd()) {
+					noEdit = true
 				}
 			}
 
