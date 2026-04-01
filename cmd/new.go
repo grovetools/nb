@@ -95,6 +95,16 @@ Examples:
 				actualNoteType = "quick"
 			}
 
+			// Read stdin to EOF before creating the note, so slow pipes
+			// deliver all their content before we write the file.
+			var stdinContent []byte
+			if fromStdin {
+				stdinContent, err = io.ReadAll(os.Stdin)
+				if err != nil {
+					return fmt.Errorf("read stdin: %w", err)
+				}
+			}
+
 			// Create options
 			var opts []service.CreateOption
 			if noEdit || fromStdin {
@@ -110,7 +120,7 @@ Examples:
 				if err != nil {
 					return err
 				}
-				
+
 				newUlog.Success("Concept created").
 					Field("path", note.Path).
 					Field("title", title).
@@ -126,21 +136,14 @@ Examples:
 				return err
 			}
 
-			// If reading from stdin, append the content
-			if fromStdin {
-				content, err := io.ReadAll(os.Stdin)
-				if err != nil {
-					return fmt.Errorf("read stdin: %w", err)
-				}
-
-				// Read existing content
+			// If we read stdin content, append it to the note
+			if len(stdinContent) > 0 {
 				existingContent, err := os.ReadFile(note.Path)
 				if err != nil {
 					return fmt.Errorf("read note: %w", err)
 				}
 
-				// Append stdin content
-				newContent := string(existingContent) + "\n" + string(content)
+				newContent := string(existingContent) + "\n" + string(stdinContent)
 				if err := s.UpdateNoteContent(note.Path, newContent); err != nil {
 					return fmt.Errorf("update note content: %w", err)
 				}
