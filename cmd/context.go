@@ -65,7 +65,7 @@ This is useful for integration with other tools like Neovim.`,
 
 			fmt.Fprintln(out, "\nNotebook Scope:")
 			fmt.Fprintf(out, "  Name: %s\n", ctx.NotebookContextWorkspace.Name)
-			fmt.Fprintf(out, "  Identifier: %s\n", ctx.NotebookContextWorkspace.Identifier())
+			fmt.Fprintf(out, "  Identifier: %s\n", ctx.NotebookContextWorkspace.Identifier("_"))
 			fmt.Fprintf(out, "  Path: %s\n", ctx.NotebookContextWorkspace.Path)
 			fmt.Fprintf(out, "  Kind: %s\n", ctx.NotebookContextWorkspace.Kind)
 
