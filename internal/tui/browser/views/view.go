@@ -907,13 +907,29 @@ func getNoteIcon(noteType string) string {
 	}
 }
 
-// getGroupIcon returns the appropriate icon for a note group
+// getGroupIcon returns the appropriate icon for a note group.
+// For nested groups (e.g. "skills/kitchen/prep"), checks the root type for its icon
+// and falls back to a generic folder icon for organizational subdirectories.
 func getGroupIcon(groupName string, noteTypes map[string]*coreconfig.NoteTypeConfig) string {
-	// Look up the icon from the NoteTypes registry
+	// Look up the exact full path icon from the NoteTypes registry
 	if typeConfig, ok := noteTypes[groupName]; ok && typeConfig.Icon != "" {
 		return typeConfig.Icon
 	}
-	// Fallback to a generic folder icon
+
+	// Fallback: check base type (e.g. "skills" from "skills/kitchen/prep")
+	parts := strings.Split(groupName, "/")
+	if len(parts) > 1 {
+		// Nested organizational folders get generic folder icon
+		return theme.IconFolder
+	}
+
+	// Top-level groups check their base type config
+	if len(parts) > 0 {
+		if typeConfig, ok := noteTypes[parts[0]]; ok && typeConfig.Icon != "" {
+			return typeConfig.Icon
+		}
+	}
+
 	return theme.IconFolder
 }
 
