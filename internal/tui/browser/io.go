@@ -2,7 +2,6 @@ package browser
 
 import (
 	"context"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"time"
@@ -351,7 +350,7 @@ type unstageFinishedMsg struct {
 }
 
 // stageAllCmd stages all changes in the git repo
-func stageAllCmd(items []*tree.Item) tea.Cmd {
+func stageAllCmd(svc *service.Service, items []*tree.Item) tea.Cmd {
 	return func() tea.Msg {
 		if len(items) == 0 {
 			return stageFinishedMsg{success: false, count: 0, err: nil}
@@ -371,10 +370,7 @@ func stageAllCmd(items []*tree.Item) tea.Cmd {
 			return stageFinishedMsg{success: false, count: 0, err: nil}
 		}
 
-		// Stage all
-		cmd := exec.Command("git", "add", ".")
-		cmd.Dir = gitRoot
-		if _, err := cmd.CombinedOutput(); err != nil {
+		if err := svc.GitStageAll(gitRoot); err != nil {
 			return stageFinishedMsg{success: false, count: 0, err: err}
 		}
 
@@ -383,7 +379,7 @@ func stageAllCmd(items []*tree.Item) tea.Cmd {
 }
 
 // unstageAllCmd unstages all staged changes in the git repo
-func unstageAllCmd(items []*tree.Item) tea.Cmd {
+func unstageAllCmd(svc *service.Service, items []*tree.Item) tea.Cmd {
 	return func() tea.Msg {
 		if len(items) == 0 {
 			return unstageFinishedMsg{success: false, count: 0, err: nil}
@@ -403,10 +399,7 @@ func unstageAllCmd(items []*tree.Item) tea.Cmd {
 			return unstageFinishedMsg{success: false, count: 0, err: nil}
 		}
 
-		// Unstage all
-		cmd := exec.Command("git", "reset", "HEAD")
-		cmd.Dir = gitRoot
-		if _, err := cmd.CombinedOutput(); err != nil {
+		if err := svc.GitUnstageAll(gitRoot); err != nil {
 			return unstageFinishedMsg{success: false, count: 0, err: err}
 		}
 
@@ -417,7 +410,7 @@ func unstageAllCmd(items []*tree.Item) tea.Cmd {
 // toggleStageFilesCmd toggles the stage status for the given files.
 // If a file is staged, it unstages it. If unstaged, it stages it.
 // Returns updated status map for optimistic UI update without full refresh.
-func toggleStageFilesCmd(paths []string, gitFileStatus map[string]string) tea.Cmd {
+func toggleStageFilesCmd(svc *service.Service, paths []string, gitFileStatus map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		if len(paths) == 0 {
 			return stageFinishedMsg{success: false, count: 0, err: nil}
@@ -473,10 +466,7 @@ func toggleStageFilesCmd(paths []string, gitFileStatus map[string]string) tea.Cm
 				for i, info := range infos {
 					filePaths[i] = info.path
 				}
-				args := append([]string{"add", "--"}, filePaths...)
-				cmd := exec.Command("git", args...)
-				cmd.Dir = gitRoot
-				if _, err := cmd.CombinedOutput(); err != nil {
+				if err := svc.GitStagePaths(gitRoot, filePaths); err != nil {
 					return stageFinishedMsg{success: false, count: totalStaged, err: err}
 				}
 				// Update status optimistically
@@ -510,10 +500,7 @@ func toggleStageFilesCmd(paths []string, gitFileStatus map[string]string) tea.Cm
 				for i, info := range infos {
 					filePaths[i] = info.path
 				}
-				args := append([]string{"reset", "HEAD", "--"}, filePaths...)
-				cmd := exec.Command("git", args...)
-				cmd.Dir = gitRoot
-				if _, err := cmd.CombinedOutput(); err != nil {
+				if err := svc.GitUnstagePaths(gitRoot, filePaths); err != nil {
 					return unstageFinishedMsg{success: false, count: totalUnstaged, err: err}
 				}
 				// Update status optimistically

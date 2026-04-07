@@ -3,10 +3,8 @@ package browser
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/key"
@@ -1091,13 +1089,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMessage = "No files to stage/unstage"
 				return m, nil
 			}
-			return m, toggleStageFilesCmd(paths, m.gitFileStatus)
+			return m, toggleStageFilesCmd(m.service, paths, m.gitFileStatus)
 		case key.Matches(msg, m.keys.GitStageAll):
 			// Stage all changes
-			return m, stageAllCmd(m.allItems)
+			return m, stageAllCmd(m.service, m.allItems)
 		case key.Matches(msg, m.keys.GitUnstageAll):
 			// Unstage all changes
-			return m, unstageAllCmd(m.allItems)
+			return m, unstageAllCmd(m.service, m.allItems)
 		case key.Matches(msg, m.keys.Back):
 			if m.ecosystemPickerMode {
 				m.ecosystemPickerMode = false
@@ -1396,55 +1394,6 @@ func (m *Model) renameNoteCmd() tea.Cmd {
 	}
 }
 
-// archivePlanDirectory moves a plan directory to the .archive subdirectory
-// and returns the paths of all notes that were in the plan directory
-func (m *Model) archivePlanDirectory(ctx *service.WorkspaceContext, planGroup string) ([]string, error) {
-	// planGroup is like "plans/my-plan"
-	// We need to move it to "plans/.archive/my-plan"
-
-	// Get the plans base directory
-	plansBaseDir, err := m.service.GetNotebookLocator().GetPlansDir(ctx.NotebookContextWorkspace)
-	if err != nil {
-		return nil, fmt.Errorf("get plans directory: %w", err)
-	}
-
-	// Extract plan name from group (remove "plans/" prefix)
-	planName := strings.TrimPrefix(planGroup, "plans/")
-
-	// Source path: plans/<planName>
-	sourcePath := filepath.Join(plansBaseDir, planName)
-
-	// Collect paths of notes in this plan directory
-	var notePaths []string
-	for _, item := range m.allItems {
-		if strings.HasPrefix(item.Path, sourcePath+string(filepath.Separator)) {
-			notePaths = append(notePaths, item.Path)
-		}
-	}
-
-	// Create archive directory if it doesn't exist
-	archiveDir := filepath.Join(plansBaseDir, ".archive")
-	if err := os.MkdirAll(archiveDir, 0755); err != nil {
-		return nil, fmt.Errorf("create archive directory: %w", err)
-	}
-
-	// Destination path: plans/.archive/<planName>
-	destPath := filepath.Join(archiveDir, planName)
-
-	// Check if destination already exists, if so append timestamp
-	if _, err := os.Stat(destPath); err == nil {
-		// Destination exists, create unique name with timestamp
-		timestamp := time.Now().Format("20060102150405")
-		destPath = filepath.Join(archiveDir, fmt.Sprintf("%s-%s", planName, timestamp))
-	}
-
-	// Move the plan directory
-	if err := os.Rename(sourcePath, destPath); err != nil {
-		return nil, fmt.Errorf("move plan directory: %w", err)
-	}
-
-	return notePaths, nil
-}
 
 // archiveSelectedNotesCmd creates a command to archive the selected notes and plan groups
 func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
@@ -1558,7 +1507,7 @@ func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
 
 				for _, planName := range planNames {
 					// Archive the plan directory and collect archived note paths
-					planNotePaths, err := m.archivePlanDirectory(wsCtx, planName)
+					planNotePaths, err := m.service.ArchivePlanDirectory(wsCtx, planName)
 					if err != nil {
 						archiveErr = fmt.Errorf("failed to archive plan %s in workspace %s: %w", planName, workspaceName, err)
 						break
@@ -1798,11 +1747,14 @@ func (m *Model) executeCommitCmd() tea.Cmd {
 		message = "Update notes"
 	}
 
+	svc := m.service
+	items := m.allItems
+
 	return func() tea.Msg {
 		// Find a git repo from the current items
 		var gitRoot string
-		for _, item := range m.allItems {
-			root, err := findGitRoot(item.Path)
+		for _, item := range items {
+			root, err := svc.FindGitRoot(item.Path)
 			if err == nil && root != "" {
 				gitRoot = root
 				break
@@ -1814,34 +1766,14 @@ func (m *Model) executeCommitCmd() tea.Cmd {
 		}
 
 		// Commit only what's already staged (no auto-staging)
-		gitCommitCmd := exec.Command("git", "commit", "-m", message)
-		gitCommitCmd.Dir = gitRoot
-		output, err := gitCommitCmd.CombinedOutput()
-		if err != nil {
-			// Check if there's nothing to commit
-			if strings.Contains(string(output), "nothing to commit") {
+		if err := svc.GitCommit(gitRoot, message); err != nil {
+			if err == service.ErrNothingToCommit {
 				return commitFinishedMsg{success: false, message: "Nothing to commit", err: nil}
 			}
-			return commitFinishedMsg{success: false, message: "", err: fmt.Errorf("git commit failed: %w\n%s", err, string(output))}
+			return commitFinishedMsg{success: false, message: "", err: err}
 		}
 
 		return commitFinishedMsg{success: true, message: message, err: nil}
-	}
-}
-
-// findGitRoot finds the git root directory for a given path
-func findGitRoot(path string) (string, error) {
-	dir := filepath.Dir(path)
-	for {
-		gitDir := filepath.Join(dir, ".git")
-		if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("not a git repository")
-		}
-		dir = parent
 	}
 }
 
