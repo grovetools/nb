@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"github.com/grovetools/core/tui/keymap"
-	"github.com/grovetools/nb/internal/tui/browser"
+	"github.com/grovetools/nb/pkg/tui/browser"
 )
 
 // BrowserKeymapInfo returns the keymap metadata for the nb browser TUI.

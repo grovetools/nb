@@ -23,8 +23,8 @@ import (
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/nb/internal/tui/browser/components/confirm"
-	"github.com/grovetools/nb/internal/tui/browser/views"
+	"github.com/grovetools/nb/pkg/tui/browser/components/confirm"
+	"github.com/grovetools/nb/pkg/tui/browser/views"
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/sync"
@@ -137,8 +137,19 @@ type refreshMsg struct{}
 // quitPopupMsg signals that the TUI should exit, causing the tmux popup to close.
 type quitPopupMsg struct{}
 
-// New creates a new TUI model.
-func New(svc *service.Service, initialFocus *workspace.WorkspaceNode, ctx *service.WorkspaceContext) Model {
+// Config configures a browser Model. It is the single entry point used by both
+// the standalone CLI and embedding hosts (e.g. grove terminal).
+type Config struct {
+	Service      *service.Service
+	InitialFocus *workspace.WorkspaceNode
+	Context      *service.WorkspaceContext
+}
+
+// New creates a new browser TUI model from a Config.
+func New(cfg Config) Model {
+	svc := cfg.Service
+	initialFocus := cfg.InitialFocus
+	ctx := cfg.Context
 	// Load user-configurable keybindings
 	keys := NewKeyMap(svc.CoreConfig)
 

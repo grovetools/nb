@@ -8,7 +8,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/pathutil"
-	"github.com/grovetools/nb/internal/tui/browser"
+	"github.com/grovetools/nb/pkg/tui/browser"
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/spf13/cobra"
 )
@@ -57,7 +57,11 @@ This view provides a workspace-centric way to explore your entire notebook.`,
 			}
 
 			// Create and run TUI with initial focus
-			model := browser.New(s, initialFocus, ctx)
+			model := browser.New(browser.Config{
+				Service:      s,
+				InitialFocus: initialFocus,
+				Context:      ctx,
+			})
 			p := tea.NewProgram(model, tea.WithAltScreen())
 
 			if _, err := p.Run(); err != nil {
