@@ -1,12 +1,10 @@
 package browser
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,7 +16,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/pkg/paths"
-	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/keymap"
@@ -90,9 +87,6 @@ type Model struct {
 	columnList       list.Model
 	availableColumns []string
 
-	// File to edit when running in Neovim plugin mode
-	fileToEdit string
-
 	// Grep mode state
 	isGrepping bool // True when in content search mode
 
@@ -101,10 +95,6 @@ type Model struct {
 	selectedTag      string // The tag being filtered on
 	tagPickerMode    bool   // True when showing tag picker
 	tagPicker        list.Model
-
-	// Tmux split state
-	tmuxSplitPaneID string // ID of the tmux pane created for editing
-	tmuxTUIPaneID   string // ID of the pane running the TUI
 
 	// View component
 	views views.Model
@@ -126,16 +116,8 @@ type Model struct {
 	commitInput  textinput.Model
 }
 
-// FileToEdit returns the file path that should be edited (for Neovim integration)
-func (m Model) FileToEdit() string {
-	return m.fileToEdit
-}
-
 // refreshMsg signals that a full data refresh is required.
 type refreshMsg struct{}
-
-// quitPopupMsg signals that the TUI should exit, causing the tmux popup to close.
-type quitPopupMsg struct{}
 
 // Config configures a browser Model. It is the single entry point used by both
 // the standalone CLI and embedding hosts (e.g. grove terminal).
@@ -419,12 +401,6 @@ type fileContentReadyMsg struct {
 // editorFinishedMsg is sent when the editor closes
 type editorFinishedMsg struct{ err error }
 
-// editFileAndQuitMsg signals to quit and let neovim plugin handle opening
-type editFileAndQuitMsg struct{ filePath string }
-
-// previewFileMsg signals to preview a file in neovim (without focusing)
-type previewFileMsg struct{ filePath string }
-
 // notesArchivedMsg is sent when notes and/or plans have been archived
 type notesArchivedMsg struct {
 	archivedPaths []string
@@ -462,199 +438,6 @@ type noteRenamedMsg struct {
 	oldPath string
 	newPath string
 	err     error
-}
-
-// tmuxSplitFinishedMsg is sent when a tmux split operation completes
-type tmuxSplitFinishedMsg struct {
-	paneID     string
-	tuiPaneID  string
-	err        error
-	clearPanes bool // If true, clear the stored pane IDs (pane was closed)
-}
-
-// openInEditor opens a note in the configured editor
-func (m Model) openInEditor(path string) tea.Cmd {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vim" // fallback
-	}
-	cmd := exec.Command(editor, path)
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return editorFinishedMsg{err: err}
-	})
-}
-
-// openInTmuxCmd intelligently opens a file in tmux.
-// If in a popup, it opens in the main session and signals to quit.
-// If not in a popup, it opens in a split and stays open.
-func (m Model) openInTmuxCmd(path string) tea.Cmd {
-	return func() tea.Msg {
-		client, err := tmux.NewClient()
-		if err != nil {
-			return tmuxSplitFinishedMsg{err: fmt.Errorf("tmux client not found: %w", err)}
-		}
-
-		isPopup, err := client.IsPopup(context.Background())
-		if err != nil {
-			// Not in tmux or error, fall back to split behavior
-			return tmuxSplitFinishedMsg{err: fmt.Errorf("IsPopup error: %w", err)}
-		}
-
-		if isPopup {
-			editor := os.Getenv("EDITOR")
-			if editor == "" {
-				editor = "nvim"
-			}
-			ctx := context.Background()
-			err := client.OpenInEditorWindow(ctx, editor, path, "notebook", 2, false)
-			if err != nil {
-				return tmuxSplitFinishedMsg{err: fmt.Errorf("popup mode - failed to open in editor: %w", err)}
-			}
-			// Close the popup explicitly before quitting
-			if err := client.ClosePopup(ctx); err != nil {
-				// Log error but continue - the file was opened successfully
-				return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to close popup: %w", err)}
-			}
-			return quitPopupMsg{}
-		}
-
-		// Not in a popup, use existing split behavior
-		return m.openInTmuxSplitCmd(path)()
-	}
-}
-
-// openInTmuxSplitCmd opens a note in a tmux split pane or reuses an existing split
-func (m Model) openInTmuxSplitCmd(path string) tea.Cmd {
-	return m.openInTmuxSplitCmdImpl(path, false)
-}
-
-// previewInTmuxSplitCmd opens a note in a tmux split without switching focus
-func (m Model) previewInTmuxSplitCmd(path string) tea.Cmd {
-	return m.openInTmuxSplitCmdImpl(path, true)
-}
-
-// openInTmuxSplitCmdImpl is the shared implementation for opening files in tmux
-func (m Model) openInTmuxSplitCmdImpl(path string, switchBack bool) tea.Cmd {
-	return func() tea.Msg {
-		client, err := tmux.NewClient()
-		if err != nil {
-			return tmuxSplitFinishedMsg{err: fmt.Errorf("tmux client not found: %w", err)}
-		}
-
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			editor = "vim" // fallback
-		}
-
-		// If we already have a split pane, verify it still exists and try to use it
-		paneStillExists := false
-		if m.tmuxSplitPaneID != "" {
-			// Check if the pane still exists (user may have closed it)
-			if client.PaneExists(context.Background(), m.tmuxSplitPaneID) {
-				// Send keys to open the file in the existing editor
-				// Using :e command for vim/nvim
-				err = client.SendKeys(context.Background(), m.tmuxSplitPaneID, fmt.Sprintf(":e %s", path), "Enter")
-				if err == nil {
-					// Success! Handle focus based on mode
-					if switchBack {
-						// Preview mode: switch back to TUI pane
-						if m.tmuxTUIPaneID != "" {
-							err = client.SelectPane(context.Background(), m.tmuxTUIPaneID)
-							if err != nil {
-								return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to switch back to TUI: %w", err)}
-							}
-						}
-					} else {
-						// Open mode: switch to editor pane
-						err = client.SelectPane(context.Background(), m.tmuxSplitPaneID)
-						if err != nil {
-							return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to switch to editor: %w", err)}
-						}
-					}
-
-					// Return success with the existing pane ID
-					return tmuxSplitFinishedMsg{paneID: m.tmuxSplitPaneID, err: nil}
-				}
-				// SendKeys failed, pane might have been closed between check and now
-			}
-			// Pane doesn't exist or SendKeys failed - fall through to create new split
-		}
-
-		// At this point, either no split exists or the old one is gone
-		// Track if we need to clear old pane IDs
-		shouldClearOldPanes := m.tmuxSplitPaneID != "" && !paneStillExists
-
-		// No existing split, create a new one
-		// First get the current pane ID (the TUI pane)
-		tuiPaneID, err := client.GetCurrentPaneID(context.Background())
-		if err != nil {
-			return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to get current pane ID: %w", err)}
-		}
-
-		// Get current pane width to calculate optimal split
-		currentWidth, err := client.GetPaneWidth(context.Background(), "")
-		if err != nil {
-			return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to get pane width: %w", err)}
-		}
-
-		// Calculate optimal TUI width based on view mode
-		var tuiWidth int
-		if m.views.GetViewMode() == views.TableView {
-			// Table view needs more space for columns: 40% with min 70, max 120
-			tuiWidth = currentWidth * 40 / 100
-			if tuiWidth < 70 {
-				tuiWidth = 70
-			}
-			if tuiWidth > 120 {
-				tuiWidth = 120
-			}
-		} else {
-			// Tree view: 30% of screen with min 40, max 80 columns
-			tuiWidth = currentWidth * 30 / 100
-			if tuiWidth < 40 {
-				tuiWidth = 40
-			}
-			if tuiWidth > 80 {
-				tuiWidth = 80
-			}
-		}
-		// If screen is too narrow, just split 50/50
-		if currentWidth < 120 {
-			tuiWidth = 0 // 0 means default split
-		}
-
-		// Calculate editor width (remaining space after TUI and border)
-		editorWidth := 0
-		if tuiWidth > 0 {
-			editorWidth = currentWidth - tuiWidth - 1 // -1 for tmux border
-			if editorWidth < 40 {
-				editorWidth = 0 // Fall back to default split if too small
-			}
-		}
-
-		// The command to run in the new pane. Quote the path to handle spaces.
-		commandToRun := fmt.Sprintf("%s %q", editor, path)
-
-		// Split current pane horizontally (creating a vertical split) and run the editor.
-		// The target is empty, which means the currently active pane.
-		// editorWidth > 0 means we give the editor that much space, TUI keeps the rest
-		paneID, err := client.SplitWindow(context.Background(), "", true, editorWidth, commandToRun)
-		if err != nil {
-			return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to split tmux window: %w", err)}
-		}
-
-		// If preview mode, switch back to TUI pane
-		if switchBack {
-			err = client.SelectPane(context.Background(), tuiPaneID)
-			if err != nil {
-				return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to switch back to TUI: %w", err)}
-			}
-		}
-
-		// On success, return the pane ID and TUI pane ID
-		// If we're replacing a closed pane, signal to clear the old IDs first
-		return tmuxSplitFinishedMsg{paneID: paneID, tuiPaneID: tuiPaneID, clearPanes: shouldClearOldPanes, err: nil}
-	}
 }
 
 // noteTypeItem implements the list.Item interface for the note type picker.

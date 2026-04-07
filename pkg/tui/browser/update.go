@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/core/util/pathutil"
@@ -186,60 +187,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.preview.SetContent(m.previewContent)
 		m.preview.GotoTop() // Reset scroll on new file
 		return m, nil
-	case quitPopupMsg:
-		return m, tea.Quit
-	case editFileAndQuitMsg:
-		// Write file path to temp file for Neovim to read
-		// Use session ID from environment if available, otherwise fall back to PID
-		sessionID := os.Getenv("GROVE_NVIM_SESSION_ID")
-		if sessionID == "" {
-			sessionID = fmt.Sprintf("%d", os.Getpid())
-		}
-		tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("grove-nb-edit-%s", sessionID))
-		err := os.WriteFile(tempFile, []byte("OPEN:"+msg.filePath+"\n"), 0644)
-		if err != nil {
-			m.statusMessage = fmt.Sprintf("Error writing temp file: %v", err)
-		} else {
-			m.statusMessage = ""
-		}
-		// Don't quit - stay open
-		return m, nil
-
-	case previewFileMsg:
-		// Write file path to temp file for Neovim to preview
-		sessionID := os.Getenv("GROVE_NVIM_SESSION_ID")
-		if sessionID == "" {
-			sessionID = fmt.Sprintf("%d", os.Getpid())
-		}
-		tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("grove-nb-edit-%s", sessionID))
-		err := os.WriteFile(tempFile, []byte("PREVIEW:"+msg.filePath+"\n"), 0644)
-		if err != nil {
-			m.statusMessage = fmt.Sprintf("Error writing temp file: %v", err)
-		} else {
-			m.statusMessage = ""
-		}
-		return m, nil
-
-	case tmuxSplitFinishedMsg:
-		if msg.err != nil {
-			m.statusMessage = fmt.Sprintf("tmux error: %v", msg.err)
-			return m, nil // Stay in TUI to show the error
-		}
-		// Split was successful, store the pane IDs and stay in TUI
-		if msg.clearPanes {
-			// Old pane was closed, clear stored IDs
-			m.tmuxSplitPaneID = ""
-			m.tmuxTUIPaneID = ""
-		}
-		if msg.paneID != "" {
-			m.tmuxSplitPaneID = msg.paneID
-		}
-		if msg.tuiPaneID != "" {
-			m.tmuxTUIPaneID = msg.tuiPaneID
-		}
-		m.statusMessage = ""
-		return m, nil
-
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetSize(msg.Width, msg.Height)
@@ -629,7 +576,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.previewFocused = false
 				return m, nil
 			case key.Matches(msg, m.keys.Quit): // Allow quitting from preview
-				return m, tea.Quit
+				return m, func() tea.Msg { return embed.CloseRequestMsg{} }
 			case key.Matches(msg, m.keys.Back): // Esc to switch focus back
 				m.previewFocused = false
 				return m, nil
@@ -736,7 +683,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.keys.Quit):
-			return m, tea.Quit
+			return m, func() tea.Msg { return embed.CloseRequestMsg{} }
 		case key.Matches(msg, m.keys.Help):
 			m.help.Toggle()
 			return m, nil
@@ -1049,18 +996,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				if noteToOpen != nil {
-					if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
-						return m, func() tea.Msg {
-							return editFileAndQuitMsg{filePath: noteToOpen.Path}
-						}
+					path := noteToOpen.Path
+					return m, func() tea.Msg {
+						return embed.EditRequestMsg{Path: path}
 					}
-
-					// If in a tmux session, intelligently open based on context (popup vs normal)
-					if os.Getenv("TMUX") != "" {
-						return m, m.openInTmuxCmd(noteToOpen.Path)
-					}
-
-					return m, m.openInEditor(noteToOpen.Path)
 				}
 			}
 		case key.Matches(msg, m.keys.Preview): // Tab
