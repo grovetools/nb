@@ -30,7 +30,7 @@ import (
 // updateViewsState synchronizes the view state with the browser model
 func (m *Model) updateViewsState() {
 	log := logging.NewLogger("tui.browser.update")
-	log.Info("updateViewsState called")
+	log.Debug("updateViewsState called")
 
 	m.views.SetParentState(
 		m.service,
