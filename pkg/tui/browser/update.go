@@ -1176,7 +1176,7 @@ func (m *Model) findWorkspaceNodeByName(name string) (*workspace.WorkspaceNode, 
 }
 
 // updateNoteCreation handles input when the note creation UI is active.
-func (m *Model) updateNoteCreation(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) updateNoteCreation(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -1288,7 +1288,7 @@ func (m *Model) createNoteCmd() tea.Cmd {
 }
 
 // updateNoteRename handles input when the note rename UI is active.
-func (m *Model) updateNoteRename(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) updateNoteRename(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -1665,7 +1665,7 @@ func (m *Model) clearGitStatus() {
 }
 
 // updateCommitDialog handles input when the commit dialog is active.
-func (m *Model) updateCommitDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) updateCommitDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
