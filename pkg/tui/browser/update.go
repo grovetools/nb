@@ -187,6 +187,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.preview.SetContent(m.previewContent)
 		m.preview.GotoTop() // Reset scroll on new file
 		return m, nil
+	case embed.EditFinishedMsg:
+		// External editor closed — refresh the tree to pick up any
+		// changes (modified time, title, new files).
+		return m, func() tea.Msg { return refreshMsg{} }
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetSize(msg.Width, msg.Height)
