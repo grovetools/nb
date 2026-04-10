@@ -15,6 +15,8 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/core/tui/theme"
+	markdown "github.com/grovetools/core/tui/components/markdown"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/nb/pkg/tui/browser/components/confirm"
@@ -184,7 +186,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.previewFile = msg.path
-		m.preview.SetContent(m.previewContent)
+		// Render markdown with syntax highlighting
+		rendered := markdown.Render(m.previewContent, theme.DefaultTheme)
+		wrapped := markdown.WrapForViewport(rendered, m.preview.Width-1)
+		m.preview.SetContent(wrapped)
 		m.preview.GotoTop() // Reset scroll on new file
 		return m, nil
 	case embed.EditFinishedMsg:
@@ -200,12 +205,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		const mainContentHeight = 7
 		availableHeight := m.height - mainContentHeight
 
-		browserWidth := m.width / 2
-		previewWidth := m.width - browserWidth
-
-		m.views.SetSize(browserWidth, availableHeight)
-		m.preview.Width = previewWidth
-		m.preview.Height = availableHeight
+		if m.previewVisible {
+			browserWidth := m.width / 2
+			previewWidth := m.width - browserWidth
+			m.views.SetSize(browserWidth, availableHeight)
+			m.preview.Width = previewWidth
+			m.preview.Height = availableHeight
+			// Re-render markdown for new width
+			if m.previewContent != "" {
+				rendered := markdown.Render(m.previewContent, theme.DefaultTheme)
+				wrapped := markdown.WrapForViewport(rendered, m.preview.Width-1)
+				m.preview.SetContent(wrapped)
+			}
+		} else {
+			m.views.SetSize(m.width-4, availableHeight) // Full width minus padding
+		}
 
 		m.columnList.SetSize(40, 8)
 		return m, nil
@@ -1017,6 +1031,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if strings.Contains(m.statusMessage, "Previewing") || strings.Contains(m.statusMessage, "Loading") {
 					m.statusMessage = ""
 				}
+				// Give browser full width
+				const mainContentHeight = 7
+				availableHeight := m.height - mainContentHeight
+				m.views.SetSize(m.width-4, availableHeight)
+			} else {
+				// Recalculate layout for split pane
+				const mainContentHeight = 7
+				availableHeight := m.height - mainContentHeight
+				browserWidth := m.width / 2
+				previewWidth := m.width - browserWidth
+				m.views.SetSize(browserWidth, availableHeight)
+				m.preview.Width = previewWidth
+				m.preview.Height = availableHeight
+				// Re-render existing content for new width, or load if needed
+				if m.previewContent != "" {
+					rendered := markdown.Render(m.previewContent, theme.DefaultTheme)
+					wrapped := markdown.WrapForViewport(rendered, m.preview.Width-1)
+					m.preview.SetContent(wrapped)
+				}
+				return m, m.updatePreviewContent()
 			}
 			return m, nil
 		case key.Matches(msg, m.keys.GitCommit):
