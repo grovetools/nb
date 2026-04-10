@@ -10,6 +10,7 @@ import (
 
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/embed"
+	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/nb/pkg/tui/browser"
 )
 
@@ -25,7 +26,7 @@ type Model struct {
 func New(cfg browser.Config) Model {
 	b := browser.New(cfg)
 	page := &browserPage{inner: b}
-	return Model{pager: pager.NewWith([]pager.Page{page}, pager.DefaultKeyMap(), pager.Config{
+	return Model{pager: pager.NewWith([]pager.Page{page}, pager.KeyMapFromBase(keymap.NewBase()), pager.Config{
 		OuterPadding: [4]int{0, 0, 0, 0},
 	})}
 }
