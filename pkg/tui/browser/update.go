@@ -1035,6 +1035,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				const mainContentHeight = 7
 				availableHeight := m.height - mainContentHeight
 				m.views.SetSize(m.width-4, availableHeight)
+				// Tell the terminal host to close the preview VDrawer (empty path = close).
+				return m, func() tea.Msg {
+					return embed.PreviewRequestMsg{Path: ""}
+				}
 			} else {
 				// Recalculate layout for split pane
 				const mainContentHeight = 7
@@ -1052,7 +1056,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, m.updatePreviewContent()
 			}
-			return m, nil
 		case key.Matches(msg, m.keys.GitCommit):
 			// Start commit dialog
 			m.isCommitting = true

@@ -18,6 +18,7 @@ import (
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
+	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/nb/pkg/tui/browser/components/confirm"
@@ -368,6 +369,8 @@ func (m Model) Init() tea.Cmd {
 }
 
 // updatePreviewContent checks if the preview needs to be updated and returns a command to load the file.
+// When preview is visible, it also emits an embed.PreviewRequestMsg so the terminal host can
+// open/update a PTY-based preview split (nvim -R in the VDrawer).
 func (m *Model) updatePreviewContent() tea.Cmd {
 	node := m.views.GetCurrentNode()
 	if node != nil && node.IsNote() {
@@ -379,7 +382,15 @@ func (m *Model) updatePreviewContent() tea.Cmd {
 		if m.previewVisible {
 			m.statusMessage = fmt.Sprintf("Loading %s...", filepath.Base(node.Item.Path))
 		}
-		return loadFileContentCmd(node.Item.Path)
+		path := node.Item.Path
+		cmds := []tea.Cmd{loadFileContentCmd(path)}
+		// Emit preview request for the terminal host (VDrawer with nvim -R).
+		if m.previewVisible {
+			cmds = append(cmds, func() tea.Msg {
+				return embed.PreviewRequestMsg{Path: path}
+			})
+		}
+		return tea.Batch(cmds...)
 	}
 
 	// If not on a note, clear the preview.
