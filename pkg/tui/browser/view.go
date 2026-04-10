@@ -189,34 +189,10 @@ func (m Model) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 	}
 
-	// --- Main two-pane layout (or single pane if preview hidden) ---
+	// --- Single-pane layout (preview is handled by the terminal host VDrawer) ---
 	browserContent := m.views.View()
-
-	var viewContent string
-	if m.previewVisible {
-		// Update preview pane border based on focus
-		if m.previewFocused {
-			m.preview.Style = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(theme.DefaultTheme.Colors.Orange) // Highlight when focused
-		} else {
-			m.preview.Style = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(theme.DefaultTheme.Colors.MutedText)
-		}
-
-		// Create the two panes
-		browserPaneStyle := lipgloss.NewStyle().Padding(0, 1)
-		browserPane := browserPaneStyle.Render(browserContent)
-		previewPane := m.preview.View()
-
-		// Join them horizontally
-		viewContent = lipgloss.JoinHorizontal(lipgloss.Top, browserPane, previewPane)
-	} else {
-		// Preview hidden - only show browser pane
-		browserPaneStyle := lipgloss.NewStyle().Padding(0, 1)
-		viewContent = browserPaneStyle.Render(browserContent)
-	}
+	browserPaneStyle := lipgloss.NewStyle().Padding(0, 1)
+	viewContent := browserPaneStyle.Render(browserContent)
 
 	// Header - breadcrumb style
 	// Get notebook title from config

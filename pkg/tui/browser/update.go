@@ -15,8 +15,6 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/keymap"
-	"github.com/grovetools/core/tui/theme"
-	markdown "github.com/grovetools/core/tui/components/markdown"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/nb/pkg/tui/browser/components/confirm"
@@ -174,23 +172,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = ""
 		return m, nil
 	case fileContentReadyMsg:
-		if msg.err != nil {
-			m.previewContent = fmt.Sprintf("Error loading file:\n%v", msg.err)
-			if m.previewVisible {
-				m.statusMessage = fmt.Sprintf("Error loading %s", filepath.Base(msg.path))
-			}
-		} else {
-			m.previewContent = msg.content
-			if m.previewVisible {
-				m.statusMessage = fmt.Sprintf("Previewing %s", filepath.Base(msg.path))
-			}
-		}
+		// Track the file path for dedup in updatePreviewContent.
+		// The actual preview rendering is handled by the terminal
+		// host's VDrawer (nvim -R), not the internal viewport.
 		m.previewFile = msg.path
-		// Render markdown with syntax highlighting
-		rendered := markdown.Render(m.previewContent, theme.DefaultTheme)
-		wrapped := markdown.WrapForViewport(rendered, m.preview.Width-1)
-		m.preview.SetContent(wrapped)
-		m.preview.GotoTop() // Reset scroll on new file
 		return m, nil
 	case embed.EditFinishedMsg:
 		// External editor closed — refresh the tree to pick up any
@@ -200,26 +185,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetSize(msg.Width, msg.Height)
 
-		// Calculate pane sizes
+		// Calculate pane sizes — preview is handled by the terminal host
+		// VDrawer, so nb always uses full width.
 		// header(1) + search(1) + blank(1) + view + blank(1) + status(1) + footer(1) + top_margin(1)
 		const mainContentHeight = 7
 		availableHeight := m.height - mainContentHeight
-
-		if m.previewVisible {
-			browserWidth := m.width / 2
-			previewWidth := m.width - browserWidth
-			m.views.SetSize(browserWidth, availableHeight)
-			m.preview.Width = previewWidth
-			m.preview.Height = availableHeight
-			// Re-render markdown for new width
-			if m.previewContent != "" {
-				rendered := markdown.Render(m.previewContent, theme.DefaultTheme)
-				wrapped := markdown.WrapForViewport(rendered, m.preview.Width-1)
-				m.preview.SetContent(wrapped)
-			}
-		} else {
-			m.views.SetSize(m.width-4, availableHeight) // Full width minus padding
-		}
+		m.views.SetSize(m.width-4, availableHeight)
 
 		m.columnList.SetSize(40, 8)
 		return m, nil
@@ -587,24 +558,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		// If preview is focused, it gets priority for key events.
-		if m.previewFocused {
-			switch {
-			case key.Matches(msg, m.keys.Preview): // Tab still switches focus back
-				m.previewFocused = false
-				return m, nil
-			case key.Matches(msg, m.keys.Quit): // Allow quitting from preview
-				return m, func() tea.Msg { return embed.CloseRequestMsg{} }
-			case key.Matches(msg, m.keys.Back): // Esc to switch focus back
-				m.previewFocused = false
-				return m, nil
-			default:
-				// Pass all other keys to the viewport for scrolling
-				var cmd tea.Cmd
-				m.preview, cmd = m.preview.Update(msg)
-				return m, cmd
-			}
-		}
+		// Preview focus is handled by the terminal host (VDrawer),
+		// not internally. Tab keybind is kept for future use.
 
 		// Handle note creation mode
 		if m.isCreatingNote {
@@ -1023,39 +978,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Preview): // Tab
 			m.previewFocused = !m.previewFocused
 			return m, nil
-		case key.Matches(msg, m.keys.TogglePreview): // v - toggle preview visibility
+		case key.Matches(msg, m.keys.TogglePreview): // v - toggle preview
 			m.previewVisible = !m.previewVisible
 			if !m.previewVisible {
-				m.previewFocused = false // Can't focus a hidden preview
-				// Clear preview-related status message
+				m.previewFocused = false
 				if strings.Contains(m.statusMessage, "Previewing") || strings.Contains(m.statusMessage, "Loading") {
 					m.statusMessage = ""
 				}
-				// Give browser full width
-				const mainContentHeight = 7
-				availableHeight := m.height - mainContentHeight
-				m.views.SetSize(m.width-4, availableHeight)
-				// Tell the terminal host to close the preview VDrawer (empty path = close).
+				// Close the terminal host's preview VDrawer (empty path = close).
 				return m, func() tea.Msg {
 					return embed.PreviewRequestMsg{Path: ""}
 				}
-			} else {
-				// Recalculate layout for split pane
-				const mainContentHeight = 7
-				availableHeight := m.height - mainContentHeight
-				browserWidth := m.width / 2
-				previewWidth := m.width - browserWidth
-				m.views.SetSize(browserWidth, availableHeight)
-				m.preview.Width = previewWidth
-				m.preview.Height = availableHeight
-				// Re-render existing content for new width, or load if needed
-				if m.previewContent != "" {
-					rendered := markdown.Render(m.previewContent, theme.DefaultTheme)
-					wrapped := markdown.WrapForViewport(rendered, m.preview.Width-1)
-					m.preview.SetContent(wrapped)
-				}
-				return m, m.updatePreviewContent()
 			}
+			// Opening preview: emit PreviewRequestMsg for the current file.
+			// The terminal host opens nvim -R in a VDrawer; nb itself
+			// does NOT render an internal viewport (previewVisible is
+			// tracked only as toggle state for the keybind).
+			node := m.views.GetCurrentNode()
+			if node != nil && node.IsNote() {
+				path := node.Item.Path
+				m.previewFile = path
+				return m, func() tea.Msg {
+					return embed.PreviewRequestMsg{Path: path}
+				}
+			}
+			return m, nil
 		case key.Matches(msg, m.keys.GitCommit):
 			// Start commit dialog
 			m.isCommitting = true
