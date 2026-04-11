@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/compositor"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/embed"
@@ -70,8 +71,27 @@ This view provides a workspace-centric way to explore your entire notebook.`,
 			})
 			host := &cliEnvironmentHost{model: browserModel}
 
-			if _, err := embed.RunStandalone(host, tea.WithAltScreen()); err != nil {
-				return fmt.Errorf("error running TUI: %w", err)
+			// Wrap in StandaloneHost (handles DoneMsg, CloseRequestMsg,
+			// EditRequestMsg) then compositor (GPU-accelerated rendering).
+			standaloneHost := embed.NewStandaloneHost(host)
+			compModel := compositor.NewModel(standaloneHost)
+			p := tea.NewProgram(compModel, tea.WithAltScreen())
+
+			finalModel, runErr := p.Run()
+
+			// Free compositor resources and unwrap to recover the
+			// StandaloneHost so post-exit result extraction succeeds.
+			if cm, ok := finalModel.(*compositor.Model); ok {
+				cm.Free()
+				finalModel = cm.Unwrap()
+			}
+
+			if runErr != nil {
+				return fmt.Errorf("error running TUI: %w", runErr)
+			}
+
+			if finalHost, ok := finalModel.(embed.StandaloneHost); ok && finalHost.Err != nil {
+				return fmt.Errorf("error running TUI: %w", finalHost.Err)
 			}
 
 			return nil
