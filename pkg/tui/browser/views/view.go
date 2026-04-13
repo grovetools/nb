@@ -817,7 +817,48 @@ func (m *Model) calculateTableColumnWidths() [8]int {
 		maxPath = 0
 	}
 
-	return [8]int{maxName, maxType, maxStatus, maxTags, maxCreated, maxModified, maxWorkspace, maxPath}
+	result := [8]int{maxName, maxType, maxStatus, maxTags, maxCreated, maxModified, maxWorkspace, maxPath}
+
+	// Width-responsive shrinking: if total row width exceeds terminal
+	// width, progressively shrink flexible columns (path, tags, name)
+	// so the table fits without hard-truncation by the outer MaxWidth.
+	if m.width > 0 {
+		const selectionWidth = 2
+		const sepWidth = 3 // visual width of " │ "
+		totalWidth := func() int {
+			w := selectionWidth + result[0] // name is always shown
+			for i := 1; i < len(result); i++ {
+				if result[i] > 0 {
+					w += sepWidth + result[i]
+				}
+			}
+			return w
+		}
+
+		// Shrink columns in priority order: path, tags, name.
+		// Each iteration removes excess from the widest flexible column.
+		shrinkOrder := []int{7, 3, 0} // PATH, TAGS, NAME
+		minWidths := map[int]int{7: minPathWidth, 3: minTagsWidth, 0: minNameWidth}
+		for _, idx := range shrinkOrder {
+			excess := totalWidth() - m.width
+			if excess <= 0 {
+				break
+			}
+			if result[idx] <= 0 {
+				continue
+			}
+			minW := minWidths[idx]
+			shrink := excess
+			if result[idx]-shrink < minW {
+				shrink = result[idx] - minW
+			}
+			if shrink > 0 {
+				result[idx] -= shrink
+			}
+		}
+	}
+
+	return result
 }
 
 // getNoteStatus determines the status of a note (e.g., pending if it has todos)

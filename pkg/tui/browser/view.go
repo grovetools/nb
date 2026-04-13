@@ -249,8 +249,6 @@ func (m Model) View() string {
 	headerText := lipgloss.JoinHorizontal(lipgloss.Left, headerParts...)
 	header := theme.DefaultTheme.Header.Render(headerText)
 
-	footer := m.help.View()
-
 	// Build status bar
 	var status string
 	if m.loadingCount > 0 {
@@ -306,10 +304,16 @@ func (m Model) View() string {
 		viewContent,
 		"", // Another blank line for spacing
 		theme.DefaultTheme.Muted.Render(status),
-		footer,
 	)
 
-	// Apply global left padding and top margin
-	styledView := lipgloss.NewStyle().PaddingLeft(2).Render(fullView)
+	// Apply global left padding, top margin, and width clamping
+	styledView := lipgloss.NewStyle().PaddingLeft(2).MaxWidth(m.width).Render(fullView)
 	return "\n" + styledView
+}
+
+// FooterView returns the help text for use as the pager footer.
+// The host (view/model.go) wires this into pager.SetFooter so the
+// pager can pin it below the scrollable body.
+func (m Model) FooterView() string {
+	return m.help.View()
 }

@@ -28,6 +28,7 @@ func New(cfg browser.Config) Model {
 	page := &browserPage{inner: b}
 	return Model{pager: pager.NewWith([]pager.Page{page}, pager.KeyMapFromBase(keymap.NewBase()), pager.Config{
 		OuterPadding: [4]int{0, 0, 0, 0},
+		FooterHeight: 1, // help line pinned via SetFooter
 	})}
 }
 
@@ -39,10 +40,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// View delegates entirely to the pager. The browserPage adapter
-// strips the browser's leading newline so the pager's blank-row
-// separator (bar → blank → body) isn't doubled up.
+// View sets the pager footer from the browser's help text and
+// delegates rendering to the pager. The browserPage adapter strips
+// the browser's leading newline so the pager's blank-row separator
+// (bar → blank → body) isn't doubled up.
 func (m Model) View() string {
+	if p, ok := m.pager.Active().(*browserPage); ok {
+		m.pager.SetFooter(p.inner.FooterView())
+	}
 	return m.pager.View()
 }
 
