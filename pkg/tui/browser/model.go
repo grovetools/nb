@@ -115,6 +115,9 @@ type Model struct {
 	// Commit dialog state
 	isCommitting bool
 	commitInput  textinput.Model
+
+	// Hosting context
+	hosted bool // True when running inside groveterm; use SplitEditorRequestMsg
 }
 
 // refreshMsg signals that a full data refresh is required.
@@ -126,6 +129,7 @@ type Config struct {
 	Service      *service.Service
 	InitialFocus *workspace.WorkspaceNode
 	Context      *service.WorkspaceContext
+	Hosted       bool // True when embedded inside groveterm (use BSP splits for editing)
 }
 
 // New creates a new browser TUI model from a Config.
@@ -293,6 +297,7 @@ func New(cfg Config) Model {
 		gitFileStatus:     make(map[string]string),
 		scannedGitRepos:   make(map[string]bool),
 		commitInput:       commitInput,
+		hosted:            cfg.Hosted,
 	}
 }
 

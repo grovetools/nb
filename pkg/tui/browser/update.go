@@ -181,6 +181,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// External editor closed — refresh the tree to pick up any
 		// changes (modified time, title, new files).
 		return m, func() tea.Msg { return refreshMsg{} }
+	case embed.SplitEditorClosedMsg:
+		// BSP split editor closed — refresh to pick up edits.
+		return m, func() tea.Msg { return refreshMsg{} }
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetSize(msg.Width, msg.Height)
@@ -970,6 +973,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if noteToOpen != nil {
 					path := noteToOpen.Path
+					if m.hosted {
+						return m, func() tea.Msg {
+							return embed.SplitEditorRequestMsg{Path: path}
+						}
+					}
 					return m, func() tea.Msg {
 						return embed.EditRequestMsg{Path: path}
 					}
