@@ -973,11 +973,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if noteToOpen != nil {
 					path := noteToOpen.Path
-					if m.hosted {
-						return m, func() tea.Msg {
-							return embed.SplitEditorRequestMsg{Path: path}
-						}
+					// enter/e: full-edit mode — replaces notebook with editor panel
+					return m, func() tea.Msg {
+						return embed.EditRequestMsg{Path: path}
 					}
+				}
+			}
+		case key.Matches(msg, m.keys.Edit): // e - full edit mode
+			node := m.views.GetCurrentNode()
+			if node != nil && node.IsNote() {
+				note := views.ItemToNote(node.Item)
+				if note != nil {
+					path := note.Path
 					return m, func() tea.Msg {
 						return embed.EditRequestMsg{Path: path}
 					}
@@ -986,31 +993,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Preview): // Tab
 			m.previewFocused = !m.previewFocused
 			return m, nil
-		case key.Matches(msg, m.keys.TogglePreview): // v - toggle preview
+		case key.Matches(msg, m.keys.TogglePreview): // v - split preview mode
+			node := m.views.GetCurrentNode()
+			if node == nil || !node.IsNote() {
+				return m, nil
+			}
+			noteToPreview := views.ItemToNote(node.Item)
+			if noteToPreview == nil {
+				return m, nil
+			}
+			path := noteToPreview.Path
+			if m.hosted {
+				// Open (or replace) a split editor alongside the notebook browser
+				// with a 35/65 ratio (notebook keeps 35%, editor gets 65%).
+				return m, func() tea.Msg {
+					return embed.SplitEditorRequestMsg{Path: path, Ratio: 0.35}
+				}
+			}
+			// Standalone: toggle internal preview pane
 			m.previewVisible = !m.previewVisible
 			if !m.previewVisible {
 				m.previewFocused = false
 				if strings.Contains(m.statusMessage, "Previewing") || strings.Contains(m.statusMessage, "Loading") {
 					m.statusMessage = ""
 				}
-				// Close the terminal host's preview VDrawer (empty path = close).
 				return m, func() tea.Msg {
 					return embed.PreviewRequestMsg{Path: ""}
 				}
 			}
-			// Opening preview: emit PreviewRequestMsg for the current file.
-			// The terminal host opens nvim -R in a VDrawer; nb itself
-			// does NOT render an internal viewport (previewVisible is
-			// tracked only as toggle state for the keybind).
-			node := m.views.GetCurrentNode()
-			if node != nil && node.IsNote() {
-				path := node.Item.Path
-				m.previewFile = path
-				return m, func() tea.Msg {
-					return embed.PreviewRequestMsg{Path: path}
-				}
+			m.previewFile = path
+			return m, func() tea.Msg {
+				return embed.PreviewRequestMsg{Path: path}
 			}
-			return m, nil
 		case key.Matches(msg, m.keys.GitCommit):
 			// Start commit dialog
 			m.isCommitting = true
