@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/key"
@@ -18,8 +17,6 @@ import (
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/core/util/pathutil"
-	"github.com/grovetools/flow/pkg/orchestration"
-	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/grovetools/nb/pkg/tui/browser/components/confirm"
 	"github.com/grovetools/nb/pkg/tui/browser/views"
 	"github.com/grovetools/nb/pkg/models"
@@ -148,81 +145,10 @@ func (m *Model) promoteToJobCmd() tea.Cmd {
 	planName := pi.name
 
 	return func() tea.Msg {
-		// Load the target plan
-		plan, err := orchestration.LoadPlan(planPath)
+		jobFilename, err := m.service.PromoteNoteToJob(note.Path, planPath)
 		if err != nil {
-			return notePromotedToJobMsg{err: fmt.Errorf("loading plan %s: %w", planName, err)}
+			return notePromotedToJobMsg{err: err}
 		}
-
-		// Read note content from disk
-		noteContent, err := os.ReadFile(note.Path)
-		if err != nil {
-			return notePromotedToJobMsg{err: fmt.Errorf("reading note content: %w", err)}
-		}
-
-		// Parse frontmatter to get the body content
-		_, body, err := frontmatter.Parse(string(noteContent))
-		if err != nil {
-			// Fall back to raw content if parsing fails
-			body = string(noteContent)
-		}
-
-		// Determine the note title
-		noteTitle := note.FrontmatterTitle
-		if noteTitle == "" {
-			noteTitle = note.Title
-		}
-
-		// Generate a unique job ID using timestamp + slugified title
-		jobID := fmt.Sprintf("%s-%s", time.Now().Format("20060102-150405"), sanitizeForFilename(noteTitle))
-
-		// Create the job
-		job := &orchestration.Job{
-			ID:       jobID,
-			Title:    noteTitle,
-			Type:     orchestration.JobTypeChat,
-			Status:   orchestration.JobStatusPendingUser,
-			NoteRef:  note.Path,
-		}
-
-		// Add the job to the plan (this writes the job file to disk)
-		jobFilename, err := orchestration.AddJob(plan, job)
-		if err != nil {
-			return notePromotedToJobMsg{err: fmt.Errorf("adding job to plan: %w", err)}
-		}
-
-		// Write the note body as the job's prompt content
-		jobFilePath := filepath.Join(planPath, jobFilename)
-		jobContent, err := os.ReadFile(jobFilePath)
-		if err != nil {
-			return notePromotedToJobMsg{err: fmt.Errorf("reading job file: %w", err)}
-		}
-		// Append the note body after the frontmatter
-		updatedContent := string(jobContent) + "\n" + strings.TrimSpace(body) + "\n"
-		if err := os.WriteFile(jobFilePath, []byte(updatedContent), 0644); err != nil {
-			return notePromotedToJobMsg{err: fmt.Errorf("writing job body: %w", err)}
-		}
-
-		// Update the note's frontmatter with plan_ref
-		planRef := fmt.Sprintf("%s/%s", planName, jobFilename)
-		fm, noteBody, parseErr := frontmatter.Parse(string(noteContent))
-		if parseErr == nil && fm != nil {
-			fm.PlanRef = planRef
-			updatedNote := frontmatter.BuildContent(fm, noteBody)
-			if writeErr := os.WriteFile(note.Path, []byte(updatedNote), 0644); writeErr != nil {
-				// Non-fatal: log but continue
-				_ = writeErr
-			}
-		}
-
-		// Archive the original note
-		noteDir := filepath.Dir(note.Path)
-		archiveDir := filepath.Join(noteDir, ".archive")
-		if err := os.MkdirAll(archiveDir, 0755); err == nil {
-			dest := filepath.Join(archiveDir, filepath.Base(note.Path))
-			_ = os.Rename(note.Path, dest)
-		}
-
 		return notePromotedToJobMsg{planName: planName, jobFile: jobFilename}
 	}
 }
