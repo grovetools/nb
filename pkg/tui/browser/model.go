@@ -301,6 +301,9 @@ func New(cfg Config) Model {
 	}
 }
 
+// NoteCount returns the total number of notes in the browser list.
+func (m Model) NoteCount() int { return len(m.allItems) }
+
 // populateTagPicker collects all unique tags with counts and populates the tag picker, sorted by count descending
 func (m *Model) populateTagPicker() {
 	tagCounts := make(map[string]int)

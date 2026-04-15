@@ -53,6 +53,17 @@ func (m Model) View() string {
 
 func (m Model) Close() error { return nil }
 
+// TestState returns a snapshot of internal state for the debug API.
+func (m Model) TestState() map[string]interface{} {
+	state := map[string]interface{}{
+		"mode": "browser",
+	}
+	if p, ok := m.pager.Active().(*browserPage); ok {
+		state["note_count"] = p.inner.NoteCount()
+	}
+	return state
+}
+
 // browserPage adapts nb's browser.Model to pager.Page.
 type browserPage struct {
 	inner  browser.Model
