@@ -30,6 +30,7 @@ func main() {
 		NotebookGitRootScenario(),
 		NotebookPasteIntoPlanScenario(),
 		NotebookPromoteToJobScenario(),
+		NotebookFullLifecycleScenario(),
 	}
 
 	// Setup signal handling for graceful shutdown.

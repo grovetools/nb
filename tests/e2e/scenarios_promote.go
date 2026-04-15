@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/grovetools/tend/pkg/fs"
+	"github.com/grovetools/tend/pkg/git"
 	"github.com/grovetools/tend/pkg/harness"
 	"github.com/grovetools/tend/pkg/verify"
 )
@@ -257,6 +259,329 @@ Another bug to fix.
 				}
 
 				return nil
+			}),
+		},
+	)
+}
+
+// findFlowBinary locates the flow binary for cross-tool e2e tests.
+func findFlowBinary() (string, error) {
+	if bin, err := exec.LookPath("flow"); err == nil {
+		return bin, nil
+	}
+	// Try the real home directory (test sandbox uses a fake home)
+	realHomeBin := filepath.Join("/Users/solom4", ".grove", "bin", "flow")
+	if fs.Exists(realHomeBin) {
+		return realHomeBin, nil
+	}
+	return "", fmt.Errorf("flow binary not found in PATH or ~/.grove/bin")
+}
+
+// NotebookFullLifecycleScenario tests the complete note lifecycle:
+// promote → complete (note moves inbox → in_progress → completed)
+// promote → demote  (note moves inbox → in_progress → inbox)
+func NotebookFullLifecycleScenario() *harness.Scenario {
+	return harness.NewScenario(
+		"notebook-full-lifecycle",
+		"Full round-trip: promote note to job, complete moves note to completed, demote moves note back to inbox.",
+		[]string{"notebook", "promote", "complete", "demote", "lifecycle", "cross-workspace"},
+		[]harness.Step{
+			harness.NewStep("Setup multi-workspace sandbox with git", func(ctx *harness.Context) error {
+				homeDir := ctx.HomeDir()
+				notebookRoot := filepath.Join(homeDir, "notebooks", "lifecycle-test")
+
+				// Workspace A: source workspace with notes
+				wsADir := filepath.Join(notebookRoot, "workspaces", "workspace-a")
+				wsAInbox := filepath.Join(wsADir, "inbox")
+				if err := fs.CreateDir(wsAInbox); err != nil {
+					return fmt.Errorf("creating workspace-a inbox: %w", err)
+				}
+
+				// Workspace B: target workspace with a plan
+				wsBDir := filepath.Join(notebookRoot, "workspaces", "workspace-b")
+				planDir := filepath.Join(wsBDir, "plans", "test-plan")
+				if err := fs.CreateDir(planDir); err != nil {
+					return fmt.Errorf("creating plan dir: %w", err)
+				}
+
+				planConfig := "name: test-plan\nworktree: test-worktree\n"
+				if err := fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), planConfig); err != nil {
+					return fmt.Errorf("writing plan config: %w", err)
+				}
+
+				// Initialize a git repo at the sandbox root so git.GetRepoInfo works
+				if err := git.Init(notebookRoot); err != nil {
+					return fmt.Errorf("git init: %w", err)
+				}
+				if err := git.SetupTestConfig(notebookRoot); err != nil {
+					return fmt.Errorf("git config: %w", err)
+				}
+				repo := git.New(notebookRoot)
+				if err := repo.AddCommit("initial commit"); err != nil {
+					return fmt.Errorf("git commit: %w", err)
+				}
+
+				ctx.Set("notebook_root", notebookRoot)
+				ctx.Set("ws_a_dir", wsADir)
+				ctx.Set("ws_a_inbox", wsAInbox)
+				ctx.Set("ws_b_dir", wsBDir)
+				ctx.Set("plan_dir", planDir)
+
+				return nil
+			}),
+
+			harness.NewStep("Create note for promote→complete lifecycle", func(ctx *harness.Context) error {
+				wsAInbox := ctx.GetString("ws_a_inbox")
+				noteContent := `---
+title: Lifecycle Test Note
+type: inbox
+tags: [test]
+---
+
+# Lifecycle Test
+
+This note will be promoted and then completed.
+`
+				notePath := filepath.Join(wsAInbox, "test-lifecycle.md")
+				if err := fs.WriteString(notePath, noteContent); err != nil {
+					return fmt.Errorf("writing note: %w", err)
+				}
+				ctx.Set("note1_path", notePath)
+				return nil
+			}),
+
+			harness.NewStep("Promote note to job", func(ctx *harness.Context) error {
+				notePath := ctx.GetString("note1_path")
+				planDir := ctx.GetString("plan_dir")
+
+				cmd := ctx.Bin("promote", notePath, "--plan", planDir, "--type", "chat")
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if err := result.AssertSuccess(); err != nil {
+					return fmt.Errorf("nb promote failed: %w", err)
+				}
+
+				// Extract job filename from stdout
+				lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+				var jobFilename string
+				for i := len(lines) - 1; i >= 0; i-- {
+					line := strings.TrimSpace(lines[i])
+					if line != "" && strings.HasSuffix(line, ".md") {
+						jobFilename = line
+						break
+					}
+				}
+				if jobFilename == "" {
+					return fmt.Errorf("nb promote did not output a job filename, stdout: %q", result.Stdout)
+				}
+				ctx.Set("job1_filename", jobFilename)
+				return nil
+			}),
+
+			harness.NewStep("Verify promote: note moved to in_progress", func(ctx *harness.Context) error {
+				notePath := ctx.GetString("note1_path")
+				wsADir := ctx.GetString("ws_a_dir")
+				inProgressPath := filepath.Join(wsADir, "in_progress", filepath.Base(notePath))
+
+				if err := fs.AssertNotExists(notePath); err != nil {
+					return fmt.Errorf("original note should be gone from inbox: %w", err)
+				}
+				if err := fs.AssertExists(inProgressPath); err != nil {
+					return fmt.Errorf("note should exist in in_progress: %w", err)
+				}
+
+				ctx.Set("note1_in_progress", inProgressPath)
+				return nil
+			}),
+
+			harness.NewStep("Verify promote: job created with correct frontmatter", func(ctx *harness.Context) error {
+				planDir := ctx.GetString("plan_dir")
+				jobFilename := ctx.GetString("job1_filename")
+				note1InProgress := ctx.GetString("note1_in_progress")
+				jobPath := filepath.Join(planDir, jobFilename)
+
+				if err := fs.AssertExists(jobPath); err != nil {
+					return fmt.Errorf("job file not in plan: %w", err)
+				}
+
+				job, err := orchestration.LoadJob(jobPath)
+				if err != nil {
+					return fmt.Errorf("loading job: %w", err)
+				}
+
+				return ctx.Verify(func(v *verify.Collector) {
+					v.Equal("job type is chat", string(orchestration.JobTypeChat), string(job.Type))
+					v.Equal("job status is pending_user", string(orchestration.JobStatusPendingUser), string(job.Status))
+					v.Equal("job note_ref points to in_progress", note1InProgress, job.NoteRef)
+					v.Equal("job worktree from plan config", "test-worktree", job.Worktree)
+					v.Contains("job title from note", job.Title, "Lifecycle Test Note")
+				})
+			}),
+
+			harness.NewStep("Complete job and verify note moves to completed", func(ctx *harness.Context) error {
+				flowBin, err := findFlowBinary()
+				if err != nil {
+					return fmt.Errorf("finding flow binary: %w", err)
+				}
+
+				planDir := ctx.GetString("plan_dir")
+				jobFilename := ctx.GetString("job1_filename")
+
+				cmd := ctx.Command(flowBin, "complete", planDir, jobFilename).
+					Env("HOME=" + ctx.HomeDir())
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if err := result.AssertSuccess(); err != nil {
+					return fmt.Errorf("flow complete failed: %w", err)
+				}
+
+				return nil
+			}),
+
+			harness.NewStep("Verify complete: note in completed/, job status completed", func(ctx *harness.Context) error {
+				note1InProgress := ctx.GetString("note1_in_progress")
+				wsADir := ctx.GetString("ws_a_dir")
+				completedPath := filepath.Join(wsADir, "completed", filepath.Base(note1InProgress))
+
+				// Note should be gone from in_progress
+				if err := fs.AssertNotExists(note1InProgress); err != nil {
+					return fmt.Errorf("note should be gone from in_progress: %w", err)
+				}
+
+				// Note should be in completed/
+				if err := fs.AssertExists(completedPath); err != nil {
+					return fmt.Errorf("note should exist in completed: %w", err)
+				}
+
+				// Job status should be completed
+				planDir := ctx.GetString("plan_dir")
+				jobFilename := ctx.GetString("job1_filename")
+				jobPath := filepath.Join(planDir, jobFilename)
+
+				job, err := orchestration.LoadJob(jobPath)
+				if err != nil {
+					return fmt.Errorf("loading completed job: %w", err)
+				}
+
+				return ctx.Verify(func(v *verify.Collector) {
+					v.Equal("job status is completed", string(orchestration.JobStatusCompleted), string(job.Status))
+				})
+			}),
+
+			// --- Demote round-trip ---
+
+			harness.NewStep("Create second note for promote→demote lifecycle", func(ctx *harness.Context) error {
+				wsAInbox := ctx.GetString("ws_a_inbox")
+				noteContent := `---
+title: Demote Test Note
+type: inbox
+tags: [test]
+---
+
+# Demote Test
+
+This note will be promoted and then demoted back to inbox.
+`
+				notePath := filepath.Join(wsAInbox, "test-demote.md")
+				if err := fs.WriteString(notePath, noteContent); err != nil {
+					return fmt.Errorf("writing second note: %w", err)
+				}
+				ctx.Set("note2_path", notePath)
+				return nil
+			}),
+
+			harness.NewStep("Promote second note", func(ctx *harness.Context) error {
+				notePath := ctx.GetString("note2_path")
+				planDir := ctx.GetString("plan_dir")
+
+				cmd := ctx.Bin("promote", notePath, "--plan", planDir, "--type", "chat")
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if err := result.AssertSuccess(); err != nil {
+					return fmt.Errorf("nb promote (demote test) failed: %w", err)
+				}
+
+				lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+				var jobFilename string
+				for i := len(lines) - 1; i >= 0; i-- {
+					line := strings.TrimSpace(lines[i])
+					if line != "" && strings.HasSuffix(line, ".md") {
+						jobFilename = line
+						break
+					}
+				}
+				if jobFilename == "" {
+					return fmt.Errorf("nb promote did not output a job filename, stdout: %q", result.Stdout)
+				}
+				ctx.Set("job2_filename", jobFilename)
+				return nil
+			}),
+
+			harness.NewStep("Verify second note moved to in_progress", func(ctx *harness.Context) error {
+				notePath := ctx.GetString("note2_path")
+				wsADir := ctx.GetString("ws_a_dir")
+				inProgressPath := filepath.Join(wsADir, "in_progress", filepath.Base(notePath))
+
+				if err := fs.AssertNotExists(notePath); err != nil {
+					return fmt.Errorf("original note should be gone from inbox: %w", err)
+				}
+				if err := fs.AssertExists(inProgressPath); err != nil {
+					return fmt.Errorf("note should exist in in_progress: %w", err)
+				}
+
+				ctx.Set("note2_in_progress", inProgressPath)
+				return nil
+			}),
+
+			harness.NewStep("Demote second job back to inbox", func(ctx *harness.Context) error {
+				flowBin, err := findFlowBinary()
+				if err != nil {
+					return fmt.Errorf("finding flow binary: %w", err)
+				}
+
+				planDir := ctx.GetString("plan_dir")
+				jobFilename := ctx.GetString("job2_filename")
+				jobFilePath := filepath.Join(planDir, jobFilename)
+
+				cmd := ctx.Command(flowBin, "plan", "demote", jobFilePath).
+					Env("HOME=" + ctx.HomeDir())
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if err := result.AssertSuccess(); err != nil {
+					return fmt.Errorf("flow plan demote failed: %w", err)
+				}
+
+				return nil
+			}),
+
+			harness.NewStep("Verify demote: note back in inbox, job abandoned", func(ctx *harness.Context) error {
+				note2InProgress := ctx.GetString("note2_in_progress")
+				wsADir := ctx.GetString("ws_a_dir")
+				inboxPath := filepath.Join(wsADir, "inbox", filepath.Base(note2InProgress))
+
+				// Note should be gone from in_progress
+				if err := fs.AssertNotExists(note2InProgress); err != nil {
+					return fmt.Errorf("note should be gone from in_progress: %w", err)
+				}
+
+				// Note should be back in inbox
+				if err := fs.AssertExists(inboxPath); err != nil {
+					return fmt.Errorf("note should be back in inbox: %w", err)
+				}
+
+				// Job status should be abandoned
+				planDir := ctx.GetString("plan_dir")
+				jobFilename := ctx.GetString("job2_filename")
+				jobPath := filepath.Join(planDir, jobFilename)
+
+				job, err := orchestration.LoadJob(jobPath)
+				if err != nil {
+					return fmt.Errorf("loading demoted job: %w", err)
+				}
+
+				return ctx.Verify(func(v *verify.Collector) {
+					v.Equal("job status is abandoned", string(orchestration.JobStatusAbandoned), string(job.Status))
+				})
 			}),
 		},
 	)
