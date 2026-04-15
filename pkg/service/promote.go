@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/nb/pkg/frontmatter"
 )
@@ -88,6 +90,25 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 	if plan.Config != nil {
 		if plan.Config.Worktree != "" {
 			job.Worktree = plan.Config.Worktree
+		}
+	}
+	// Resolve repo/branch from the worktree (a git repo) rather than the
+	// plan directory (which lives in the notebook filesystem, not in git).
+	// This ensures promoted jobs get "grovetools" not "nb".
+	if job.Worktree != "" {
+		// Find the ecosystem root and look up the worktree path
+		if node, err := workspace.GetProjectByPath("."); err == nil && node != nil {
+			var ecoRoot string
+			if node.RootEcosystemPath != "" {
+				ecoRoot = node.RootEcosystemPath
+			} else {
+				ecoRoot = node.Path
+			}
+			wtPath := filepath.Join(ecoRoot, ".grove-worktrees", job.Worktree)
+			if repo, branch, _ := git.GetRepoInfo(wtPath); repo != "" {
+				job.Repository = repo
+				job.Branch = branch
+			}
 		}
 	}
 
