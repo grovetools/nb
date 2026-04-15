@@ -11,10 +11,16 @@ import (
 	"github.com/grovetools/nb/pkg/frontmatter"
 )
 
+// PromoteOptions configures the job created by PromoteNoteToJob.
+type PromoteOptions struct {
+	JobType     string // e.g. "chat", "interactive_agent", "headless_agent", "oneshot"
+	JobTemplate string // e.g. "chat", "" for none
+}
+
 // PromoteNoteToJob promotes a note to a job in an existing flow plan.
 // Both notePath and planDir are absolute paths and may be in different workspaces.
 // Returns the job filename on success.
-func (s *Service) PromoteNoteToJob(notePath string, planDir string) (string, error) {
+func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts PromoteOptions) (string, error) {
 	// Load the target plan
 	plan, err := orchestration.LoadPlan(planDir)
 	if err != nil {
@@ -63,12 +69,21 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string) (string, err
 	// Create the job with note_ref pointing to the in_progress location.
 	// Inherit repository/branch/worktree from plan config so the job
 	// doesn't fall back to CWD-based resolution in AddJob.
+	jobType := orchestration.JobTypeChat
+	if opts.JobType != "" {
+		jobType = orchestration.JobType(opts.JobType)
+	}
+	jobStatus := orchestration.JobStatusPendingUser
+	if jobType != orchestration.JobTypeChat {
+		jobStatus = orchestration.JobStatusPending
+	}
 	job := &orchestration.Job{
-		ID:      jobID,
-		Title:   noteTitle,
-		Type:    orchestration.JobTypeChat,
-		Status:  orchestration.JobStatusPendingUser,
-		NoteRef: inProgressPath,
+		ID:       jobID,
+		Title:    noteTitle,
+		Type:     jobType,
+		Status:   jobStatus,
+		Template: opts.JobTemplate,
+		NoteRef:  inProgressPath,
 	}
 	if plan.Config != nil {
 		if plan.Config.Worktree != "" {

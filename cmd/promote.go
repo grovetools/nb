@@ -15,6 +15,8 @@ var promoteUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.promote")
 func NewPromoteCmd(svc **service.Service) *cobra.Command {
 	var planDir string
 	var workspaceDir string
+	var jobType string
+	var jobTemplate string
 
 	cmd := &cobra.Command{
 		Use:   "promote <note-path>",
@@ -55,7 +57,11 @@ Examples:
 				}
 			}
 
-			jobFilename, err := s.PromoteNoteToJob(notePath, absPlanDir)
+			opts := service.PromoteOptions{
+				JobType:     jobType,
+				JobTemplate: jobTemplate,
+			}
+			jobFilename, err := s.PromoteNoteToJob(notePath, absPlanDir, opts)
 			if err != nil {
 				return err
 			}
@@ -76,6 +82,8 @@ Examples:
 	cmd.Flags().StringVar(&planDir, "plan", "", "Path to the target flow plan directory (required)")
 	_ = cmd.MarkFlagRequired("plan")
 	cmd.Flags().StringVar(&workspaceDir, "workspace", "", "Workspace directory to resolve --plan relative to its plans/")
+	cmd.Flags().StringVar(&jobType, "type", "chat", "Job type (chat, interactive_agent, headless_agent, oneshot)")
+	cmd.Flags().StringVar(&jobTemplate, "template", "chat", "Job template name")
 
 	return cmd
 }
