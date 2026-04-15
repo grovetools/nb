@@ -87,6 +87,32 @@ func (m Model) View() string {
 		return "\n" + lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, paddedOverlay)
 	}
 
+	// Render plan picker if active (promote to job)
+	if m.isPromotingToJob {
+		content := m.planPicker.View()
+
+		dialogBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(theme.DefaultTheme.Colors.Cyan).
+			Padding(1, 2).
+			Render(content)
+
+		helpText := lipgloss.NewStyle().
+			Faint(true).
+			Width(lipgloss.Width(dialogBox)).
+			Align(lipgloss.Center).
+			Render("\n\nEnter to select • Esc to cancel")
+
+		overlay := lipgloss.JoinVertical(lipgloss.Left, dialogBox, helpText)
+
+		// Add padding from top and left
+		paddedOverlay := lipgloss.NewStyle().
+			Padding(2, 0, 0, 4).
+			Render(overlay)
+
+		return "\n" + lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, paddedOverlay)
+	}
+
 	// Render note creation UI if active
 	if m.isCreatingNote {
 		// Get context information

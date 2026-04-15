@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/key"
@@ -17,6 +18,8 @@ import (
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/core/util/pathutil"
+	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/grovetools/nb/pkg/tui/browser/components/confirm"
 	"github.com/grovetools/nb/pkg/tui/browser/views"
 	"github.com/grovetools/nb/pkg/models"
@@ -115,6 +118,113 @@ func (m *Model) createPlanCmd(note *models.Note) tea.Cmd {
 		// On success, trigger a full refresh of the note browser
 		return refreshMsg{}
 	})
+}
+
+// notePromotedToJobMsg is sent after a note has been promoted to a job in a plan.
+type notePromotedToJobMsg struct {
+	planName string
+	jobFile  string
+	err      error
+}
+
+// promoteToJobCmd creates a job in the selected plan from the current note.
+func (m *Model) promoteToJobCmd() tea.Cmd {
+	note := m.noteToPromote
+	if note == nil {
+		return func() tea.Msg {
+			return notePromotedToJobMsg{err: fmt.Errorf("no note selected for promotion")}
+		}
+	}
+
+	// Get selected plan from picker
+	selected := m.planPicker.SelectedItem()
+	if selected == nil {
+		return func() tea.Msg {
+			return notePromotedToJobMsg{err: fmt.Errorf("no plan selected")}
+		}
+	}
+	pi := selected.(planItem)
+	planPath := pi.path
+	planName := pi.name
+
+	return func() tea.Msg {
+		// Load the target plan
+		plan, err := orchestration.LoadPlan(planPath)
+		if err != nil {
+			return notePromotedToJobMsg{err: fmt.Errorf("loading plan %s: %w", planName, err)}
+		}
+
+		// Read note content from disk
+		noteContent, err := os.ReadFile(note.Path)
+		if err != nil {
+			return notePromotedToJobMsg{err: fmt.Errorf("reading note content: %w", err)}
+		}
+
+		// Parse frontmatter to get the body content
+		_, body, err := frontmatter.Parse(string(noteContent))
+		if err != nil {
+			// Fall back to raw content if parsing fails
+			body = string(noteContent)
+		}
+
+		// Determine the note title
+		noteTitle := note.FrontmatterTitle
+		if noteTitle == "" {
+			noteTitle = note.Title
+		}
+
+		// Generate a unique job ID using timestamp + slugified title
+		jobID := fmt.Sprintf("%s-%s", time.Now().Format("20060102-150405"), sanitizeForFilename(noteTitle))
+
+		// Create the job
+		job := &orchestration.Job{
+			ID:       jobID,
+			Title:    noteTitle,
+			Type:     orchestration.JobTypeChat,
+			Status:   orchestration.JobStatusPendingUser,
+			NoteRef:  note.Path,
+		}
+
+		// Add the job to the plan (this writes the job file to disk)
+		jobFilename, err := orchestration.AddJob(plan, job)
+		if err != nil {
+			return notePromotedToJobMsg{err: fmt.Errorf("adding job to plan: %w", err)}
+		}
+
+		// Write the note body as the job's prompt content
+		jobFilePath := filepath.Join(planPath, jobFilename)
+		jobContent, err := os.ReadFile(jobFilePath)
+		if err != nil {
+			return notePromotedToJobMsg{err: fmt.Errorf("reading job file: %w", err)}
+		}
+		// Append the note body after the frontmatter
+		updatedContent := string(jobContent) + "\n" + strings.TrimSpace(body) + "\n"
+		if err := os.WriteFile(jobFilePath, []byte(updatedContent), 0644); err != nil {
+			return notePromotedToJobMsg{err: fmt.Errorf("writing job body: %w", err)}
+		}
+
+		// Update the note's frontmatter with plan_ref
+		planRef := fmt.Sprintf("%s/%s", planName, jobFilename)
+		fm, noteBody, parseErr := frontmatter.Parse(string(noteContent))
+		if parseErr == nil && fm != nil {
+			fm.PlanRef = planRef
+			updatedNote := frontmatter.BuildContent(fm, noteBody)
+			if writeErr := os.WriteFile(note.Path, []byte(updatedNote), 0644); writeErr != nil {
+				// Non-fatal: log but continue
+				_ = writeErr
+			}
+		}
+
+		// Archive the original note
+		noteDir := filepath.Dir(note.Path)
+		archiveDir := filepath.Join(noteDir, ".archive")
+		if err := os.MkdirAll(archiveDir, 0755); err == nil {
+			dest := filepath.Join(archiveDir, filepath.Base(note.Path))
+			_ = os.Rename(note.Path, dest)
+		}
+
+		return notePromotedToJobMsg{planName: planName, jobFile: jobFilename}
+	}
 }
 
 func (m *Model) syncWorkspaceCmd() tea.Cmd {
@@ -514,6 +624,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(fetchAllItemsCmd(m.service, m.showArtifacts), m.spinner.Tick)
 
+	case notePromotedToJobMsg:
+		m.noteToPromote = nil
+		if msg.err != nil {
+			m.statusMessage = fmt.Sprintf("Error promoting note: %v", msg.err)
+			return m, nil
+		}
+		m.statusMessage = fmt.Sprintf("Promoted to job in %s/%s", msg.planName, msg.jobFile)
+		// Refresh notes to reflect the archived note
+		m.loadingCount++
+		if m.focusedWorkspace != nil {
+			return m, tea.Batch(fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
+		}
+		return m, tea.Batch(fetchAllItemsCmd(m.service, m.showArtifacts), m.spinner.Tick)
+
 	case tea.KeyMsg:
 		if m.help.ShowAll {
 			// Let help component handle keys (scrolling, close on ?/q/esc)
@@ -599,6 +723,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			default:
 				m.tagPicker, cmd = m.tagPicker.Update(msg)
+				return m, cmd
+			}
+		}
+
+		// Handle plan picker mode (promote to job)
+		if m.isPromotingToJob {
+			switch msg.String() {
+			case "esc":
+				m.isPromotingToJob = false
+				m.noteToPromote = nil
+				return m, nil
+			case "enter":
+				m.isPromotingToJob = false
+				m.statusMessage = "Promoting note to job..."
+				return m, m.promoteToJobCmd()
+			default:
+				m.planPicker, cmd = m.planPicker.Update(msg)
 				return m, cmd
 			}
 		}
@@ -929,6 +1070,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMessage = fmt.Sprintf("Promoting note '%s' to a new plan...", title)
 				// This command will take over the terminal to launch the flow TUI
 				return m, m.createPlanCmd(note)
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.PromoteToJob):
+			node := m.views.GetCurrentNode()
+			if node != nil && node.IsNote() {
+				note := views.ItemToNote(node.Item)
+				m.noteToPromote = note
+				if err := m.populatePlanPicker(); err != nil {
+					m.statusMessage = fmt.Sprintf("Cannot promote: %s", err)
+					m.noteToPromote = nil
+					return m, nil
+				}
+				m.isPromotingToJob = true
+				return m, nil
 			}
 			return m, nil
 		case key.Matches(msg, m.keys.Archive):

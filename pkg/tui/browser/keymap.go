@@ -34,6 +34,7 @@ type KeyMap struct {
 	CreateNoteInbox  key.Binding
 	CreateNoteGlobal key.Binding
 	CreatePlan       key.Binding
+	PromoteToJob     key.Binding
 	Rename           key.Binding
 	// Clipboard operations (TUI-specific)
 	Cut     key.Binding
@@ -78,7 +79,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		// TUI-specific sections use explicit icons
 		keymap.NewSectionWithIcon("Notes", theme.IconNote,
 			k.CreateNote, k.CreateNoteInbox, k.CreateNoteGlobal,
-			k.CreatePlan, k.Rename,
+			k.CreatePlan, k.PromoteToJob, k.Rename,
 		),
 		keymap.NewSectionWithIcon("Clipboard", theme.IconArchive,
 			k.Cut, k.Copy, k.Paste, k.Archive, k.CopyPath,
@@ -174,6 +175,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		CreatePlan: key.NewBinding(
 			key.WithKeys("P"),
 			key.WithHelp("P", "promote note to plan"),
+		),
+		PromoteToJob: key.NewBinding(
+			key.WithKeys("J"),
+			key.WithHelp("J", "promote note to job"),
 		),
 		Rename: key.NewBinding(
 			key.WithKeys("R"),

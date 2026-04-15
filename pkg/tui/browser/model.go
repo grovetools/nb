@@ -80,7 +80,9 @@ type Model struct {
 
 	// Note promotion state
 	isPromotingToPlan bool // True when confirming worktree creation for a new plan
+	isPromotingToJob  bool // True when showing plan picker for promote-to-job
 	noteToPromote     *models.Note
+	planPicker        list.Model
 
 	// Column Visibility
 	columnVisibility map[string]bool
@@ -231,6 +233,14 @@ func New(cfg Config) Model {
 	columnList.SetShowStatusBar(false)
 	columnList.SetShowPagination(false)
 
+	// Initialize plan picker (will be populated when opened)
+	planPicker := list.New([]list.Item{}, planDelegate{}, 40, 20)
+	planPicker.Title = "Select Plan"
+	planPicker.SetShowHelp(false)
+	planPicker.SetFilteringEnabled(false)
+	planPicker.SetShowStatusBar(false)
+	planPicker.SetShowPagination(false)
+
 	// Initialize tag picker (will be populated when opened)
 	// Start with a reasonable default height, will be adjusted in populateTagPicker
 	tagPicker := list.New([]list.Item{}, tagDelegate{}, 40, 20)
@@ -288,6 +298,7 @@ func New(cfg Config) Model {
 		availableColumns:  availableColumns,
 		confirmDialog:     confirmDialog,
 		clipboard:         []string{},
+		planPicker:        planPicker,
 		tagPicker:         tagPicker,
 		views:             viewsModel,
 		preview:           preview,
@@ -307,7 +318,7 @@ func (m Model) NoteCount() int { return len(m.allItems) }
 // IsTextEntryActive reports whether a text input is currently focused,
 // so the pager knows to suspend navigation key bindings.
 func (m Model) IsTextEntryActive() bool {
-	return m.filterInput.Focused() || m.isCreatingNote || m.isRenamingNote || m.isCommitting
+	return m.filterInput.Focused() || m.isCreatingNote || m.isRenamingNote || m.isCommitting || m.isPromotingToJob
 }
 
 // populateTagPicker collects all unique tags with counts and populates the tag picker, sorted by count descending
@@ -364,6 +375,70 @@ func (m *Model) populateTagPicker() {
 		pickerHeight = 25
 	}
 	m.tagPicker.SetSize(40, pickerHeight)
+}
+
+// populatePlanPicker scans the workspace's plans directory and populates the plan picker list.
+func (m *Model) populatePlanPicker() error {
+	// Resolve the current workspace's plans directory
+	var wsNode *workspace.WorkspaceNode
+	if m.focusedWorkspace != nil {
+		wsNode = m.focusedWorkspace
+	} else {
+		// Fall back: use the note's workspace if available
+		if m.noteToPromote != nil && m.noteToPromote.Workspace != "" {
+			found, ok := m.findWorkspaceNodeByName(m.noteToPromote.Workspace)
+			if ok {
+				wsNode = found
+			}
+		}
+	}
+
+	if wsNode == nil {
+		return fmt.Errorf("no workspace context available")
+	}
+
+	plansDir, err := m.service.GetNotebookLocator().GetPlansDir(wsNode)
+	if err != nil {
+		return fmt.Errorf("resolving plans directory: %w", err)
+	}
+
+	entries, err := os.ReadDir(plansDir)
+	if err != nil {
+		return fmt.Errorf("reading plans directory: %w", err)
+	}
+
+	var items []list.Item
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		// Skip hidden directories
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		items = append(items, planItem{
+			name: entry.Name(),
+			path: filepath.Join(plansDir, entry.Name()),
+		})
+	}
+
+	if len(items) == 0 {
+		return fmt.Errorf("no plans found in workspace")
+	}
+
+	m.planPicker.SetItems(items)
+
+	// Adjust height based on number of plans (min 10, max 25)
+	pickerHeight := len(items) + 4
+	if pickerHeight < 10 {
+		pickerHeight = 10
+	}
+	if pickerHeight > 25 {
+		pickerHeight = 25
+	}
+	m.planPicker.SetSize(40, pickerHeight)
+
+	return nil
 }
 
 // Init initializes the TUI.
@@ -518,6 +593,38 @@ func (d tagDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 
 	// Format with count
 	str := fmt.Sprintf("%s (%d)", i.tag, i.count)
+	if index == m.Index() {
+		str = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange).Render("│ " + str)
+	} else {
+		str = "  " + str
+	}
+
+	fmt.Fprint(w, str)
+}
+
+// planItem implements the list.Item interface for the plan picker.
+type planItem struct {
+	name string
+	path string
+}
+
+func (i planItem) FilterValue() string { return i.name }
+func (i planItem) Title() string       { return i.name }
+func (i planItem) Description() string { return "" }
+
+// planDelegate is a custom delegate with minimal spacing for the plan picker
+type planDelegate struct{}
+
+func (d planDelegate) Height() int                             { return 1 }
+func (d planDelegate) Spacing() int                            { return 0 }
+func (d planDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d planDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	i, ok := item.(planItem)
+	if !ok {
+		return
+	}
+
+	str := i.name
 	if index == m.Index() {
 		str = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange).Render("│ " + str)
 	} else {
