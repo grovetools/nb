@@ -118,14 +118,16 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 		return "", fmt.Errorf("adding job to plan: %w", err)
 	}
 
-	// Append a chat template marker and reference to the linked note
-	// (do NOT copy the full note body into the job)
+	// Append the note body to the job file so chat models can read it
+	// directly. Also include a reference link for provenance.
 	jobFilePath := filepath.Join(planDir, jobFilename)
 	jobContent, err := os.ReadFile(jobFilePath)
 	if err != nil {
 		return "", fmt.Errorf("reading job file: %w", err)
 	}
-	updatedContent := string(jobContent) + "\n<!-- grove: {\"template\": \"chat\"} -->\n\nSee linked note: " + inProgressPath + "\n"
+	// The job template already includes a <!-- grove: {"template": "chat"} -->
+	// marker, so we just append the note body and reference below it.
+	updatedContent := string(jobContent) + "\n" + strings.TrimSpace(body) + "\n\n_Promoted from: " + inProgressPath + "_\n"
 	if err := os.WriteFile(jobFilePath, []byte(updatedContent), 0644); err != nil {
 		return "", fmt.Errorf("writing job body: %w", err)
 	}
