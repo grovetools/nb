@@ -14,20 +14,23 @@ var promoteUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.promote")
 
 func NewPromoteCmd(svc **service.Service) *cobra.Command {
 	var planDir string
+	var workspaceDir string
 
 	cmd := &cobra.Command{
 		Use:   "promote <note-path>",
 		Short: "Promote a note to a job in an existing flow plan",
 		Long: `Promote a notebook entry to a chat job in an existing flow plan.
 
-The note content becomes the job prompt. The original note is archived
-and linked back to the plan via plan_ref frontmatter.
+The note is moved to in_progress/ and a reference job is created in the
+target plan. The original note is linked back via plan_ref frontmatter.
 
 Both note-path and --plan accept absolute paths and may be in different workspaces.
+Use --workspace to resolve --plan relative to that workspace's plans directory.
 
 Examples:
   nb promote /path/to/note.md --plan /path/to/plan-dir
-  nb promote ./inbox/my-note.md --plan ~/plans/sprint-42`,
+  nb promote ./inbox/my-note.md --plan ~/plans/sprint-42
+  nb promote note.md --plan treemux-pt6 --workspace /path/to/workspace`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s := *svc
@@ -37,9 +40,19 @@ Examples:
 				return fmt.Errorf("resolving note path: %w", err)
 			}
 
-			absPlanDir, err := filepath.Abs(planDir)
-			if err != nil {
-				return fmt.Errorf("resolving plan path: %w", err)
+			var absPlanDir string
+			if workspaceDir != "" {
+				// Resolve --plan relative to the workspace's plans directory
+				absWorkspace, err := filepath.Abs(workspaceDir)
+				if err != nil {
+					return fmt.Errorf("resolving workspace path: %w", err)
+				}
+				absPlanDir = filepath.Join(absWorkspace, "plans", planDir)
+			} else {
+				absPlanDir, err = filepath.Abs(planDir)
+				if err != nil {
+					return fmt.Errorf("resolving plan path: %w", err)
+				}
 			}
 
 			jobFilename, err := s.PromoteNoteToJob(notePath, absPlanDir)
@@ -62,6 +75,7 @@ Examples:
 
 	cmd.Flags().StringVar(&planDir, "plan", "", "Path to the target flow plan directory (required)")
 	_ = cmd.MarkFlagRequired("plan")
+	cmd.Flags().StringVar(&workspaceDir, "workspace", "", "Workspace directory to resolve --plan relative to its plans/")
 
 	return cmd
 }

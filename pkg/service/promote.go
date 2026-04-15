@@ -48,13 +48,25 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string) (string, err
 	// Generate a unique job ID
 	jobID := fmt.Sprintf("%s-%s", time.Now().Format("20060102-150405"), sanitizeForJobID(noteTitle))
 
-	// Create the job
+	// Move the note to in_progress/ before creating the job so note_ref
+	// points to the in_progress path.
+	noteDir := filepath.Dir(notePath)
+	inProgressDir := filepath.Join(filepath.Dir(noteDir), "in_progress")
+	if err := os.MkdirAll(inProgressDir, 0755); err != nil {
+		return "", fmt.Errorf("creating in_progress directory: %w", err)
+	}
+	inProgressPath := filepath.Join(inProgressDir, filepath.Base(notePath))
+	if err := os.Rename(notePath, inProgressPath); err != nil {
+		return "", fmt.Errorf("moving note to in_progress: %w", err)
+	}
+
+	// Create the job with note_ref pointing to the in_progress location
 	job := &orchestration.Job{
 		ID:      jobID,
 		Title:   noteTitle,
 		Type:    orchestration.JobTypeChat,
 		Status:  orchestration.JobStatusPendingUser,
-		NoteRef: notePath,
+		NoteRef: inProgressPath,
 	}
 
 	// Add the job to the plan (writes the job file to disk)
@@ -63,34 +75,27 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string) (string, err
 		return "", fmt.Errorf("adding job to plan: %w", err)
 	}
 
-	// Append the note body to the job file
+	// Append a chat template marker and reference to the linked note
+	// (do NOT copy the full note body into the job)
 	jobFilePath := filepath.Join(planDir, jobFilename)
 	jobContent, err := os.ReadFile(jobFilePath)
 	if err != nil {
 		return "", fmt.Errorf("reading job file: %w", err)
 	}
-	updatedContent := string(jobContent) + "\n" + strings.TrimSpace(body) + "\n"
+	updatedContent := string(jobContent) + "\n<!-- grove: {\"template\": \"chat\"} -->\n\nSee linked note: " + inProgressPath + "\n"
 	if err := os.WriteFile(jobFilePath, []byte(updatedContent), 0644); err != nil {
 		return "", fmt.Errorf("writing job body: %w", err)
 	}
 
-	// Update the note's frontmatter with plan_ref
+	// Update the note's frontmatter with plan_ref at its new in_progress location
 	planName := filepath.Base(planDir)
 	planRef := fmt.Sprintf("%s/%s", planName, jobFilename)
 	if fm != nil {
 		fm.PlanRef = planRef
 		updatedNote := frontmatter.BuildContent(fm, body)
-		if writeErr := os.WriteFile(notePath, []byte(updatedNote), 0644); writeErr != nil {
+		if writeErr := os.WriteFile(inProgressPath, []byte(updatedNote), 0644); writeErr != nil {
 			s.Logger.WithError(writeErr).Warn("Failed to update note frontmatter with plan_ref")
 		}
-	}
-
-	// Archive the original note
-	noteDir := filepath.Dir(notePath)
-	archiveDir := filepath.Join(noteDir, ".archive")
-	if err := os.MkdirAll(archiveDir, 0755); err == nil {
-		dest := filepath.Join(archiveDir, filepath.Base(notePath))
-		_ = os.Rename(notePath, dest)
 	}
 
 	return jobFilename, nil
