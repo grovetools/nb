@@ -60,13 +60,20 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string) (string, err
 		return "", fmt.Errorf("moving note to in_progress: %w", err)
 	}
 
-	// Create the job with note_ref pointing to the in_progress location
+	// Create the job with note_ref pointing to the in_progress location.
+	// Inherit repository/branch/worktree from plan config so the job
+	// doesn't fall back to CWD-based resolution in AddJob.
 	job := &orchestration.Job{
 		ID:      jobID,
 		Title:   noteTitle,
 		Type:    orchestration.JobTypeChat,
 		Status:  orchestration.JobStatusPendingUser,
 		NoteRef: inProgressPath,
+	}
+	if plan.Config != nil {
+		if plan.Config.Worktree != "" {
+			job.Worktree = plan.Config.Worktree
+		}
 	}
 
 	// Add the job to the plan (writes the job file to disk)
