@@ -304,6 +304,12 @@ func New(cfg Config) Model {
 // NoteCount returns the total number of notes in the browser list.
 func (m Model) NoteCount() int { return len(m.allItems) }
 
+// IsTextEntryActive reports whether a text input is currently focused,
+// so the pager knows to suspend navigation key bindings.
+func (m Model) IsTextEntryActive() bool {
+	return m.filterInput.Focused() || m.isCreatingNote || m.isRenamingNote || m.isCommitting
+}
+
 // populateTagPicker collects all unique tags with counts and populates the tag picker, sorted by count descending
 func (m *Model) populateTagPicker() {
 	tagCounts := make(map[string]int)

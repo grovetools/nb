@@ -58,7 +58,7 @@ func (m Model) View() string {
 	// If a component is active, render it as an overlay
 	if m.confirmDialog.Active {
 		dialog := m.confirmDialog.View()
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+		return "\n" + lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
 	}
 
 	// Render tag picker if active
@@ -84,7 +84,7 @@ func (m Model) View() string {
 			Padding(2, 0, 0, 4).
 			Render(overlay)
 
-		return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, paddedOverlay)
+		return "\n" + lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, paddedOverlay)
 	}
 
 	// Render note creation UI if active
@@ -121,7 +121,7 @@ func (m Model) View() string {
 			Padding(2, 0, 0, 4).
 			Render(overlay)
 
-		return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, paddedOverlay)
+		return "\n" + lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, paddedOverlay)
 	}
 
 	// Render note rename UI if active
@@ -146,7 +146,7 @@ func (m Model) View() string {
 			Render("\n\nPress Enter to confirm • Esc to cancel")
 
 		overlay := lipgloss.JoinVertical(lipgloss.Left, dialogBox, helpText)
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+		return "\n" + lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
 	}
 
 	// Render git commit dialog if active
@@ -170,7 +170,7 @@ func (m Model) View() string {
 			Render("\n\nEnter to commit • Esc to cancel")
 
 		overlay := lipgloss.JoinVertical(lipgloss.Left, dialogBox, helpText)
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+		return "\n" + lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
 	}
 
 	if m.columnSelectMode {
@@ -186,7 +186,7 @@ func (m Model) View() string {
 			Align(lipgloss.Center).
 			Render("\n\nPress space to toggle • Enter/Esc/V to close")
 		content := lipgloss.JoinVertical(lipgloss.Left, styledView, helpText)
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+		return "\n" + lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 	}
 
 	// --- Single-pane layout (preview is handled by the terminal host VDrawer) ---

@@ -53,6 +53,16 @@ func (m Model) View() string {
 
 func (m Model) Close() error { return nil }
 
+// IsTextEntryActive delegates to the active pager page so the terminal
+// host can suspend navigation bindings during text input.
+func (m Model) IsTextEntryActive() bool {
+	type textInputActive interface{ IsTextEntryActive() bool }
+	if tia, ok := m.pager.Active().(textInputActive); ok {
+		return tia.IsTextEntryActive()
+	}
+	return false
+}
+
 // TestState returns a snapshot of internal state for the debug API.
 func (m Model) TestState() map[string]interface{} {
 	state := map[string]interface{}{
@@ -102,6 +112,10 @@ func (p *browserPage) Blur() {
 	if bm, ok := updated.(browser.Model); ok {
 		p.inner = bm
 	}
+}
+
+func (p *browserPage) IsTextEntryActive() bool {
+	return p.inner.IsTextEntryActive()
 }
 
 func (p *browserPage) SetSize(w, h int) {
