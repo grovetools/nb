@@ -473,11 +473,20 @@ func (m *Model) updatePreviewContent() tea.Cmd {
 		}
 		path := node.Item.Path
 		cmds := []tea.Cmd{loadFileContentCmd(path)}
-		// Emit preview request for the terminal host (VDrawer with nvim -R).
+		// Emit preview request for the terminal host.
 		if m.previewVisible {
-			cmds = append(cmds, func() tea.Msg {
-				return embed.PreviewRequestMsg{Path: path}
-			})
+			if m.hosted {
+				cmds = append(cmds,
+					func() tea.Msg { return embed.SplitEditorCloseRequestMsg{} },
+					func() tea.Msg {
+						return embed.SplitEditorRequestMsg{Path: path, Ratio: 0.35, Focus: false}
+					},
+				)
+			} else {
+				cmds = append(cmds, func() tea.Msg {
+					return embed.PreviewRequestMsg{Path: path}
+				})
+			}
 		}
 		return tea.Batch(cmds...)
 	}

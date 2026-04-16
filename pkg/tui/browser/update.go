@@ -1084,25 +1084,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			path := noteToPreview.Path
-			if m.hosted {
-				// Open (or replace) a split editor alongside the notebook browser
-				// with a 35/65 ratio (notebook keeps 35%, editor gets 65%).
-				return m, func() tea.Msg {
-					return embed.SplitEditorRequestMsg{Path: path, Ratio: 0.35}
-				}
-			}
-			// Standalone: toggle internal preview pane
 			m.previewVisible = !m.previewVisible
 			if !m.previewVisible {
 				m.previewFocused = false
+				m.previewFile = ""
 				if strings.Contains(m.statusMessage, "Previewing") || strings.Contains(m.statusMessage, "Loading") {
 					m.statusMessage = ""
+				}
+				if m.hosted {
+					return m, func() tea.Msg {
+						return embed.SplitEditorCloseRequestMsg{}
+					}
 				}
 				return m, func() tea.Msg {
 					return embed.PreviewRequestMsg{Path: ""}
 				}
 			}
 			m.previewFile = path
+			if m.hosted {
+				return m, func() tea.Msg {
+					return embed.SplitEditorRequestMsg{Path: path, Ratio: 0.35, Focus: false}
+				}
+			}
 			return m, func() tea.Msg {
 				return embed.PreviewRequestMsg{Path: path}
 			}
@@ -1127,6 +1130,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Unstage all changes
 			return m, unstageAllCmd(m.service, m.allItems)
 		case key.Matches(msg, m.keys.Back):
+			if m.previewVisible {
+				m.previewVisible = false
+				m.previewFocused = false
+				m.previewFile = ""
+				if strings.Contains(m.statusMessage, "Previewing") || strings.Contains(m.statusMessage, "Loading") {
+					m.statusMessage = ""
+				}
+				if m.hosted {
+					return m, func() tea.Msg {
+						return embed.SplitEditorCloseRequestMsg{}
+					}
+				}
+				return m, func() tea.Msg {
+					return embed.PreviewRequestMsg{Path: ""}
+				}
+			}
 			if m.ecosystemPickerMode {
 				m.ecosystemPickerMode = false
 				m.updateViewsState()
