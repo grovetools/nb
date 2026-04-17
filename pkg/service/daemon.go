@@ -15,7 +15,7 @@ func notifyDaemonNoteEvent(event models.NoteEvent) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
-		client := daemon.New()
+		client := daemon.NewWithAutoStart()
 		defer client.Close()
 
 		if !client.IsRunning() {
@@ -33,7 +33,7 @@ func notifyDaemonRefresh() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		client := daemon.New()
+		client := daemon.NewWithAutoStart()
 		defer client.Close()
 
 		if !client.IsRunning() {

@@ -110,7 +110,7 @@ Examples:
 
 			// Fast-path: --workspaces --counts reads cached counts from daemon
 			if listAllWorkspaces && listCounts {
-				client := daemon.New()
+				client := daemon.NewWithAutoStart(wsCtx.NotebookContextWorkspace.Path)
 				defer client.Close()
 
 				if client.IsRunning() {
@@ -394,7 +394,7 @@ func outputJSON_Counts(counts map[string]*coremodels.NoteCounts) error {
 // If tagFilter is non-empty, the --workspaces caller can skip its own tag filtering
 // since we filter here.
 func tryDaemonListNotes(ctx context.Context, wsFilter, tagFilter string) ([]*models.Note, error) {
-	client := daemon.New()
+	client := daemon.NewWithAutoStart()
 	defer client.Close()
 
 	if !client.IsRunning() {

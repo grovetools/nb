@@ -97,7 +97,7 @@ func fetchFocusedItemsCmd(svc *service.Service, focusedWS *workspace.WorkspaceNo
 // tryDaemonIndex attempts to fetch note index entries from the daemon.
 // Returns nil if the daemon is unavailable or returns no entries.
 func tryDaemonIndex(focusedWS *workspace.WorkspaceNode, svc *service.Service) []*tree.Item {
-	client := daemon.New()
+	client := daemon.NewWithAutoStart(focusedWS.Path)
 	defer client.Close()
 
 	if !client.IsRunning() {
@@ -252,7 +252,7 @@ func fetchWorkspacesCmd(provider *workspace.Provider) tea.Cmd {
 func fetchAllItemsCmd(svc *service.Service, showArtifacts bool) tea.Cmd {
 	return func() tea.Msg {
 		// Try daemon index first — fetch all entries (no workspace filter)
-		client := daemon.New()
+		client := daemon.NewWithAutoStart()
 		defer client.Close()
 		if client.IsRunning() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
