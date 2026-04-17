@@ -97,7 +97,10 @@ func fetchFocusedItemsCmd(svc *service.Service, focusedWS *workspace.WorkspaceNo
 // tryDaemonIndex attempts to fetch note index entries from the daemon.
 // Returns nil if the daemon is unavailable or returns no entries.
 func tryDaemonIndex(focusedWS *workspace.WorkspaceNode, svc *service.Service) []*tree.Item {
-	client := daemon.NewWithAutoStart(focusedWS.Path)
+	// Inherit GROVE_SCOPE from host (e.g. treemux) so embedded nb shares
+	// the same daemon. Don't scope per focused workspace — a home-scoped
+	// daemon's collector already sees every sub-workspace.
+	client := daemon.NewWithAutoStart()
 	defer client.Close()
 
 	if !client.IsRunning() {
