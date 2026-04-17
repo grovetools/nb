@@ -110,7 +110,7 @@ Examples:
 
 			// Fast-path: --workspaces --counts reads cached counts from daemon
 			if listAllWorkspaces && listCounts {
-				client := daemon.NewWithAutoStart(wsCtx.NotebookContextWorkspace.Path)
+				client := daemon.NewWithAutoStart()
 				defer client.Close()
 
 				if client.IsRunning() {
