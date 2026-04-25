@@ -170,7 +170,7 @@ Another bug to fix.
 				})
 			}),
 
-			harness.NewStep("Verify job body has reference link (not full content)", func(ctx *harness.Context) error {
+			harness.NewStep("Verify job body inlines note content with promoted-from trailer", func(ctx *harness.Context) error {
 				jobPath := ctx.GetString("job_path")
 
 				content, err := fs.ReadString(jobPath)
@@ -179,10 +179,9 @@ Another bug to fix.
 				}
 
 				return ctx.Verify(func(v *verify.Collector) {
-					v.Contains("job body has reference link", content, "See linked note:")
 					v.Contains("job body has chat template", content, "template")
-					// Must NOT contain the full note body
-					v.NotContains("job body does not have full note content", content, "Steps to Reproduce")
+					v.Contains("job body inlines note body", content, "Steps to Reproduce")
+					v.Contains("job body has promoted-from trailer", content, "_Promoted from:")
 				})
 			}),
 
