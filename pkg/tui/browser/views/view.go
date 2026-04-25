@@ -356,6 +356,10 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 			if icon != "" {
 				info.indicator = icon
 			}
+		} else if idx := strings.Index(groupName, "/.artifacts/"); idx >= 0 {
+			// For artifact job-dir nodes, display only the job name (the part
+			// after `<parent>/.artifacts/`), not the full path.
+			info.name = groupName[idx+len("/.artifacts/"):]
 		} else if node.IsPlan() {
 			// Handle plan nodes (but not archive nodes that start with "plans/")
 			info.isPlan = true

@@ -405,15 +405,16 @@ func (m *Model) BuildDisplayTree() {
 			// Separate regular groups, archived subgroups, and artifact subgroups
 			// archiveSubgroups maps "parent" -> "child" -> notes
 			// e.g., "plans" -> "test-plan" -> [notes in plans/.archive/test-plan]
-			// artifactSubgroups maps "parent" -> notes
-			// e.g., "plans/binary-test" -> [artifacts in plans/binary-test/.artifacts/]
+			// artifactSubgroups maps "parent" -> "jobName" -> notes
+			// e.g., "plans/binary-test" -> "impl-foo-abc123" -> [briefing/log/etc files]
+			// jobName == "" means files directly under .artifacts (no per-job subdir).
 			var regularGroups []string
 			var rootNotes []*models.Note
 			planGroups := make(map[string][]*models.Note)
 			holdPlanGroups := make(map[string][]*models.Note)
 			archiveSubgroups := make(map[string]map[string][]*models.Note)
 			closedSubgroups := make(map[string]map[string][]*models.Note)
-			artifactSubgroups := make(map[string][]*models.Note)
+			artifactSubgroups := make(map[string]map[string][]*models.Note)
 
 			for name, notes := range noteGroups {
 				// Handle root notes (e.g. grove.toml)
@@ -498,10 +499,25 @@ func (m *Model) BuildDisplayTree() {
 					continue
 				}
 
-				// Check if this matches pattern "<parent>/.artifacts" (artifacts directly in .artifacts folder)
+				// Check if this matches pattern "<parent>/.artifacts/<jobName>"
+				// (each job dir under .artifacts becomes its own subgroup).
+				if idx := strings.Index(name, "/.artifacts/"); idx >= 0 {
+					parent := name[:idx]
+					jobName := name[idx+len("/.artifacts/"):]
+					if artifactSubgroups[parent] == nil {
+						artifactSubgroups[parent] = make(map[string][]*models.Note)
+					}
+					artifactSubgroups[parent][jobName] = notes
+					continue
+				}
+
+				// Check if this matches pattern "<parent>/.artifacts" (files directly in .artifacts folder)
 				if strings.HasSuffix(name, "/.artifacts") {
 					parent := strings.TrimSuffix(name, "/.artifacts")
-					artifactSubgroups[parent] = notes
+					if artifactSubgroups[parent] == nil {
+						artifactSubgroups[parent] = make(map[string][]*models.Note)
+					}
+					artifactSubgroups[parent][""] = notes
 					continue
 				}
 
@@ -525,6 +541,46 @@ func (m *Model) BuildDisplayTree() {
 					regularGroups = append(regularGroups, name)
 				}
 			}
+			ensureParentGroup := func(parent string) {
+				if parent == "plans" || parent == "" {
+					return
+				}
+				if strings.HasPrefix(parent, "plans/") {
+					planName := strings.TrimPrefix(parent, "plans/")
+					if planGroups[planName] == nil && holdPlanGroups[planName] == nil {
+						planStatus := m.GetPlanStatus(ws.Name, parent)
+						if planStatus == "hold" {
+							if m.showOnHold {
+								holdPlanGroups[planName] = []*models.Note{}
+							}
+						} else {
+							planGroups[planName] = []*models.Note{}
+						}
+					}
+				} else {
+					found := false
+					for _, rg := range regularGroups {
+						if rg == parent {
+							found = true
+							break
+						}
+					}
+					if !found {
+						regularGroups = append(regularGroups, parent)
+					}
+				}
+			}
+
+			for parent := range archiveSubgroups {
+				ensureParentGroup(parent)
+			}
+			for parent := range closedSubgroups {
+				ensureParentGroup(parent)
+			}
+			for parent := range artifactSubgroups {
+				ensureParentGroup(parent)
+			}
+
 			// Sort groups using SortOrder from NoteTypes registry
 			// Groups with lower SortOrder appear first, then alphabetically by name
 			sort.SliceStable(regularGroups, func(i, j int) bool {
@@ -814,7 +870,17 @@ func (m *Model) buildTagFilteredTree() {
 
 // Helper methods for BuildDisplayTree (extracted for readability)
 
-func (m *Model) addArchiveSubgroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, groupPrefix string, archiveSubgroups map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string) {
+func (m *Model) addArchiveSubgroup(
+	nodes *[]*DisplayNode,
+	ws *workspace.WorkspaceNode,
+	groupPrefix string,
+	archiveSubgroups map[string][]*models.Note,
+	hasSearchFilter bool,
+	workspacePathMap map[string]string,
+	parentPath string,
+	parentName string,
+	parentGroup string,
+) {
 	// Sort archived child names
 	var archivedNames []string
 	for name := range archiveSubgroups {
@@ -835,29 +901,16 @@ func (m *Model) addArchiveSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspac
 	archivePrefix.WriteString(archiveIndent)
 	archivePrefix.WriteString("└ ")
 
-	// Get parent group name from groupPrefix context
-	// This is a bit tricky - we need to track which group we're in
-	// For simplicity, we'll extract it from the nodes list
-	parentGroupName := ""
-	if len(*nodes) > 0 {
-		for i := len(*nodes) - 1; i >= 0; i-- {
-			if (*nodes)[i].IsGroup() && !strings.Contains((*nodes)[i].Item.Name, "/.archive") {
-				parentGroupName = (*nodes)[i].Item.Name
-				break
-			}
-		}
-	}
-
 	// Add .archive parent node
 	archiveParentItem := &tree.Item{
-		Path:     filepath.Join(ws.Path, parentGroupName, ".archive"),
-		Name:     parentGroupName + "/.archive",
+		Path:     filepath.Join(parentPath, ".archive"),
+		Name:     parentName + "/.archive",
 		IsDir:    true,
 		Type:     tree.TypeGroup,
 		Metadata: make(map[string]interface{}),
 	}
 	archiveParentItem.Metadata["Workspace"] = ws.Name
-	archiveParentItem.Metadata["Group"] = parentGroupName + "/.archive"
+	archiveParentItem.Metadata["Group"] = parentGroup + "/.archive"
 	archiveParentNode := &DisplayNode{
 		Item:       archiveParentItem,
 		Prefix:     archivePrefix.String(),
@@ -914,14 +967,14 @@ func (m *Model) addArchiveSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspac
 
 			// Add archived child node
 			archivedChildItem := &tree.Item{
-				Path:     filepath.Join(ws.Path, parentGroupName, ".archive", archivedName),
-				Name:     parentGroupName + "/.archive/" + archivedName,
+				Path:     filepath.Join(parentPath, ".archive", archivedName),
+				Name:     parentName + "/.archive/" + archivedName,
 				IsDir:    true,
 				Type:     tree.TypeGroup,
 				Metadata: make(map[string]interface{}),
 			}
 			archivedChildItem.Metadata["Workspace"] = ws.Name
-			archivedChildItem.Metadata["Group"] = parentGroupName + "/.archive/" + archivedName
+			archivedChildItem.Metadata["Group"] = parentGroup + "/.archive/" + archivedName
 			archivedChildNode := &DisplayNode{
 				Item:       archivedChildItem,
 				Prefix:     archivedPrefix.String(),
@@ -952,7 +1005,17 @@ func (m *Model) addArchiveSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspac
 	}
 }
 
-func (m *Model) addClosedSubgroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, groupPrefix string, closedSubgroups map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string) {
+func (m *Model) addClosedSubgroup(
+	nodes *[]*DisplayNode,
+	ws *workspace.WorkspaceNode,
+	groupPrefix string,
+	closedSubgroups map[string][]*models.Note,
+	hasSearchFilter bool,
+	workspacePathMap map[string]string,
+	parentPath string,
+	parentName string,
+	parentGroup string,
+) {
 	// Sort closed child names
 	var closedNames []string
 	for name := range closedSubgroups {
@@ -973,27 +1036,16 @@ func (m *Model) addClosedSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 	closedPrefix.WriteString(closedIndent)
 	closedPrefix.WriteString("└ ")
 
-	// Get parent group name from groupPrefix context
-	parentGroupName := ""
-	if len(*nodes) > 0 {
-		for i := len(*nodes) - 1; i >= 0; i-- {
-			if (*nodes)[i].IsGroup() && !strings.Contains((*nodes)[i].Item.Name, "/.closed") {
-				parentGroupName = (*nodes)[i].Item.Name
-				break
-			}
-		}
-	}
-
 	// Add .closed parent node
 	closedParentItem := &tree.Item{
-		Path:     filepath.Join(ws.Path, parentGroupName, ".closed"),
-		Name:     parentGroupName + "/.closed",
+		Path:     filepath.Join(parentPath, ".closed"),
+		Name:     parentName + "/.closed",
 		IsDir:    true,
 		Type:     tree.TypeGroup,
 		Metadata: make(map[string]interface{}),
 	}
 	closedParentItem.Metadata["Workspace"] = ws.Name
-	closedParentItem.Metadata["Group"] = parentGroupName + "/.closed"
+	closedParentItem.Metadata["Group"] = parentGroup + "/.closed"
 	closedParentNode := &DisplayNode{
 		Item:       closedParentItem,
 		Prefix:     closedPrefix.String(),
@@ -1050,14 +1102,14 @@ func (m *Model) addClosedSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 
 			// Add closed child node
 			closedChildItem := &tree.Item{
-				Path:     filepath.Join(ws.Path, parentGroupName + "/.closed/" + closedName),
-				Name:     parentGroupName + "/.closed/" + closedName,
+				Path:     filepath.Join(parentPath, ".closed", closedName),
+				Name:     parentName + "/.closed/" + closedName,
 				IsDir:    true,
 				Type:     tree.TypeGroup,
 				Metadata: make(map[string]interface{}),
 			}
 			closedChildItem.Metadata["Workspace"] = ws.Name
-			closedChildItem.Metadata["Group"] = parentGroupName + "/.closed/" + closedName
+			closedChildItem.Metadata["Group"] = parentGroup + "/.closed/" + closedName
 			closedChildNode := &DisplayNode{
 				Item:       closedChildItem,
 				Prefix:     closedChildPrefix.String(),
@@ -1088,7 +1140,30 @@ func (m *Model) addClosedSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 	}
 }
 
-func (m *Model) addArtifactSubgroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, groupPrefix string, artifactNotes []*models.Note, hasSearchFilter bool, workspacePathMap map[string]string) {
+func (m *Model) addArtifactSubgroup(
+	nodes *[]*DisplayNode,
+	ws *workspace.WorkspaceNode,
+	groupPrefix string,
+	artifactJobs map[string][]*models.Note,
+	hasSearchFilter bool,
+	workspacePathMap map[string]string,
+	parentPath string,
+	parentName string,
+	parentGroup string,
+) {
+	// Sort job names for stable rendering
+	var jobNames []string
+	for name := range artifactJobs {
+		jobNames = append(jobNames, name)
+	}
+	sort.Strings(jobNames)
+
+	// Count total artifact files across all jobs
+	totalArtifacts := 0
+	for _, notes := range artifactJobs {
+		totalArtifacts += len(notes)
+	}
+
 	// Calculate .artifacts prefix (last child under this group)
 	var artifactsPrefix strings.Builder
 	artifactsIndent := strings.ReplaceAll(groupPrefix, "├ ", "│ ")
@@ -1096,65 +1171,106 @@ func (m *Model) addArtifactSubgroup(nodes *[]*DisplayNode, ws *workspace.Workspa
 	artifactsPrefix.WriteString(artifactsIndent)
 	artifactsPrefix.WriteString("└ ")
 
-	// Get parent group name from the last group node
-	parentGroupName := ""
-	if len(*nodes) > 0 {
-		for i := len(*nodes) - 1; i >= 0; i-- {
-			if (*nodes)[i].IsGroup() && !strings.Contains((*nodes)[i].Item.Name, "/.artifacts") {
-				parentGroupName = (*nodes)[i].Item.Name
-				break
-			}
-		}
-	}
-
 	// Add .artifacts parent node
 	artifactsParentItem := &tree.Item{
-		Path:     filepath.Join(ws.Path, parentGroupName, ".artifacts"),
-		Name:     parentGroupName + "/.artifacts",
+		Path:     filepath.Join(parentPath, ".artifacts"),
+		Name:     parentName + "/.artifacts",
 		IsDir:    true,
 		Type:     tree.TypeGroup,
 		Metadata: make(map[string]interface{}),
 	}
 	artifactsParentItem.Metadata["Workspace"] = ws.Name
-	artifactsParentItem.Metadata["Group"] = parentGroupName + "/.artifacts"
+	artifactsParentItem.Metadata["Group"] = parentGroup + "/.artifacts"
 	artifactsParentNode := &DisplayNode{
 		Item:       artifactsParentItem,
 		Prefix:     artifactsPrefix.String(),
 		Depth:      ws.Depth + 2,
-		ChildCount: len(artifactNotes),
+		ChildCount: totalArtifacts,
 	}
 	*nodes = append(*nodes, artifactsParentNode)
 
 	// Check if .artifacts parent is collapsed
 	artifactsParentNodeID := artifactsParentNode.NodeID()
 	if !m.collapsedNodes[artifactsParentNodeID] || hasSearchFilter {
-		// Sort artifact notes by created date
-		sort.SliceStable(artifactNotes, func(i, j int) bool {
-			if m.sortAscending {
-				return artifactNotes[i].CreatedAt.Before(artifactNotes[j].CreatedAt)
-			}
-			return artifactNotes[i].CreatedAt.After(artifactNotes[j].CreatedAt)
-		})
+		for ji, jobName := range jobNames {
+			isLastJob := ji == len(jobNames)-1
+			jobNotes := artifactJobs[jobName]
 
-		// Add individual artifact notes
-		for ai, artifact := range artifactNotes {
-			isLastArtifact := ai == len(artifactNotes)-1
-			var artifactPrefix strings.Builder
-			artifactIndent := strings.ReplaceAll(artifactsPrefix.String(), "├ ", "│ ")
-			artifactIndent = strings.ReplaceAll(artifactIndent, "└ ", "  ")
-			artifactPrefix.WriteString(artifactIndent)
-			if isLastArtifact {
-				artifactPrefix.WriteString("└ ")
+			sort.SliceStable(jobNotes, func(i, j int) bool {
+				if m.sortAscending {
+					return jobNotes[i].CreatedAt.Before(jobNotes[j].CreatedAt)
+				}
+				return jobNotes[i].CreatedAt.After(jobNotes[j].CreatedAt)
+			})
+
+			// Files directly under .artifacts/ (no per-job subdir): render
+			// straight under the .artifacts node.
+			if jobName == "" {
+				for ni, note := range jobNotes {
+					isLastNote := ni == len(jobNotes)-1 && isLastJob
+					var notePrefix strings.Builder
+					noteIndent := strings.ReplaceAll(artifactsPrefix.String(), "├ ", "│ ")
+					noteIndent = strings.ReplaceAll(noteIndent, "└ ", "  ")
+					notePrefix.WriteString(noteIndent)
+					if isLastNote {
+						notePrefix.WriteString("└ ")
+					} else {
+						notePrefix.WriteString("├ ")
+					}
+					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
+				}
+				continue
+			}
+
+			// Per-job subdir node
+			var jobPrefix strings.Builder
+			jobIndent := strings.ReplaceAll(artifactsPrefix.String(), "├ ", "│ ")
+			jobIndent = strings.ReplaceAll(jobIndent, "└ ", "  ")
+			jobPrefix.WriteString(jobIndent)
+			if isLastJob {
+				jobPrefix.WriteString("└ ")
 			} else {
-				artifactPrefix.WriteString("├ ")
+				jobPrefix.WriteString("├ ")
 			}
 
-			*nodes = append(*nodes, &DisplayNode{Item: noteToItem(artifact), Prefix: artifactPrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(artifact, workspacePathMap, m.focusedWorkspace)})
+			jobItem := &tree.Item{
+				Path:     filepath.Join(parentPath, ".artifacts", jobName),
+				Name:     parentName + "/.artifacts/" + jobName,
+				IsDir:    true,
+				Type:     tree.TypeGroup,
+				Metadata: make(map[string]interface{}),
+			}
+			jobItem.Metadata["Workspace"] = ws.Name
+			jobItem.Metadata["Group"] = parentGroup + "/.artifacts/" + jobName
+			jobNode := &DisplayNode{
+				Item:       jobItem,
+				Prefix:     jobPrefix.String(),
+				Depth:      ws.Depth + 3,
+				ChildCount: len(jobNotes),
+			}
+			*nodes = append(*nodes, jobNode)
+
+			jobNodeID := jobNode.NodeID()
+			if !m.collapsedNodes[jobNodeID] || hasSearchFilter {
+				for ni, note := range jobNotes {
+					isLastNote := ni == len(jobNotes)-1
+					var notePrefix strings.Builder
+					noteIndent := strings.ReplaceAll(jobPrefix.String(), "├ ", "│ ")
+					noteIndent = strings.ReplaceAll(noteIndent, "└ ", "  ")
+					notePrefix.WriteString(noteIndent)
+					if isLastNote {
+						notePrefix.WriteString("└ ")
+					} else {
+						notePrefix.WriteString("├ ")
+					}
+					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 4, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
+				}
+			}
 		}
 	}
 }
 
-func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, planGroups map[string][]*models.Note, archiveSubgroups map[string]map[string][]*models.Note, artifactSubgroups map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasGroupsAfter bool) {
+func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, planGroups map[string][]*models.Note, archiveSubgroups map[string]map[string][]*models.Note, artifactSubgroups map[string]map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasGroupsAfter bool) {
 	// Calculate plans parent prefix
 	var plansPrefix strings.Builder
 	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├ ", "│ ")
@@ -1483,7 +1599,7 @@ func (m *Model) addCompletedGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 
 		// Add .archive subgroup if this group has archived children
 		if hasArchives {
-			m.addArchiveSubgroup(nodes, ws, completedPrefix.String(), archiveSubgroups["completed"], hasSearchFilter, workspacePathMap)
+			m.addArchiveSubgroup(nodes, ws, completedPrefix.String(), archiveSubgroups["completed"], hasSearchFilter, workspacePathMap, completedPath, "completed", "completed")
 		}
 	}
 }
@@ -1624,7 +1740,7 @@ func (m *Model) renderTree(
 	// Subgroups are passed from the top-level call site
 	archiveSubgroups map[string]map[string][]*models.Note,
 	closedSubgroups map[string]map[string][]*models.Note,
-	artifactSubgroups map[string][]*models.Note,
+	artifactSubgroups map[string]map[string][]*models.Note,
 ) {
 	numChildren := len(n.childKeys)
 	for i, key := range n.childKeys {
@@ -1646,8 +1762,10 @@ func (m *Model) renderTree(
 			itemName = config.groupMetadataPrefix + child.fullName
 		}
 
+		groupPath := filepath.Join(rootDir, child.fullName)
+
 		groupItem := &tree.Item{
-			Path:  filepath.Join(rootDir, child.fullName), // Absolute path for NodeID
+			Path:  groupPath, // Absolute path for NodeID
 			Name:  itemName,
 			IsDir: true,
 			Type:  config.itemType,
@@ -1698,28 +1816,34 @@ func (m *Model) renderTree(
 			m.renderTree(nodes, ws, child, nextParentPrefix, depth+1, hasSearchFilter, workspacePathMap, rootDir, recursiveConfig, false, archiveSubgroups, closedSubgroups, artifactSubgroups)
 
 			// Render notes and special subgroups if this node corresponds to an original group
-			if len(child.notes) > 0 {
-				hasArchives := config.includeArchives && len(archiveSubgroups[child.fullName]) > 0 && m.showArchives
-				hasClosed := config.includeClosed && len(closedSubgroups[child.fullName]) > 0 && m.showArchives
+			artifactGroupKey := child.fullName
+			if config.itemType == tree.TypePlan {
+				artifactGroupKey = config.groupMetadataPrefix + child.fullName
+			}
 
-				artifactGroupKey := child.fullName
-				if config.itemType == tree.TypePlan {
-					artifactGroupKey = config.groupMetadataPrefix + child.fullName
-				}
-				hasArtifacts := config.includeArtifacts && len(artifactSubgroups[artifactGroupKey]) > 0 && m.showArtifacts
+			hasArchives := config.includeArchives && len(archiveSubgroups[child.fullName]) > 0 && m.showArchives
+			hasClosed := config.includeClosed && len(closedSubgroups[child.fullName]) > 0 && m.showArchives
+			hasArtifacts := config.includeArtifacts && len(artifactSubgroups[artifactGroupKey]) > 0 && m.showArtifacts
 
+			hasNotes := len(child.notes) > 0
+
+			if hasNotes || hasArchives || hasClosed || hasArtifacts {
 				hasFollowingNoteSiblings := hasArchives || hasClosed || hasArtifacts
 
-				m.addNoteNodes(nodes, child.notes, ws, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings)
+				if hasNotes {
+					m.addNoteNodes(nodes, child.notes, ws, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings)
+				}
+
+				fullGroupMetadata := config.groupMetadataPrefix + child.fullName
 
 				if hasArchives {
-					m.addArchiveSubgroup(nodes, ws, childPrefix.String(), archiveSubgroups[child.fullName], hasSearchFilter, workspacePathMap)
+					m.addArchiveSubgroup(nodes, ws, childPrefix.String(), archiveSubgroups[child.fullName], hasSearchFilter, workspacePathMap, groupPath, itemName, fullGroupMetadata)
 				}
 				if hasClosed {
-					m.addClosedSubgroup(nodes, ws, childPrefix.String(), closedSubgroups[child.fullName], hasSearchFilter, workspacePathMap)
+					m.addClosedSubgroup(nodes, ws, childPrefix.String(), closedSubgroups[child.fullName], hasSearchFilter, workspacePathMap, groupPath, itemName, fullGroupMetadata)
 				}
 				if hasArtifacts {
-					m.addArtifactSubgroup(nodes, ws, childPrefix.String(), artifactSubgroups[artifactGroupKey], hasSearchFilter, workspacePathMap)
+					m.addArtifactSubgroup(nodes, ws, childPrefix.String(), artifactSubgroups[artifactGroupKey], hasSearchFilter, workspacePathMap, groupPath, itemName, fullGroupMetadata)
 				}
 			}
 		}
