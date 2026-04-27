@@ -35,8 +35,11 @@ issues:
   # Exclude vendor directory
   exclude-dirs:
     - vendor
-  # Don't require constants for simple strings in tests
+  # Don't require constants for simple strings in tests and e2e scenarios
   exclude-rules:
     - path: _test\.go$
+      linters:
+        - goconst
+    - path: tests/e2e/
       linters:
         - goconst

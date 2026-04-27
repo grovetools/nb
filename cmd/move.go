@@ -123,7 +123,8 @@ Examples:
 }
 
 func moveNote(svc *service.Service, workspaceOverride, sourcePath, destType, destWorkspace, destBranch string,
-	applyMigrate, dryRun, force, copy bool) error {
+	applyMigrate, dryRun, force, copy bool,
+) error {
 	// Make source path absolute
 	absSource, err := filepath.Abs(sourcePath)
 	if err != nil {
@@ -184,7 +185,7 @@ func moveNote(svc *service.Service, workspaceOverride, sourcePath, destType, des
 
 	// Create destination directory if needed
 	destDir := filepath.Dir(destPath)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
@@ -237,10 +238,10 @@ func moveNote(svc *service.Service, workspaceOverride, sourcePath, destType, des
 	fmt.Printf("  To:   %s\n", finalPath)
 
 	svc.Logger.WithFields(logrus.Fields{
-		"operation":    operation,
-		"source_path":  absSource,
-		"dest_path":    finalPath,
-		"migrated":     applyMigrate,
+		"operation":   operation,
+		"source_path": absSource,
+		"dest_path":   finalPath,
+		"migrated":    applyMigrate,
 	}).Info("Move/copy operation completed")
 
 	return nil
@@ -274,7 +275,7 @@ func moveToPath(svc *service.Service, sourcePath, destPath string, dryRun, copy 
 
 	// Create destination directory if needed
 	destDir := filepath.Dir(absDest)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 

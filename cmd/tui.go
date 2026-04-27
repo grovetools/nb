@@ -180,7 +180,7 @@ func writeNvimIPC(action, path string) {
 		sessionID = fmt.Sprintf("%d", os.Getpid())
 	}
 	tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("grove-nb-edit-%s", sessionID))
-	_ = os.WriteFile(tempFile, []byte(action+":"+path+"\n"), 0644)
+	_ = os.WriteFile(tempFile, []byte(action+":"+path+"\n"), 0o644)
 }
 
 // tmuxSplitFinishedMsg reports the result of a tmux split-or-reuse operation

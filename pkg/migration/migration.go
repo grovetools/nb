@@ -122,20 +122,21 @@ func AnalyzeFile(filePath, basePath string) ([]MigrationIssue, error) {
 // StructuralMigration performs migration from old repos/{workspace}/{branch} structure
 // to new notebooks/{workspace}/notes/{noteType} structure
 type StructuralMigration struct {
-	sourcePath      string
-	targetPath      string
-	globalRoot      string
-	locator         *coreworkspace.NotebookLocator
-	provider        *coreworkspace.Provider
-	options         MigrationOptions
-	report          *MigrationReport
-	output          io.Writer
-	isCopyOnly      bool
+	sourcePath string
+	targetPath string
+	globalRoot string
+	locator    *coreworkspace.NotebookLocator
+	provider   *coreworkspace.Provider
+	options    MigrationOptions
+	report     *MigrationReport
+	output     io.Writer
+	isCopyOnly bool
 }
 
 // NewStructuralMigration creates a new structural migration instance
 func NewStructuralMigration(sourcePath, targetPath, globalRoot string, locator *coreworkspace.NotebookLocator,
-	provider *coreworkspace.Provider, options MigrationOptions, isCopyOnly bool, output io.Writer) *StructuralMigration {
+	provider *coreworkspace.Provider, options MigrationOptions, isCopyOnly bool, output io.Writer,
+) *StructuralMigration {
 	return &StructuralMigration{
 		sourcePath: sourcePath,
 		targetPath: targetPath,
@@ -176,12 +177,12 @@ func (sm *StructuralMigration) MigrateStructure() error {
 				dirName := info.Name()
 				parentDirName := filepath.Base(filepath.Dir(path))
 				// Is this a plan directory? (e.g., .../plans/my-plan or .../archive/my-plan)
-				if parentDirName == "plans" {
+				if parentDirName == "plans" { //nolint:goconst
 					// All subdirectories of plans/ are plan directories
 					planDirsToMigrate = append(planDirsToMigrate, planDirToMigrate{path: path, isArchived: false})
 					return filepath.SkipDir // We handle the whole directory as one unit
 				}
-				if parentDirName == "archive" {
+				if parentDirName == "archive" { //nolint:goconst
 					// Check if this is an archived plan (has .grove-plan.yml) or just an archived note type directory
 					if sm.isPlanDirectory(path) {
 						planDirsToMigrate = append(planDirsToMigrate, planDirToMigrate{path: path, isArchived: true})
@@ -224,7 +225,6 @@ func (sm *StructuralMigration) MigrateStructure() error {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return fmt.Errorf("failed to walk directory %s: %w", rootPath, err)
 		}
@@ -313,7 +313,7 @@ func (sm *StructuralMigration) conservativelyUpdateFrontmatter(content string, f
 	modified := false
 
 	// Only add/update specific fields if they're missing
-	if _, exists := fmMap["repository"]; !exists && ftm.workspace != "global" {
+	if _, exists := fmMap["repository"]; !exists && ftm.workspace != "global" { //nolint:goconst
 		fmMap["repository"] = ftm.workspace
 		modified = true
 	}
@@ -389,7 +389,7 @@ func (sm *StructuralMigration) parseLegacyPath(fullPath, rootPath string) (works
 
 	noteType = strings.Join(noteTypeParts, "/")
 	if noteType == "" {
-		noteType = "inbox" // Default if note is at the root of a branch/global dir
+		noteType = "inbox" //nolint:goconst // default if note is at the root of a branch/global dir
 	}
 
 	return workspace, branch, noteType, isArchived, nil
@@ -476,12 +476,12 @@ func (sm *StructuralMigration) migrateFile(ftm fileToMigrate) error {
 	}
 
 	// Ensure new directory exists (only in actual migration, not dry run)
-	if err := os.MkdirAll(newDir, 0755); err != nil {
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Write to new location
-	if err := os.WriteFile(newPath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(newPath, []byte(newContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -505,21 +505,6 @@ func (sm *StructuralMigration) migrateFile(ftm fileToMigrate) error {
 
 	if sm.options.Verbose {
 		fmt.Fprintf(sm.output, "* Migrated: %s -> %s\n", ftm.oldPath, newPath)
-	}
-
-	return nil
-}
-
-// findWorkspaceNode finds a workspace node by name
-func (sm *StructuralMigration) findWorkspaceNode(workspaceName string) *coreworkspace.WorkspaceNode {
-	if sm.provider == nil {
-		return nil
-	}
-
-	for _, node := range sm.provider.All() {
-		if node.Name == workspaceName {
-			return node
-		}
 	}
 
 	return nil
@@ -628,7 +613,7 @@ func (sm *StructuralMigration) migratePlanDirectory(planPath string, isArchived 
 	}
 
 	// Perform operation (copy or move)
-	if err := os.MkdirAll(filepath.Dir(finalDestPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(finalDestPath), 0o755); err != nil {
 		return fmt.Errorf("failed to create parent directory for destination: %w", err)
 	}
 

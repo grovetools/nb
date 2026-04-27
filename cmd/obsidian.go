@@ -108,7 +108,7 @@ It creates the .obsidian directory and sets up default preferences (like strict 
 				}
 
 				// Create target .obsidian directory
-				if err := os.MkdirAll(obsidianDir, 0755); err != nil {
+				if err := os.MkdirAll(obsidianDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create .obsidian directory: %w", err)
 				}
 
@@ -160,19 +160,19 @@ It creates the .obsidian directory and sets up default preferences (like strict 
 				fmt.Fprintln(out, "* Copied template configuration")
 			} else {
 				// No template - create basic .obsidian with default app.json
-				if err := os.MkdirAll(obsidianDir, 0755); err != nil {
+				if err := os.MkdirAll(obsidianDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create .obsidian directory: %w", err)
 				}
 
-				appJsonPath := filepath.Join(obsidianDir, "app.json")
-				appJsonContent := `{
+				appJSONPath := filepath.Join(obsidianDir, "app.json")
+				appJSONContent := `{
   "strictLineBreaks": true,
   "attachmentFolderPath": ".attachments",
   "newFileLocation": "current"
 }`
 				// Only write if it doesn't exist so we don't overwrite user settings
-				if _, err := os.Stat(appJsonPath); os.IsNotExist(err) {
-					if err := os.WriteFile(appJsonPath, []byte(appJsonContent), 0644); err != nil {
+				if _, err := os.Stat(appJSONPath); os.IsNotExist(err) {
+					if err := os.WriteFile(appJSONPath, []byte(appJSONContent), 0o644); err != nil {
 						return fmt.Errorf("failed to write app.json: %w", err)
 					}
 					fmt.Fprintln(out, "* Created default app.json")
@@ -243,7 +243,7 @@ Examples:
 
 			// Create .obsidian/plugins directory if it doesn't exist
 			pluginsDir := filepath.Join(vault, ".obsidian", "plugins")
-			if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+			if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
 				return fmt.Errorf("failed to create plugins directory: %w", err)
 			}
 

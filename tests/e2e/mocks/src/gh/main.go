@@ -74,10 +74,10 @@ func main() {
 
 func handleList(args []string, stateDir string) {
 	var jsonFile string
-	if args[0] == "issue" {
-		jsonFile = "issues.json"
+	if args[0] == "issue" { //nolint:goconst
+		jsonFile = "issues.json" //nolint:goconst
 	} else if args[0] == "pr" {
-		jsonFile = "prs.json"
+		jsonFile = "prs.json" //nolint:goconst
 	} else {
 		fmt.Fprintf(os.Stderr, "mock gh: unhandled list command %v\n", args)
 		os.Exit(1)
@@ -145,7 +145,7 @@ func handleEdit(args []string, stateDir string) {
 			title = args[i+1]
 			i++
 		}
-		if args[i] == "--body" && i+1 < len(args) {
+		if args[i] == "--body" && i+1 < len(args) { //nolint:goconst
 			body = args[i+1]
 			i++
 		}
@@ -220,9 +220,7 @@ func handleCreate(args []string, stateDir string) {
 		case "--label":
 			// Split comma-separated labels
 			labelStr := args[i+1]
-			for _, l := range splitLabels(labelStr) {
-				labels = append(labels, l)
-			}
+			labels = append(labels, splitLabels(labelStr)...)
 			i++
 		}
 	}
@@ -264,7 +262,7 @@ func handleCreate(args []string, stateDir string) {
 	items = append(items, newItem)
 
 	newData, _ := json.MarshalIndent(items, "", "\t")
-	if err := os.WriteFile(jsonPath, newData, 0644); err != nil {
+	if err := os.WriteFile(jsonPath, newData, 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "mock gh: failed to write issues.json: %v\n", err)
 		os.Exit(1)
 	}
@@ -333,6 +331,6 @@ func updateItem(itemType, itemID, stateDir string, updater func(*ghItem)) {
 
 	if found {
 		newData, _ := json.MarshalIndent(items, "", "\t")
-		os.WriteFile(jsonPath, newData, 0644)
+		_ = os.WriteFile(jsonPath, newData, 0o644)
 	}
 }

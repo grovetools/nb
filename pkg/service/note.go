@@ -541,7 +541,7 @@ func CreateNoteContent(noteType models.NoteType, title, workspace, branch, workt
 		return generateBlogContent(title, workspace, branch, allTags, now, timestampStr)
 	case "prompts":
 		return generatePromptsContent(title, workspace, branch, allTags, now, timestampStr)
-	case "quick":
+	case "quick": //nolint:goconst
 		return generateQuickContent(title, workspace, branch, allTags, now, timestampStr)
 	case "llm":
 		return generateLLMContent(title, workspace, branch, allTags, now, timestampStr)
@@ -566,7 +566,7 @@ func GetNoteMetadata(path string) (workspaceIdentifier, branch, noteType string)
 				filenameIndex := -1
 				for j := i + 2; j < len(parts); j++ {
 					if strings.HasSuffix(parts[j], ".md") || strings.HasSuffix(parts[j], ".txt") ||
-					   strings.HasSuffix(parts[j], ".json") || strings.Contains(parts[j], ".") {
+						strings.HasSuffix(parts[j], ".json") || strings.Contains(parts[j], ".") {
 						filenameIndex = j
 						break
 					}
@@ -586,12 +586,12 @@ func GetNoteMetadata(path string) (workspaceIdentifier, branch, noteType string)
 		if part == "nb" && i+1 < len(parts) {
 			if parts[i+1] == globalWorkspace {
 				// Path: .../nb/global/notes/TYPE/.../file.md (with "notes" subdirectory)
-				if i+2 < len(parts) && parts[i+2] == "notes" && i+3 < len(parts) {
+				if i+2 < len(parts) && parts[i+2] == "notes" && i+3 < len(parts) { //nolint:goconst
 					// Find where the filename starts (contains .md)
 					for j := len(parts) - 1; j >= i+3; j-- {
 						if strings.HasSuffix(parts[j], ".md") {
 							noteType = strings.Join(parts[i+3:j], "/")
-							return "global", "", noteType
+							return globalWorkspace, "", noteType
 						}
 					}
 				}
@@ -601,11 +601,11 @@ func GetNoteMetadata(path string) (workspaceIdentifier, branch, noteType string)
 					for j := len(parts) - 1; j >= i+2; j-- {
 						if strings.HasSuffix(parts[j], ".md") {
 							noteType = strings.Join(parts[i+2:j], "/")
-							return "global", "", noteType
+							return globalWorkspace, "", noteType
 						}
 					}
 				}
-				return "global", "", "" // Note directly in global
+				return globalWorkspace, "", "" // Note directly in global
 			}
 			if parts[i+1] == "notebooks" && i+2 < len(parts) {
 				// Path: .../nb/notebooks/IDENTIFIER/notes/TYPE/.../file.md
@@ -698,7 +698,7 @@ func (s *Service) RenameNote(oldPath, newTitle string) (string, error) {
 	}
 
 	// Write to new path
-	if err := os.WriteFile(newPath, []byte(updatedContent), 0644); err != nil {
+	if err := os.WriteFile(newPath, []byte(updatedContent), 0o644); err != nil {
 		return "", fmt.Errorf("write new file: %w", err)
 	}
 

@@ -206,21 +206,21 @@ func launchAndTestInitialNavigation(ctx *harness.Context) error {
 	}
 
 	// Frame 1: Press 'j' to navigate down
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 2: Press 'h' to collapse project-A
-	session.SendKeys("h")
+	_ = session.SendKeys("h")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 3: Press 'l' to expand project-A
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -233,14 +233,14 @@ func launchAndTestInitialNavigation(ctx *harness.Context) error {
 	}
 
 	// Frame 4: Press 'j' to navigate to inbox
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 5: Press 'l' to expand inbox
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -251,7 +251,7 @@ func launchAndTestInitialNavigation(ctx *harness.Context) error {
 	}
 
 	// Frame 6: Press 'j' to navigate to note-with-todos.md
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -269,7 +269,7 @@ func testHelpPreviewAndCreation(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	// Frame 7-8: Test help screen with '?', then close with Esc
-	session.SendKeys("?")
+	_ = session.SendKeys("?")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -278,34 +278,34 @@ func testHelpPreviewAndCreation(ctx *harness.Context) error {
 	ctx.ShowCommandOutput("TUI help screen", helpView, "")
 
 	// Close help with Esc
-	session.SendKeys("\x1b") // Esc
+	_ = session.SendKeys("\x1b") // Esc
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 9: Open preview pane with 'v'
-	session.SendKeys("v")
+	_ = session.SendKeys("v")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 10-11: Navigate down and expand research folder
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 12: Navigate to data.json and verify preview
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -316,7 +316,7 @@ func testHelpPreviewAndCreation(ctx *harness.Context) error {
 	}
 
 	// Frame 13: Navigate to tagged-note.md and verify preview
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -327,7 +327,7 @@ func testHelpPreviewAndCreation(ctx *harness.Context) error {
 	}
 
 	// Frame 14: Close preview pane with 'v'
-	session.SendKeys("v")
+	_ = session.SendKeys("v")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -337,7 +337,7 @@ func testHelpPreviewAndCreation(ctx *harness.Context) error {
 
 	// Frames 15-18: Navigate back up to inbox (k k k k)
 	for i := 0; i < 4; i++ {
-		session.SendKeys("k")
+		_ = session.SendKeys("k")
 		time.Sleep(200 * time.Millisecond)
 		if err := session.WaitStable(); err != nil {
 			return err
@@ -345,28 +345,28 @@ func testHelpPreviewAndCreation(ctx *harness.Context) error {
 	}
 
 	// Frame 19: Press 'i' to create an inbox note
-	session.SendKeys("i")
+	_ = session.SendKeys("i")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 20: Press Enter to select default type (inbox)
-	session.SendKeys("\r")
+	_ = session.SendKeys("\r")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frames 21-31: Type "my-new-note"
-	session.SendKeys("my-new-note")
+	_ = session.SendKeys("my-new-note")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 32: Press Enter to create the note
-	session.SendKeys("\r")
+	_ = session.SendKeys("\r")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -392,14 +392,14 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	// Frame 33: Navigate down with 'j'
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 34: Toggle archives on with 'A'
-	session.SendKeys("A")
+	_ = session.SendKeys("A")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -421,37 +421,37 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 	// Frames 35-36: Navigate to .archive folder under inbox
 	// After toggling archives, cursor is on research
 	// Navigate up to inbox
-	session.SendKeys("k")
+	_ = session.SendKeys("k")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 	// Expand inbox if not already expanded
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 	// Navigate down through inbox contents to .archive
 	// inbox has: note-with-todos.md, 20251228-my-new-note.md, .archive
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 37: Expand .archive folder
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -463,7 +463,7 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 
 	// Frames 38-42: Navigate up to global with 'k' keys (5 times)
 	for i := 0; i < 5; i++ {
-		session.SendKeys("k")
+		_ = session.SendKeys("k")
 		time.Sleep(200 * time.Millisecond)
 		if err := session.WaitStable(); err != nil {
 			return err
@@ -471,34 +471,34 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 	}
 
 	// Frame 43-44: Try to create note at global (press 'i', then Esc to cancel)
-	session.SendKeys("i")
+	_ = session.SendKeys("i")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
-	session.SendKeys("\x1b") // Esc
+	_ = session.SendKeys("\x1b") // Esc
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 45: Press 'n' to create a global note
-	session.SendKeys("n")
+	_ = session.SendKeys("n")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frames 46-56: Type "global-note"
-	session.SendKeys("global-note")
+	_ = session.SendKeys("global-note")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 57: Press Enter to create the note
-	session.SendKeys("\r")
+	_ = session.SendKeys("\r")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -516,12 +516,12 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 	ctx.ShowCommandOutput("TUI after creating global note", globalNoteView, "")
 
 	// Frames 58-59: Navigate down to the global note
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -529,7 +529,7 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 
 	// Frame 60: Press 'ctrl+g' to clear focus (go to global view)
 	// Note: '-' was repurposed for git stage toggle, use ctrl+g for clear focus
-	session.SendKeys("\x07") // Ctrl+G
+	_ = session.SendKeys("\x07") // Ctrl+G
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -548,14 +548,14 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 
 	// Navigate to ungrouped section and verify it shows project notes
 	// Find ungrouped in the tree - it should be below ecosystem-B
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Expand ungrouped
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -568,7 +568,7 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 	}
 
 	// Navigate to project-A
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -588,19 +588,19 @@ func testEcosystemAndLinking(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	// Frames 61-62: Navigate up to global with 'k' keys
-	session.SendKeys("k")
+	_ = session.SendKeys("k")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
-	session.SendKeys("k")
+	_ = session.SendKeys("k")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 63: Expand global with 'l'
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -608,7 +608,7 @@ func testEcosystemAndLinking(ctx *harness.Context) error {
 
 	// Frames 64-67: Navigate down to ecosystem-B and subproject-C
 	for i := 0; i < 4; i++ {
-		session.SendKeys("j")
+		_ = session.SendKeys("j")
 		time.Sleep(200 * time.Millisecond)
 		if err := session.WaitStable(); err != nil {
 			return err
@@ -616,7 +616,7 @@ func testEcosystemAndLinking(ctx *harness.Context) error {
 	}
 
 	// Frame 68: Expand subproject-C with 'l'
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -636,7 +636,7 @@ func testEcosystemAndLinking(ctx *harness.Context) error {
 	}
 
 	// Frame 69: Toggle artifacts on with 'b'
-	session.SendKeys("b")
+	_ = session.SendKeys("b")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -659,7 +659,7 @@ func testEcosystemAndLinking(ctx *harness.Context) error {
 
 	// Frames 70-78: Navigate through the tree with 'j' keys
 	for i := 0; i < 8; i++ {
-		session.SendKeys("j")
+		_ = session.SendKeys("j")
 		time.Sleep(200 * time.Millisecond)
 		if err := session.WaitStable(); err != nil {
 			return err
@@ -667,21 +667,21 @@ func testEcosystemAndLinking(ctx *harness.Context) error {
 	}
 
 	// Frame 79: Open preview with 'v'
-	session.SendKeys("v")
+	_ = session.SendKeys("v")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 81: Close preview and navigate with Enter
-	session.SendKeys("\r")
+	_ = session.SendKeys("\r")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Frame 83: Quit with 'q'
-	session.SendKeys("q")
+	_ = session.SendKeys("q")
 	time.Sleep(500 * time.Millisecond)
 
 	finalView, _ := session.Capture()

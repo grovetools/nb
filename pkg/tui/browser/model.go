@@ -13,44 +13,44 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/nb/pkg/tui/browser/components/confirm"
-	"github.com/grovetools/nb/pkg/tui/browser/views"
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/sync"
 	"github.com/grovetools/nb/pkg/tree"
+	"github.com/grovetools/nb/pkg/tui/browser/components/confirm"
+	"github.com/grovetools/nb/pkg/tui/browser/views"
 )
 
 // Model is the main model for the notebook browser TUI
 type Model struct {
-	service    *service.Service
-	workspaces []*workspace.WorkspaceNode
-	allItems   []*tree.Item
-	keys       KeyMap
-	help       help.Model
-	width      int
-	height     int
-	filterInput textinput.Model
-	sequence    *keymap.SequenceState // For detecting multi-key sequences (gg, dd, z*)
-	showArchives        bool   // Whether to show .archive and .closed directories
-	showArtifacts       bool   // Whether to show .artifacts directories
-	hideGlobal          bool   // Whether to hide the global workspace node
-	showOnHold          bool   // Whether to show on-hold plans
-	showGitModifiedOnly bool   // Whether to show only notes with git changes
+	service             *service.Service
+	workspaces          []*workspace.WorkspaceNode
+	allItems            []*tree.Item
+	keys                KeyMap
+	help                help.Model
+	width               int
+	height              int
+	filterInput         textinput.Model
+	sequence            *keymap.SequenceState // For detecting multi-key sequences (gg, dd, z*)
+	showArchives        bool                  // Whether to show .archive and .closed directories
+	showArtifacts       bool                  // Whether to show .artifacts directories
+	hideGlobal          bool                  // Whether to hide the global workspace node
+	showOnHold          bool                  // Whether to show on-hold plans
+	showGitModifiedOnly bool                  // Whether to show only notes with git changes
 	spinner             spinner.Model
 	loadingCount        int
-	recentNotesMode     bool // Whether to show only recent notes
-	savedViewMode views.ViewMode // View mode to restore when exiting recent notes mode
-	savedModVisibility bool      // Saved visibility state for MODIFIED column
-	savedWsVisibility  bool      // Saved visibility state for WORKSPACE column
+	recentNotesMode     bool           // Whether to show only recent notes
+	savedViewMode       views.ViewMode // View mode to restore when exiting recent notes mode
+	savedModVisibility  bool           // Saved visibility state for MODIFIED column
+	savedWsVisibility   bool           // Saved visibility state for WORKSPACE column
 
 	// Focus mode state
 	ecosystemPickerMode bool
@@ -79,10 +79,9 @@ type Model struct {
 	noteToRename   *models.Note
 
 	// Note promotion state
-	isPromotingToPlan bool // True when confirming worktree creation for a new plan
-	isPromotingToJob  bool // True when showing plan picker for promote-to-job
-	noteToPromote     *models.Note
-	planPicker        list.Model
+	isPromotingToJob bool // True when showing plan picker for promote-to-job
+	noteToPromote    *models.Note
+	planPicker       list.Model
 
 	// Column Visibility
 	columnVisibility map[string]bool
@@ -105,14 +104,14 @@ type Model struct {
 	// Preview Pane
 	preview        viewport.Model
 	previewFocused bool
-	previewVisible bool   // Whether the preview pane is shown
+	previewVisible bool // Whether the preview pane is shown
 	previewContent string
 	previewFile    string // Path of the file currently in preview
 
 	// Git status state
-	gitFileStatus    map[string]string // Key: normalized absolute path, Value: git status code
-	gitDeletedFiles  []string          // Paths of deleted files (don't exist on disk)
-	scannedGitRepos  map[string]bool   // Key: git root path
+	gitFileStatus   map[string]string // Key: normalized absolute path, Value: git status code
+	gitDeletedFiles []string          // Paths of deleted files (don't exist on disk)
+	scannedGitRepos map[string]bool   // Key: git root path
 
 	// Commit dialog state
 	isCommitting bool
@@ -266,7 +265,7 @@ func New(cfg Config) Model {
 		FoldToggle:   keys.FoldToggle,
 		FoldOpenAll:  keys.FoldOpenAll,
 		FoldCloseAll: keys.FoldCloseAll,
-		Select: keys.Select,
+		Select:       keys.Select,
 		SelectNone:   keys.SelectNone,
 	}
 	viewsModel := views.New(viewsKeys, columnVisibility)
@@ -278,37 +277,37 @@ func New(cfg Config) Model {
 		BorderForeground(theme.DefaultTheme.Colors.MutedText)
 
 	return Model{
-		service:           svc,
-		keys:              keys,
-		help:              helpModel,
-		filterInput:       ti,
-		sequence:          keymap.NewSequenceState(),
-		spinner:           s,
-		loadingCount:      2, // For initial workspaces + notes load
-		showArchives:      false, // Default to hiding archives
-		showArtifacts:     false, // Default to hiding artifacts
-		focusedWorkspace:  initialFocus,
-		focusChanged:      initialFocus != nil, // Trigger initial collapse state setup
-		noteTitleInput:    noteTitleInput,
-		noteTypePicker:    noteTypePicker,
-		renameInput:       renameInput,
-		columnVisibility:  columnVisibility,
-		columnSelectMode:  false,
-		columnList:        columnList,
-		availableColumns:  availableColumns,
-		confirmDialog:     confirmDialog,
-		clipboard:         []string{},
-		planPicker:        planPicker,
-		tagPicker:         tagPicker,
-		views:             viewsModel,
-		preview:           preview,
-		previewFocused:    false,
-		previewVisible:    false, // Preview hidden by default
-		recentNotesMode:   false,
-		gitFileStatus:     make(map[string]string),
-		scannedGitRepos:   make(map[string]bool),
-		commitInput:       commitInput,
-		hosted:            cfg.Hosted,
+		service:          svc,
+		keys:             keys,
+		help:             helpModel,
+		filterInput:      ti,
+		sequence:         keymap.NewSequenceState(),
+		spinner:          s,
+		loadingCount:     2,     // For initial workspaces + notes load
+		showArchives:     false, // Default to hiding archives
+		showArtifacts:    false, // Default to hiding artifacts
+		focusedWorkspace: initialFocus,
+		focusChanged:     initialFocus != nil, // Trigger initial collapse state setup
+		noteTitleInput:   noteTitleInput,
+		noteTypePicker:   noteTypePicker,
+		renameInput:      renameInput,
+		columnVisibility: columnVisibility,
+		columnSelectMode: false,
+		columnList:       columnList,
+		availableColumns: availableColumns,
+		confirmDialog:    confirmDialog,
+		clipboard:        []string{},
+		planPicker:       planPicker,
+		tagPicker:        tagPicker,
+		views:            viewsModel,
+		preview:          preview,
+		previewFocused:   false,
+		previewVisible:   false, // Preview hidden by default
+		recentNotesMode:  false,
+		gitFileStatus:    make(map[string]string),
+		scannedGitRepos:  make(map[string]bool),
+		commitInput:      commitInput,
+		hosted:           cfg.Hosted,
 	}
 }
 
@@ -361,7 +360,7 @@ func (m *Model) populateTagPicker() {
 	// Convert to list items
 	var items []list.Item
 	for _, tc := range tags {
-		items = append(items, tagItem{tag: tc.tag, count: tc.count})
+		items = append(items, tagItem(tc))
 	}
 
 	m.tagPicker.SetItems(items)
@@ -506,9 +505,6 @@ type fileContentReadyMsg struct {
 	content string
 	err     error
 }
-
-// editorFinishedMsg is sent when the editor closes
-type editorFinishedMsg struct{ err error }
 
 // notesArchivedMsg is sent when notes and/or plans have been archived
 type notesArchivedMsg struct {
@@ -700,7 +696,7 @@ type tuiState struct {
 // getStateFilePath returns the path to the TUI state file
 func getStateFilePath() (string, error) {
 	stateDir := filepath.Join(paths.StateDir(), "nb")
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return "", err
 	}
 	return filepath.Join(stateDir, "tui-state.json"), nil
@@ -755,5 +751,5 @@ func (m *Model) saveState() error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0o644)
 }

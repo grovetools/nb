@@ -52,7 +52,7 @@ func parseFrontmatterToMap(content []byte) (map[string]interface{}, []byte, erro
 	}
 
 	// Find where the body content starts
-	bodyStart := endIdx
+	var bodyStart int
 	if endIdx == startIdx {
 		bodyStart = startIdx + 4 // Skip "---\n"
 	} else {

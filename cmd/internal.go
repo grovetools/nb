@@ -39,7 +39,7 @@ func newUpdateNoteCmd(svc **service.Service) *cobra.Command {
 		Use:   "update-note",
 		Short: "Appends content to a specific note file",
 		RunE: func(cmd *cobra.Command, args []string) error {
-	if notePath == "" {
+			if notePath == "" {
 				return fmt.Errorf("--path is required")
 			}
 			if appendContent == "" {
@@ -47,7 +47,7 @@ func newUpdateNoteCmd(svc **service.Service) *cobra.Command {
 			}
 
 			// Open the file in append mode
-			f, err := os.OpenFile(notePath, os.O_APPEND|os.O_WRONLY, 0644)
+			f, err := os.OpenFile(notePath, os.O_APPEND|os.O_WRONLY, 0o644)
 			if err != nil {
 				return fmt.Errorf("failed to open note file for appending: %w", err)
 			}
@@ -89,8 +89,8 @@ func newUpdateNoteCmd(svc **service.Service) *cobra.Command {
 // newUpdateFrontmatterCmd creates the 'internal update-frontmatter' command.
 func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 	var (
-		notePath  string
-		fieldName string
+		notePath   string
+		fieldName  string
 		fieldValue string
 	)
 
@@ -98,7 +98,7 @@ func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 		Use:   "update-frontmatter",
 		Short: "Updates a frontmatter field in a specific note file",
 		RunE: func(cmd *cobra.Command, args []string) error {
-	if notePath == "" {
+			if notePath == "" {
 				return fmt.Errorf("--path is required")
 			}
 			if fieldName == "" {
@@ -143,7 +143,7 @@ func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 			newContent := frontmatter.BuildContent(fm, body)
 
 			// Write back to file
-			if err := os.WriteFile(notePath, []byte(newContent), 0644); err != nil {
+			if err := os.WriteFile(notePath, []byte(newContent), 0o644); err != nil {
 				return fmt.Errorf("failed to write note file: %w", err)
 			}
 

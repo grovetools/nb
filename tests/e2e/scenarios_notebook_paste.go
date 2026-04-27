@@ -186,7 +186,7 @@ func testMoveNoteWithMetadata(ctx *harness.Context) error {
 	}
 
 	// Expand inbox
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -204,7 +204,7 @@ func testMoveNoteWithMetadata(ctx *harness.Context) error {
 	ctx.ShowCommandOutput("TUI before cutting source-note.md", beforeCutView, "")
 
 	// Cut the note with 'x'
-	session.SendKeys("x")
+	_ = session.SendKeys("x")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -215,9 +215,9 @@ func testMoveNoteWithMetadata(ctx *harness.Context) error {
 
 	// Navigate to plans folder - first go back up to top
 	// Send 'g' twice with a small delay - the TUI requires both keys for gg
-	session.SendKeys("g")
+	_ = session.SendKeys("g")
 	time.Sleep(100 * time.Millisecond)
-	session.SendKeys("g")
+	_ = session.SendKeys("g")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -232,7 +232,7 @@ func testMoveNoteWithMetadata(ctx *harness.Context) error {
 	}
 
 	// Expand plans folder
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -251,7 +251,7 @@ func testMoveNoteWithMetadata(ctx *harness.Context) error {
 	ctx.ShowCommandOutput("TUI before pasting into my-target-plan", beforePasteView, "")
 
 	// Paste the note with 'p'
-	session.SendKeys("p")
+	_ = session.SendKeys("p")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -296,7 +296,7 @@ func navigateToItem(session *tui.Session, ctx *harness.Context, itemName string,
 		if isItemSelected(content, itemName) {
 			return nil
 		}
-		session.SendKeys("j")
+		_ = session.SendKeys("j")
 		time.Sleep(200 * time.Millisecond)
 		if err := session.WaitStable(); err != nil {
 			return err
@@ -329,7 +329,7 @@ func isItemSelected(content, itemName string) bool {
 // when we know the folder is already expanded.
 func navigateToItemInExpandedFolder(session *tui.Session, ctx *harness.Context, itemName string, maxAttempts int) error {
 	// First, move down once since we're likely on the parent folder
-	session.SendKeys("j")
+	_ = session.SendKeys("j")
 	time.Sleep(200 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -341,7 +341,7 @@ func navigateToItemInExpandedFolder(session *tui.Session, ctx *harness.Context, 
 		if isItemSelected(content, itemName) {
 			return nil
 		}
-		session.SendKeys("j")
+		_ = session.SendKeys("j")
 		time.Sleep(200 * time.Millisecond)
 		if err := session.WaitStable(); err != nil {
 			return err
@@ -363,16 +363,16 @@ func testCopyNoteAndPreserveFrontmatter(ctx *harness.Context) error {
 	workspaceRoot := ctx.GetString("workspace_root")
 
 	// Refresh and go to top using gg (vim-style)
-	session.SendKeys("C-r")
+	_ = session.SendKeys("C-r")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Send 'g' twice with a small delay - the TUI requires both keys for gg
-	session.SendKeys("g")
+	_ = session.SendKeys("g")
 	time.Sleep(100 * time.Millisecond)
-	session.SendKeys("g")
+	_ = session.SendKeys("g")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -387,7 +387,7 @@ func testCopyNoteAndPreserveFrontmatter(ctx *harness.Context) error {
 	}
 
 	// Expand inbox
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -402,14 +402,14 @@ func testCopyNoteAndPreserveFrontmatter(ctx *harness.Context) error {
 	ctx.ShowCommandOutput("TUI before copying note-to-preserve.md", beforeCopyView, "")
 
 	// Copy the note with 'y' (yank)
-	session.SendKeys("y")
+	_ = session.SendKeys("y")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Go to top and navigate to my-target-plan
-	session.SendKeys("g", "g")
+	_ = session.SendKeys("g", "g")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -421,7 +421,7 @@ func testCopyNoteAndPreserveFrontmatter(ctx *harness.Context) error {
 	}
 
 	// Expand plans
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -433,7 +433,7 @@ func testCopyNoteAndPreserveFrontmatter(ctx *harness.Context) error {
 	}
 
 	// Paste the note
-	session.SendKeys("p")
+	_ = session.SendKeys("p")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -474,16 +474,16 @@ func testMoveNonMarkdownFile(ctx *harness.Context) error {
 	workspaceRoot := ctx.GetString("workspace_root")
 
 	// Refresh and go to top using gg (vim-style)
-	session.SendKeys("C-r")
+	_ = session.SendKeys("C-r")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Send 'g' twice with a small delay - the TUI requires both keys for gg
-	session.SendKeys("g")
+	_ = session.SendKeys("g")
 	time.Sleep(100 * time.Millisecond)
-	session.SendKeys("g")
+	_ = session.SendKeys("g")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -495,7 +495,7 @@ func testMoveNonMarkdownFile(ctx *harness.Context) error {
 	}
 
 	// Expand inbox
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -510,14 +510,14 @@ func testMoveNonMarkdownFile(ctx *harness.Context) error {
 	ctx.ShowCommandOutput("TUI before cutting data.txt", beforeCutTxtView, "")
 
 	// Cut the file with 'x'
-	session.SendKeys("x")
+	_ = session.SendKeys("x")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Go to top and navigate to my-target-plan
-	session.SendKeys("g", "g")
+	_ = session.SendKeys("g", "g")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -529,7 +529,7 @@ func testMoveNonMarkdownFile(ctx *harness.Context) error {
 	}
 
 	// Expand plans
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -541,7 +541,7 @@ func testMoveNonMarkdownFile(ctx *harness.Context) error {
 	}
 
 	// Paste
-	session.SendKeys("p")
+	_ = session.SendKeys("p")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -585,16 +585,16 @@ func testMoveNoteWithoutWorktree(ctx *harness.Context) error {
 	workspaceRoot := ctx.GetString("workspace_root")
 
 	// Refresh and go to top using gg (vim-style)
-	session.SendKeys("C-r")
+	_ = session.SendKeys("C-r")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Send 'g' twice with a small delay - the TUI requires both keys for gg
-	session.SendKeys("g")
+	_ = session.SendKeys("g")
 	time.Sleep(100 * time.Millisecond)
-	session.SendKeys("g")
+	_ = session.SendKeys("g")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -606,7 +606,7 @@ func testMoveNoteWithoutWorktree(ctx *harness.Context) error {
 	}
 
 	// Expand inbox
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -621,14 +621,14 @@ func testMoveNoteWithoutWorktree(ctx *harness.Context) error {
 	ctx.ShowCommandOutput("TUI before cutting simple-note.md", beforeCutSimpleView, "")
 
 	// Cut the note
-	session.SendKeys("x")
+	_ = session.SendKeys("x")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
 	// Go to top and navigate to plans
-	session.SendKeys("g", "g")
+	_ = session.SendKeys("g", "g")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -640,7 +640,7 @@ func testMoveNoteWithoutWorktree(ctx *harness.Context) error {
 	}
 
 	// Expand plans
-	session.SendKeys("l")
+	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -655,7 +655,7 @@ func testMoveNoteWithoutWorktree(ctx *harness.Context) error {
 	ctx.ShowCommandOutput("TUI before pasting into no-config-plan", beforePasteNoConfigView, "")
 
 	// Paste
-	session.SendKeys("p")
+	_ = session.SendKeys("p")
 	time.Sleep(1 * time.Second)
 	if err := session.WaitStable(); err != nil {
 		return err
@@ -665,7 +665,7 @@ func testMoveNoteWithoutWorktree(ctx *harness.Context) error {
 	ctx.ShowCommandOutput("TUI after pasting into no-config-plan", afterPasteView, "")
 
 	// Quit TUI
-	session.SendKeys("q")
+	_ = session.SendKeys("q")
 	time.Sleep(500 * time.Millisecond)
 
 	// Verify results

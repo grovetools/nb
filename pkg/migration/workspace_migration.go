@@ -62,7 +62,7 @@ func MigrateWorkspaces(sourceNotebookRoot, targetNotebookRoot string, renames ma
 			// For markdown files, update frontmatter
 			var newContent string
 			var modified bool
-			if filepath.Ext(path) == ".md" {
+			if filepath.Ext(path) == ".md" { //nolint:goconst
 				newContent, modified, err = conservativelyUpdateRepositoryAndTags(string(content), oldName, newName)
 				if err != nil {
 					// Log the error but still copy the file as-is
@@ -96,7 +96,7 @@ func MigrateWorkspaces(sourceNotebookRoot, targetNotebookRoot string, renames ma
 
 			// Create target directory
 			targetDir := filepath.Dir(targetPath)
-			if err := os.MkdirAll(targetDir, 0755); err != nil {
+			if err := os.MkdirAll(targetDir, 0o755); err != nil {
 				report.AddError(path, fmt.Errorf("failed to create target directory %s: %w", targetDir, err))
 				return nil // Continue walking
 			}
@@ -129,7 +129,6 @@ func MigrateWorkspaces(sourceNotebookRoot, targetNotebookRoot string, renames ma
 
 			return nil
 		})
-
 		if err != nil {
 			report.AddError(sourceWorkspacePath, fmt.Errorf("error walking source workspace: %w", err))
 		}

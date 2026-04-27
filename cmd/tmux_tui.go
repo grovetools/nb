@@ -44,9 +44,7 @@ If not in a tmux session, falls back to running the TUI directly.`,
 			}
 
 			// Close any popup that might have launched this command
-			if err := client.ClosePopup(ctx); err != nil {
-				// Ignore errors - we might not be in a popup
-			}
+			_ = client.ClosePopup(ctx)
 
 			return nil
 		},

@@ -160,7 +160,7 @@ func (m *Migrator) applyFixes(filePath string, issues []MigrationIssue) (string,
 		}
 	}
 
-	if err := os.WriteFile(newPath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(newPath, []byte(newContent), 0o644); err != nil {
 		return filePath, fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -190,5 +190,5 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, input, 0644)
+	return os.WriteFile(dst, input, 0o644)
 }

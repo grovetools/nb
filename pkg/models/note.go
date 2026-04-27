@@ -19,21 +19,21 @@ type RemoteMetadata struct {
 
 // Note represents a note file
 type Note struct {
-	Path             string   `json:"path"`
-	Title            string   `json:"title"` // Filename
-	FrontmatterTitle string   `json:"frontmatter_title,omitempty"`
-	Type             NoteType `json:"type"` // Note type from frontmatter (chat, interactive_agent, etc.)
-	Group      string    `json:"group"`         // Directory grouping (current, plans/name, etc.)
-	Content    string    `json:"content,omitempty"`
-	Workspace  string    `json:"workspace"`
-	Branch     string    `json:"branch,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	ModifiedAt time.Time `json:"modified_at"`
-	WordCount  int       `json:"word_count"`
-	HasTodos   bool      `json:"has_todos"`
-	IsArchived bool      `json:"is_archived"`
-	IsArtifact bool   `json:"is_artifact,omitempty"`
-	PlanRef    string `json:"plan_ref,omitempty"`
+	Path             string    `json:"path"`
+	Title            string    `json:"title"` // Filename
+	FrontmatterTitle string    `json:"frontmatter_title,omitempty"`
+	Type             NoteType  `json:"type"`  // Note type from frontmatter (chat, interactive_agent, etc.)
+	Group            string    `json:"group"` // Directory grouping (current, plans/name, etc.)
+	Content          string    `json:"content,omitempty"`
+	Workspace        string    `json:"workspace"`
+	Branch           string    `json:"branch,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	ModifiedAt       time.Time `json:"modified_at"`
+	WordCount        int       `json:"word_count"`
+	HasTodos         bool      `json:"has_todos"`
+	IsArchived       bool      `json:"is_archived"`
+	IsArtifact       bool      `json:"is_artifact,omitempty"`
+	PlanRef          string    `json:"plan_ref,omitempty"`
 
 	// Remote sync metadata
 	Remote *RemoteMetadata `json:"remote,omitempty"`

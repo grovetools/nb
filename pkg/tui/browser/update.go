@@ -17,13 +17,13 @@ import (
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/core/util/pathutil"
-	"github.com/grovetools/nb/pkg/tui/browser/components/confirm"
-	"github.com/grovetools/nb/pkg/tui/browser/views"
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/sync"
 	"github.com/grovetools/nb/pkg/sync/github"
 	"github.com/grovetools/nb/pkg/tree"
+	"github.com/grovetools/nb/pkg/tui/browser/components/confirm"
+	"github.com/grovetools/nb/pkg/tui/browser/views"
 	"github.com/sirupsen/logrus"
 )
 
@@ -174,7 +174,7 @@ func (m *Model) syncWorkspaceCmd() tea.Cmd {
 	}
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
@@ -460,7 +460,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// If it was a cut operation, clear the clipboard and cut paths
-		if m.clipboardMode == "cut" {
+		if m.clipboardMode == "cut" { //nolint:goconst
 			m.clipboard = nil
 			m.clipboardMode = ""
 			m.views.SetCutPaths(make(map[string]struct{}))
@@ -583,7 +583,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Only handle Esc and Enter specially, pass everything else to the input
 			// Note: We check msg.String() directly instead of using key bindings
 			// because m.keys.Confirm includes "y" which should be typed in the input
-			if msg.String() == "esc" {
+			if msg.String() == "esc" { //nolint:goconst
 				m.filterInput.SetValue("")
 				m.filterInput.Blur()
 				// If we're in tag filter mode, only clear the search, not the tag filter
@@ -591,13 +591,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateViewsState()
 					return m, nil
 				}
-				m.isGrepping = false // Exit grep mode
+				m.isGrepping = false       // Exit grep mode
 				m.isFilteringByTag = false // Exit tag filter mode
 				m.selectedTag = ""
 				m.updateViewsState()
 				return m, nil
 			}
-			if msg.String() == "enter" {
+			if msg.String() == "enter" { //nolint:goconst
 				m.filterInput.Blur()
 				return m, nil
 			}
@@ -835,21 +835,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.filterInput.Focus()
 			return m, textinput.Blink
-	case key.Matches(msg, m.keys.Refresh):
-		return m, func() tea.Msg { return refreshMsg{} }
-	case key.Matches(msg, m.keys.ToggleGitChanges):
-		m.showGitModifiedOnly = !m.showGitModifiedOnly
-		if m.showGitModifiedOnly {
-			m.statusMessage = "Filtering for git changes"
-		} else {
-			m.statusMessage = "Cleared git changes filter"
-		}
-		m.updateViewsState()
-		return m, nil
-	case key.Matches(msg, m.keys.Sync):
-		m.statusMessage = "Syncing with remotes..."
-		return m, tea.Batch(m.syncWorkspaceCmd(), m.spinner.Tick)
-	case key.Matches(msg, m.keys.FilterByTag):
+		case key.Matches(msg, m.keys.Refresh):
+			return m, func() tea.Msg { return refreshMsg{} }
+		case key.Matches(msg, m.keys.ToggleGitChanges):
+			m.showGitModifiedOnly = !m.showGitModifiedOnly
+			if m.showGitModifiedOnly {
+				m.statusMessage = "Filtering for git changes"
+			} else {
+				m.statusMessage = "Cleared git changes filter"
+			}
+			m.updateViewsState()
+			return m, nil
+		case key.Matches(msg, m.keys.Sync):
+			m.statusMessage = "Syncing with remotes..."
+			return m, tea.Batch(m.syncWorkspaceCmd(), m.spinner.Tick)
+		case key.Matches(msg, m.keys.FilterByTag):
 			m.isGrepping = false
 			// Always show the tag picker - allows switching between tags
 			m.tagPickerMode = true
@@ -960,16 +960,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.CreateNoteInbox):
 			// Inbox-style creation: show type picker, create in focused workspace or global
 			m.isCreatingNote = true
-			m.noteCreationMode = "inbox"
-			m.noteCreationStep = 0 // Start with type picker
+			m.noteCreationMode = "inbox" //nolint:goconst
+			m.noteCreationStep = 0       // Start with type picker
 			m.noteCreationCursor = m.views.GetCursor()
 			m.noteTitleInput.SetValue("")
 			return m, nil
 		case key.Matches(msg, m.keys.CreateNoteGlobal):
 			// Global note creation: show type picker, always create in global
 			m.isCreatingNote = true
-			m.noteCreationMode = "global"
-			m.noteCreationStep = 0 // Start with type picker
+			m.noteCreationMode = "global" //nolint:goconst
+			m.noteCreationStep = 0        // Start with type picker
 			m.noteCreationCursor = m.views.GetCursor()
 			m.noteTitleInput.SetValue("")
 			return m, nil
@@ -1185,14 +1185,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
-
-// buildDisplayTree constructs the hierarchical list of nodes for rendering.
-// calculateRelativePath returns the absolute path for a note (shortened with ~ for home)
-func calculateRelativePath(note *models.Note, workspacePathMap map[string]string, focusedWorkspace *workspace.WorkspaceNode) string {
-	// Always use absolute path with ~ for home
-	return shortenPath(note.Path)
-}
-
 
 // deleteSelectedNotesCmd creates a command to delete the selected notes.
 func (m *Model) deleteSelectedNotesCmd() tea.Cmd {
@@ -1442,7 +1434,6 @@ func (m *Model) renameNoteCmd() tea.Cmd {
 		}
 	}
 }
-
 
 // archiveSelectedNotesCmd creates a command to archive the selected notes and plan groups
 func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
@@ -1754,7 +1745,7 @@ func (m *Model) setCollapseStateForFocus() {
 
 // applyGrepFilter applies the grep-based content filter to the display nodes
 func (m *Model) applyGrepFilter() {
-	m.views.ApplyGrepFilter()
+	_, _ = m.views.ApplyGrepFilter()
 }
 
 // clearGitStatus resets the git status state to force a re-fetch
@@ -1825,5 +1816,3 @@ func (m *Model) executeCommitCmd() tea.Cmd {
 		return commitFinishedMsg{success: true, message: message, err: nil}
 	}
 }
-
-

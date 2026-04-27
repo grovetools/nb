@@ -55,7 +55,7 @@ Target directory options:
 			// 1. Determine Target Directory
 			var targetCtx string
 			if globalRepo {
-				targetCtx = "global"
+				targetCtx = globalStr
 			} else {
 				targetCtx = *workspaceOverride
 			}
@@ -81,7 +81,7 @@ Target directory options:
 				// Structure: <root>/workspaces/<name>/ or <root>/global/
 				parent := filepath.Dir(targetDir)
 				parentName := filepath.Base(parent)
-				if parentName == "workspaces" {
+				if parentName == "workspaces" { //nolint:goconst
 					// We're in a workspace, go up one more level
 					targetDir = filepath.Dir(parent)
 				} else {
@@ -122,14 +122,14 @@ Thumbs.db
 .idea/
 .vscode/
 `
-			if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
+			if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0o644); err != nil {
 				return fmt.Errorf("failed to write .gitignore: %w", err)
 			}
 			fmt.Fprintln(out, "* Created/updated .gitignore.")
 
 			// 4. Create notebook.yml Marker (at top level)
 			markerContent := fmt.Sprintf("type: notebook\ncreated: %s\n", time.Now().Format(time.RFC3339))
-			if err := os.WriteFile(filepath.Join(targetDir, "notebook.yml"), []byte(markerContent), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(targetDir, "notebook.yml"), []byte(markerContent), 0o644); err != nil {
 				return fmt.Errorf("failed to create notebook marker: %w", err)
 			}
 			fmt.Fprintln(out, "* Created notebook.yml marker file.")

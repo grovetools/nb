@@ -23,9 +23,9 @@ type DisplayNode struct {
 	Prefix       string
 	Depth        int
 	JumpKey      rune
-	ChildCount   int           // For groups: number of child items
-	RelativePath string        // Shortened display path for notes
-	LinkedNode   *DisplayNode  // For notes, points to the plan node; for plans, points to the note node
+	ChildCount   int          // For groups: number of child items
+	RelativePath string       // Shortened display path for notes
+	LinkedNode   *DisplayNode // For notes, points to the plan node; for plans, points to the note node
 }
 
 // NodeID returns a unique identifier for this node (for tracking collapsed state).
@@ -98,21 +98,21 @@ type Model struct {
 	selectedGroups   map[string]struct{}
 	cutPaths         map[string]struct{}
 	columnVisibility map[string]bool
-	width    int
-	height   int
-	sequence *keymap.SequenceState // For detecting multi-key sequences (gg, z*)
+	width            int
+	height           int
+	sequence         *keymap.SequenceState // For detecting multi-key sequences (gg, z*)
 
 	// References to parent (browser) state for rendering
-	service             *service.Service
-	allItems            []*tree.Item
-	workspaces          []*workspace.WorkspaceNode
-	focusedWorkspace    *workspace.WorkspaceNode
-	ecosystemPickerMode bool
-	hideGlobal          bool
-	showArchives        bool
-	showArtifacts       bool
-	showOnHold          bool
-	filterValue         string
+	service              *service.Service
+	allItems             []*tree.Item
+	workspaces           []*workspace.WorkspaceNode
+	focusedWorkspace     *workspace.WorkspaceNode
+	ecosystemPickerMode  bool
+	hideGlobal           bool
+	showArchives         bool
+	showArtifacts        bool
+	showOnHold           bool
+	filterValue          string
 	isGrepping           bool
 	pendingWorkspaceInit string // Workspace name to initialize child groups for after next rebuild
 	isFilteringByTag     bool

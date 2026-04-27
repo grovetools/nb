@@ -28,8 +28,8 @@ type Comment struct {
 
 // Item represents a generic syncable entity.
 type Item struct {
-	ID        string    // The unique ID on the remote platform (e.g., issue number "123").
-	Type      string    // "issue" or "pull_request".
+	ID        string // The unique ID on the remote platform (e.g., issue number "123").
+	Type      string // "issue" or "pull_request".
 	Title     string
 	Body      string
 	State     string // "open", "closed", "merged", etc.

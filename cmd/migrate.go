@@ -19,7 +19,7 @@ const (
 	untitledStr = "untitled"
 )
 
-func NewMigrateCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+func NewMigrateCmd(svc **service.Service, workspaceOverride *string) *cobra.Command { //nolint:gocyclo
 	var (
 		migrateDryRun        bool
 		migrateForce         bool
@@ -381,7 +381,7 @@ func printMigrationReport(report *migration.MigrationReport, dryRun bool) {
 	}
 }
 
-func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bool, targetDir string, skipConfirm bool, notebookFlag string) error {
+func runStructuralMigration(svc *service.Service, dryRun, verbose, showReport bool, targetDir string, skipConfirm bool, notebookFlag string) error { //nolint:gocyclo
 	// If --target is used, it's a copy-only operation (non-destructive)
 	isCopyOnly := targetDir != ""
 

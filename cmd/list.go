@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
-
-	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -25,7 +24,7 @@ import (
 
 var listUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.list")
 
-func NewListCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+func NewListCmd(svc **service.Service, workspaceOverride *string) *cobra.Command { //nolint:gocyclo
 	var (
 		listAll           bool
 		listType          string
@@ -117,7 +116,7 @@ Examples:
 					counts, err := client.GetNoteCounts(ctx)
 					if err == nil && len(counts) > 0 {
 						if listJSON {
-							return outputJSON_Counts(counts)
+							return outputJSONCounts(counts)
 						}
 						printCountsTable(counts)
 						return nil
@@ -383,7 +382,7 @@ func outputJSON(notes []*models.Note) error {
 	return encoder.Encode(notes)
 }
 
-func outputJSON_Counts(counts map[string]*coremodels.NoteCounts) error {
+func outputJSONCounts(counts map[string]*coremodels.NoteCounts) error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(counts)

@@ -15,7 +15,7 @@ func TestSimpleListNotes(t *testing.T) {
 
 	// Create a simple directory structure
 	notesDir := filepath.Join(tmpDir, "notes")
-	if err := os.MkdirAll(notesDir, 0755); err != nil {
+	if err := os.MkdirAll(notesDir, 0o755); err != nil {
 		t.Fatalf("failed to create test directory: %v", err)
 	}
 
@@ -36,7 +36,7 @@ func TestSimpleListNotes(t *testing.T) {
 
 	for _, tn := range testNotes {
 		path := filepath.Join(notesDir, tn.filename)
-		if err := os.WriteFile(path, []byte(tn.content), 0644); err != nil {
+		if err := os.WriteFile(path, []byte(tn.content), 0o644); err != nil {
 			t.Fatalf("Failed to write test note: %v", err)
 		}
 	}
@@ -57,7 +57,6 @@ func TestSimpleListNotes(t *testing.T) {
 		}
 		return nil
 	})
-
 	if err != nil {
 		t.Fatalf("Walk failed: %v", err)
 	}
@@ -79,16 +78,16 @@ func TestSimpleArchive(t *testing.T) {
 	// Create directories
 	currentDir := filepath.Join(tmpDir, "current")
 	archiveDir := filepath.Join(tmpDir, "archive")
-	if err := os.MkdirAll(currentDir, 0755); err != nil {
+	if err := os.MkdirAll(currentDir, 0o755); err != nil {
 		t.Fatalf("failed to create current directory: %v", err)
 	}
-	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
 		t.Fatalf("failed to create archive directory: %v", err)
 	}
 
 	// Create a test file
 	srcFile := filepath.Join(currentDir, "test.md")
-	if err := os.WriteFile(srcFile, []byte("# Test"), 0644); err != nil {
+	if err := os.WriteFile(srcFile, []byte("# Test"), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 

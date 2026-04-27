@@ -16,7 +16,7 @@ func TestParseNote(t *testing.T) {
 
 	// Create a nested structure to simulate the nb directory structure
 	noteDir := filepath.Join(tempDir, "nb", "repos", "test-repo", "main", "current")
-	err := os.MkdirAll(noteDir, 0755)
+	err := os.MkdirAll(noteDir, 0o755)
 	require.NoError(t, err)
 
 	notePath := filepath.Join(noteDir, "test-note.md")
@@ -37,7 +37,7 @@ This is a test note with some content.
 - [ ] A todo item
 `
 
-	err = os.WriteFile(notePath, []byte(noteContent), 0644)
+	err = os.WriteFile(notePath, []byte(noteContent), 0o644)
 	require.NoError(t, err)
 
 	// Parse the note
@@ -71,7 +71,7 @@ func TestParseNoteWithoutFrontmatter(t *testing.T) {
 
 	// Create a nested structure for global workspace
 	noteDir := filepath.Join(tempDir, "nb", "global", "notes", "quick")
-	err := os.MkdirAll(noteDir, 0755)
+	err := os.MkdirAll(noteDir, 0o755)
 	require.NoError(t, err)
 
 	notePath := filepath.Join(noteDir, "simple-note.md")
@@ -80,7 +80,7 @@ func TestParseNoteWithoutFrontmatter(t *testing.T) {
 Just a simple note without frontmatter.
 `
 
-	err = os.WriteFile(notePath, []byte(noteContent), 0644)
+	err = os.WriteFile(notePath, []byte(noteContent), 0o644)
 	require.NoError(t, err)
 
 	// Parse the note

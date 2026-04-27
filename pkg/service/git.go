@@ -114,7 +114,7 @@ func (s *Service) ArchivePlanDirectory(ctx *WorkspaceContext, planGroup string) 
 	}
 
 	archiveDir := filepath.Join(plansBaseDir, ".archive")
-	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create archive directory: %w", err)
 	}
 

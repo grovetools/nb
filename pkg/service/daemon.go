@@ -25,21 +25,3 @@ func notifyDaemonNoteEvent(event models.NoteEvent) {
 		_ = client.NotifyNoteEvent(ctx, event)
 	}()
 }
-
-// notifyDaemonRefresh tells the daemon to do a full re-scan.
-// Used after bulk operations (migrations, syncs) where per-file events would be excessive.
-func notifyDaemonRefresh() {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		client := daemon.NewWithAutoStart()
-		defer client.Close()
-
-		if !client.IsRunning() {
-			return
-		}
-
-		_ = client.Refresh(ctx)
-	}()
-}

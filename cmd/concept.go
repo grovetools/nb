@@ -74,7 +74,7 @@ func newConceptNewCmd(svc **service.Service, workspaceOverride *string) *cobra.C
 					workspaceName = ctx.NotebookContextWorkspace.Name
 				}
 				if globalConcept {
-					workspaceName = "global"
+					workspaceName = globalStr
 				}
 				result := service.ConceptInfo{
 					ID:        service.SanitizeFilename(title),

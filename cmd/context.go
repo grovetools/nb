@@ -22,7 +22,7 @@ func NewContextCmd(svc **service.Service, workspaceOverride *string) *cobra.Comm
 
 This is useful for integration with other tools like Neovim.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-	s := *svc
+			s := *svc
 
 			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {

@@ -56,7 +56,7 @@ func (p *GitHubProvider) Sync(config map[string]string, repoPath string) ([]*syn
 // CreateItem creates a new issue or pull request on GitHub.
 func (p *GitHubProvider) CreateItem(item *sync.Item, repoPath string) (*sync.Item, error) {
 	itemType := item.Type
-	if itemType == "pull_request" {
+	if itemType == "pull_request" { //nolint:goconst
 		itemType = "pr" // gh cli uses 'pr'
 	}
 

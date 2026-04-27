@@ -13,11 +13,11 @@ import (
 type KeyMap struct {
 	keymap.Base
 	// Focus operations (TUI-specific)
-	FocusEcosystem key.Binding
-	ClearFocus     key.Binding
-	FocusParent    key.Binding
-	FocusSelected  key.Binding
-	FocusRecent    key.Binding
+	FocusEcosystem  key.Binding
+	ClearFocus      key.Binding
+	FocusParent     key.Binding
+	FocusSelected   key.Binding
+	FocusRecent     key.Binding
 	JumpToWorkspace key.Binding
 	// Filter operations (TUI-specific)
 	FilterByTag      key.Binding

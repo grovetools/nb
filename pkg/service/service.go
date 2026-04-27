@@ -35,7 +35,7 @@ func (s *Service) CreateNoteWithContent(
 	if err != nil {
 		return nil, fmt.Errorf("get note path: %w", err)
 	}
-	if err := os.MkdirAll(noteDir, 0755); err != nil {
+	if err := os.MkdirAll(noteDir, 0o755); err != nil {
 		return nil, fmt.Errorf("ensure directories: %w", err)
 	}
 
@@ -47,7 +47,7 @@ func (s *Service) CreateNoteWithContent(
 	content := frontmatter.BuildContent(fm, body)
 
 	// 4. Write file to disk
-	if err := os.WriteFile(notePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(notePath, []byte(content), 0o644); err != nil {
 		return nil, fmt.Errorf("write note: %w", err)
 	}
 
@@ -55,7 +55,7 @@ func (s *Service) CreateNoteWithContent(
 	if fm.Modified != "" {
 		if modTime, err := frontmatter.ParseTimestamp(fm.Modified); err == nil {
 			// Use the same time for both atime and mtime
-			os.Chtimes(notePath, modTime, modTime)
+			_ = os.Chtimes(notePath, modTime, modTime)
 		}
 	}
 
@@ -100,7 +100,7 @@ func (s *Service) UpdateNoteWithContent(
 	if fm.Modified != "" {
 		if modTime, err := frontmatter.ParseTimestamp(fm.Modified); err == nil {
 			// Use the same time for both atime and mtime
-			os.Chtimes(notePath, modTime, modTime)
+			_ = os.Chtimes(notePath, modTime, modTime)
 		}
 	}
 
@@ -171,7 +171,7 @@ func (s *Service) transferNotes(sourcePaths []string, destWorkspace *coreworkspa
 			continue
 		}
 
-		if err := os.MkdirAll(destDir, 0755); err != nil {
+		if err := os.MkdirAll(destDir, 0o755); err != nil {
 			errs = append(errs, fmt.Sprintf("failed to create dest dir %s: %v", destDir, err))
 			continue
 		}
@@ -187,7 +187,7 @@ func (s *Service) transferNotes(sourcePaths []string, destWorkspace *coreworkspa
 			destPath = filepath.Join(destDir, fmt.Sprintf("%s-%s%s", base, timestamp, ext))
 
 			// Check if copying to same directory
-			if mode == "copy" && filepath.Dir(sourcePath) == filepath.Dir(destPath) {
+			if mode == "copy" && filepath.Dir(sourcePath) == filepath.Dir(destPath) { //nolint:goconst
 				isCopyToSameLocation = true
 			}
 		}
@@ -313,7 +313,7 @@ func (s *Service) updateNoteFrontmatter(notePath string, destWorkspace *corework
 
 	// Keep the repository tag
 	var repoTags []string
-	if destWorkspace != nil && destWorkspace.Name != "global" {
+	if destWorkspace != nil && destWorkspace.Name != globalWorkspace {
 		repoTags = []string{destWorkspace.Name}
 	}
 
@@ -340,7 +340,7 @@ func (s *Service) updateNoteFrontmatter(notePath string, destWorkspace *corework
 	updatedContent := frontmatter.BuildContent(fm, body)
 
 	// Write back to file
-	if err := os.WriteFile(notePath, []byte(updatedContent), 0644); err != nil {
+	if err := os.WriteFile(notePath, []byte(updatedContent), 0o644); err != nil {
 		return fmt.Errorf("write note: %w", err)
 	}
 
@@ -382,7 +382,7 @@ func New(config *Config, provider *coreworkspace.Provider, coreCfg *coreconfig.C
 	// 2. Merge user-defined types from grove.yml, overriding defaults
 	if coreCfg != nil && coreCfg.Notebooks != nil && coreCfg.Notebooks.Definitions != nil {
 		// Get default notebook name
-		defaultNotebookName := "default"
+		defaultNotebookName := "default" //nolint:goconst
 		if coreCfg.Notebooks.Rules != nil && coreCfg.Notebooks.Rules.Default != "" {
 			defaultNotebookName = coreCfg.Notebooks.Rules.Default
 		}
@@ -503,7 +503,7 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 	if err != nil {
 		return nil, fmt.Errorf("get note path: %w", err)
 	}
-	if err := os.MkdirAll(noteDir, 0755); err != nil {
+	if err := os.MkdirAll(noteDir, 0o755); err != nil {
 		return nil, fmt.Errorf("ensure directories: %w", err)
 	}
 
@@ -546,7 +546,7 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 	content := CreateNoteContent(noteType, title, currentContext.NotebookContextWorkspace.Name, currentContext.Branch, worktreeName, currentContext.CurrentWorkspace.Name, template, noteTypeConfig)
 
 	// Write file
-	if err := os.WriteFile(notePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(notePath, []byte(content), 0o644); err != nil {
 		return nil, fmt.Errorf("write note: %w", err)
 	}
 
@@ -614,13 +614,13 @@ func (s *Service) CreateConcept(ctx *WorkspaceContext, title string, options ...
 	conceptID := SanitizeFilename(title)
 	conceptPath := filepath.Join(conceptsDir, conceptID)
 
-	if err := os.MkdirAll(conceptPath, 0755); err != nil {
+	if err := os.MkdirAll(conceptPath, 0o755); err != nil {
 		return nil, fmt.Errorf("create concept directory: %w", err)
 	}
 
 	// Create concept-manifest.yml
 	manifestContent := fmt.Sprintf(
-`id: %s
+		`id: %s
 title: %s
 description: A brief description of the concept.
 status: active
@@ -629,7 +629,7 @@ related_plans: []
 related_notes: []
 related_skills: []
 `, conceptID, title)
-	if err := os.WriteFile(filepath.Join(conceptPath, "concept-manifest.yml"), []byte(manifestContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(conceptPath, "concept-manifest.yml"), []byte(manifestContent), 0o644); err != nil {
 		return nil, fmt.Errorf("create concept-manifest.yml: %w", err)
 	}
 
@@ -653,7 +653,7 @@ related_skills: []
 		Modified: timestampStr,
 	}
 
-	if currentContext.NotebookContextWorkspace.Name != "" && currentContext.NotebookContextWorkspace.Name != "global" {
+	if currentContext.NotebookContextWorkspace.Name != "" && currentContext.NotebookContextWorkspace.Name != globalWorkspace {
 		fm.Repository = currentContext.NotebookContextWorkspace.Name
 		if currentContext.Branch != "" {
 			fm.Branch = currentContext.Branch
@@ -666,7 +666,7 @@ related_skills: []
 	overviewBody := fmt.Sprintf("# Overview: %s\n\n## Summary\n\nA high-level summary of what this concept is about.\n", title)
 	overviewContent := frontmatter.BuildContent(fm, overviewBody)
 
-	if err := os.WriteFile(filepath.Join(conceptPath, "overview.md"), []byte(overviewContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(conceptPath, "overview.md"), []byte(overviewContent), 0o644); err != nil {
 		return nil, fmt.Errorf("create overview.md: %w", err)
 	}
 
@@ -1088,7 +1088,7 @@ func (s *Service) SearchConcepts(query string) ([]ConceptSearchResult, error) {
 		matchedLine := rest[secondColon+1:]
 
 		var lineNum int
-		fmt.Sscanf(lineNumStr, "%d", &lineNum)
+		_, _ = fmt.Sscanf(lineNumStr, "%d", &lineNum)
 
 		// Extract concept ID from the file path
 		// Path format: /path/to/concepts/<concept-id>/file.md
@@ -1275,7 +1275,7 @@ func (s *Service) searchConceptsInWorkspaces(query string, workspaces []*corewor
 		matchedLine := rest[secondColon+1:]
 
 		var lineNum int
-		fmt.Sscanf(lineNumStr, "%d", &lineNum)
+		_, _ = fmt.Sscanf(lineNumStr, "%d", &lineNum)
 
 		conceptID := ""
 		workspaceName := ""
@@ -1425,7 +1425,7 @@ func (s *Service) addToManifestList(manifestPath, fieldName, value string) error
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
 
-	if err := os.WriteFile(manifestPath, output, 0644); err != nil {
+	if err := os.WriteFile(manifestPath, output, 0o644); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 
@@ -1598,7 +1598,7 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, incl
 			continue
 		}
 
-		err = filepath.Walk(contentDir.Path, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(contentDir.Path, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return nil // Skip errors
 			}
@@ -1627,17 +1627,17 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, incl
 			}
 
 			// Skip .git directories - these should never appear in notebook tree
-			if info.IsDir() && info.Name() == ".git" {
+			if info.IsDir() && info.Name() == ".git" { //nolint:goconst
 				return filepath.SkipDir
 			}
 
 			// Skip .grove-worktrees directories - worktrees don't belong in notebooks
-			if info.IsDir() && info.Name() == ".grove-worktrees" {
+			if info.IsDir() && info.Name() == ".grove-worktrees" { //nolint:goconst
 				return filepath.SkipDir
 			}
 
 			// Skip .grove directory which contains metadata
-			if info.IsDir() && info.Name() == ".grove" {
+			if info.IsDir() && info.Name() == ".grove" { //nolint:goconst
 				return filepath.SkipDir
 			}
 
@@ -1670,7 +1670,7 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, incl
 					parts := strings.Split(filepath.ToSlash(relPath), "/")
 
 					switch contentDir.Type {
-					case "plans":
+					case "plans": //nolint:goconst
 						if len(parts) > 2 {
 							// This is inside a nested subdirectory: "plans/<dir>/<subdir>"
 							// Preserve the full path for archived plans like "plans/.archive/planname"
@@ -1687,7 +1687,7 @@ func (s *Service) ListAllNotes(ctx *WorkspaceContext, includeArchived bool, incl
 							note.Type = "plan"
 						}
 
-					case "chats":
+					case "chats": //nolint:goconst
 						if len(parts) > 2 {
 							// This is inside a nested subdirectory: "chats/<dir>/<subdir>"
 							note.Group = "chats/" + filepath.Join(parts[0], parts[1])
@@ -1752,7 +1752,7 @@ func (s *Service) ListAllItems(ctx *WorkspaceContext, includeArchived bool, incl
 			continue
 		}
 
-		err = filepath.Walk(contentDir.Path, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(contentDir.Path, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return nil // Skip errors
 			}
@@ -1889,7 +1889,7 @@ func (s *Service) ArchiveNotes(ctx *WorkspaceContext, paths []string) error {
 		archiveDir := filepath.Join(noteDir, ".archive")
 
 		// 3. Ensure this .archive directory exists.
-		if err := os.MkdirAll(archiveDir, 0755); err != nil {
+		if err := os.MkdirAll(archiveDir, 0o755); err != nil {
 			return fmt.Errorf("failed to create archive directory for %s: %w", path, err)
 		}
 
@@ -1999,13 +1999,13 @@ func (s *Service) GetWorkspaceContext(startPath string) (*WorkspaceContext, erro
 	}
 
 	s.Logger.WithFields(logrus.Fields{
-		"start_path":                 CWD,
-		"current_workspace_name":     ctx.CurrentWorkspace.Name,
-		"current_workspace_path":     ctx.CurrentWorkspace.Path,
-		"current_workspace_kind":     ctx.CurrentWorkspace.Kind,
-		"notebook_context_name":      ctx.NotebookContextWorkspace.Name,
-		"notebook_context_path":      ctx.NotebookContextWorkspace.Path,
-		"notebook_context_notebook":  ctx.NotebookContextWorkspace.NotebookName,
+		"start_path":                CWD,
+		"current_workspace_name":    ctx.CurrentWorkspace.Name,
+		"current_workspace_path":    ctx.CurrentWorkspace.Path,
+		"current_workspace_kind":    ctx.CurrentWorkspace.Kind,
+		"notebook_context_name":     ctx.NotebookContextWorkspace.Name,
+		"notebook_context_path":     ctx.NotebookContextWorkspace.Path,
+		"notebook_context_notebook": ctx.NotebookContextWorkspace.NotebookName,
 	}).Debug("Resolved workspace context")
 
 	return ctx, nil
@@ -2031,8 +2031,8 @@ func (s *Service) findNotebookContextNode(currentNode *coreworkspace.WorkspaceNo
 		// Find the corresponding subproject in the main ecosystem
 		for _, node := range s.workspaceProvider.All() {
 			if node.Kind == coreworkspace.KindEcosystemSubProject &&
-			   node.Name == currentNode.Name &&
-			   strings.EqualFold(node.ParentEcosystemPath, rootEco.Path) {
+				node.Name == currentNode.Name &&
+				strings.EqualFold(node.ParentEcosystemPath, rootEco.Path) {
 				return node, nil
 			}
 		}
@@ -2210,7 +2210,7 @@ func (s *Service) openInEditor(path string) error {
 // UpdateNoteContent updates the content of an existing note
 func (s *Service) UpdateNoteContent(path string, content string) error {
 	// Write the new content
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write note: %w", err)
 	}
 
@@ -2361,17 +2361,6 @@ func copyAndDelete(src, dst string) error {
 	return nil
 }
 
-// getCurrentGitBranch returns the current git branch
-func getCurrentGitBranch(repoPath string) string {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = repoPath
-	output, err := cmd.Output()
-	if err != nil {
-		return "main"
-	}
-	return strings.TrimSpace(string(output))
-}
-
 // ListAllNotesInWorkspace lists all notes in a given workspace, across all branches.
 func (s *Service) ListAllNotesInWorkspace(ws *coreworkspace.WorkspaceNode) ([]*models.Note, error) {
 	if ws.Kind != coreworkspace.KindStandaloneProject && ws.Kind != coreworkspace.KindEcosystemRoot && ws.Kind != coreworkspace.KindEcosystemSubProject {
@@ -2516,7 +2505,7 @@ func (s *Service) addFlowJobMetadata(filePath, planDir string, isCopy bool) erro
 			return fmt.Errorf("update frontmatter: %w", err)
 		}
 
-		if err := os.WriteFile(filePath, newContent, 0644); err != nil {
+		if err := os.WriteFile(filePath, newContent, 0o644); err != nil {
 			return fmt.Errorf("write updated note with job metadata: %w", err)
 		}
 		s.Logger.WithFields(logrus.Fields{

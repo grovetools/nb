@@ -19,41 +19,23 @@ type ProviderFactory func() Provider
 
 // Syncer orchestrates the synchronization process.
 type Syncer struct {
-	svc              *service.Service
+	svc               *service.Service
 	providerFactories map[string]ProviderFactory
-	logger           *logrus.Entry
+	logger            *logrus.Entry
 }
 
 // NewSyncer creates a new Syncer.
 func NewSyncer(svc *service.Service) *Syncer {
 	return &Syncer{
-		svc:              svc,
+		svc:               svc,
 		providerFactories: make(map[string]ProviderFactory),
-		logger:           svc.Logger.WithField("sub-component", "syncer"),
+		logger:            svc.Logger.WithField("sub-component", "syncer"),
 	}
 }
 
 // RegisterProvider registers a provider factory for a given provider name.
 func (s *Syncer) RegisterProvider(name string, factory ProviderFactory) {
 	s.providerFactories[name] = factory
-}
-
-// findNoteByRemoteID searches for a note with matching remote metadata.
-func (s *Syncer) findNoteByRemoteID(ctx *service.WorkspaceContext, remoteID, provider string) (*models.Note, error) {
-	// Get all notes in workspace, including archived, but not artifacts.
-	notes, err := s.svc.ListAllNotes(ctx, true, false)
-	if err != nil {
-		return nil, err
-	}
-
-	// Search for matching Remote.Provider and Remote.ID
-	for _, note := range notes {
-		if note.Remote != nil && note.Remote.Provider == provider && note.Remote.ID == remoteID {
-			return note, nil
-		}
-	}
-
-	return nil, nil // Not found
 }
 
 // needsUpdate checks if a note needs updating based on the remote item.
@@ -207,7 +189,7 @@ func (s *Syncer) syncWithProvider(
 				}
 
 				if localComment != "" {
-					itemType := "issue"
+					itemType := "issue" //nolint:goconst
 					if localNote.Remote.Provider == "github" {
 						noteTypeStr := string(localNote.Type)
 						if strings.Contains(noteTypeStr, "pr") || strings.Contains(noteTypeStr, "pull") {

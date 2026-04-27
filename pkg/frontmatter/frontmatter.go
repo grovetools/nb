@@ -35,15 +35,15 @@ type Frontmatter struct {
 	Worktree   string   `yaml:"worktree,omitempty"`
 	Created    string   `yaml:"created"`
 	Modified   string   `yaml:"modified"`
-	Started    string   `yaml:"started,omitempty"` // For LLM notes
-	PlanRef string `yaml:"plan_ref,omitempty"` // Reference to associated plan
+	Started    string   `yaml:"started,omitempty"`  // For LLM notes
+	PlanRef    string   `yaml:"plan_ref,omitempty"` // Reference to associated plan
 
 	// Remote sync metadata
 	Remote *RemoteMetadata `yaml:"remote,omitempty"`
 
 	// Blog-specific fields
 	Description string `yaml:"description,omitempty"`
-	PublishDate string   `yaml:"publishDate,omitempty"`
+	PublishDate string `yaml:"publishDate,omitempty"`
 	UpdatedDate string `yaml:"updatedDate,omitempty"`
 	Draft       bool   `yaml:"draft,omitempty"`
 	Featured    bool   `yaml:"featured,omitempty"`

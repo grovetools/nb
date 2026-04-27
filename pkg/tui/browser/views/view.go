@@ -22,10 +22,10 @@ type nodeRenderInfo struct {
 	prefix      string
 	indicator   string // "■", note icon, or plan status icon
 	name        string
-	count      string // "(d)"
-	suffix     string
-	isArchived bool
-	isArtifact bool
+	count       string // "(d)"
+	suffix      string
+	isArchived  bool
+	isArtifact  bool
 	isPlan      bool
 	isGroup     bool
 	isWorkspace bool
@@ -363,8 +363,8 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 		} else if node.IsPlan() {
 			// Handle plan nodes (but not archive nodes that start with "plans/")
 			info.isPlan = true
-			info.name = strings.TrimPrefix(groupName, "plans/") // Display plan name without "plans/"
-			info.name = strings.TrimPrefix(info.name, ".archive/")   // Also remove ".archive/" prefix for archived plans
+			info.name = strings.TrimPrefix(groupName, "plans/")    // Display plan name without "plans/"
+			info.name = strings.TrimPrefix(info.name, ".archive/") // Also remove ".archive/" prefix for archived plans
 			groupKey := m.getGroupKey(node)
 			if _, ok := m.selectedGroups[groupKey]; ok {
 				info.indicator = "■ " // Selected indicator
@@ -552,7 +552,7 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 		pre := info.name[:matchStart]
 		match := info.name[matchStart:matchEnd]
 		post := info.name[matchEnd:]
-		highlightStyle := theme.DefaultTheme.Highlight.Copy().Reverse(true)
+		highlightStyle := theme.DefaultTheme.Highlight.Reverse(true)
 		styledName = style.Render(pre) + highlightStyle.Render(match) + style.Render(post)
 	} else {
 		styledName = style.Render(info.name)
@@ -989,7 +989,7 @@ func (m *Model) GetPlanStatus(workspaceName, planGroup string) string {
 		}
 	}
 	if wsNode == nil {
-		return "unknown"
+		return "unknown" //nolint:goconst
 	}
 
 	// Get the plans base directory for this workspace using the locator
@@ -1086,22 +1086,4 @@ func (m *Model) getGroupKey(node *DisplayNode) string {
 		}
 	}
 	return ""
-}
-
-// formatRelativeTime formats a time as a relative string
-func formatRelativeTime(t time.Time) string {
-	diff := time.Since(t)
-	if diff < time.Minute {
-		return "just now"
-	}
-	if diff < time.Hour {
-		return fmt.Sprintf("%dm ago", int(diff.Minutes()))
-	}
-	if diff < 24*time.Hour {
-		return fmt.Sprintf("%dh ago", int(diff.Hours()))
-	}
-	if diff < 7*24*time.Hour {
-		return fmt.Sprintf("%dd ago", int(diff.Hours()/24))
-	}
-	return t.Format("2006-01-02")
 }

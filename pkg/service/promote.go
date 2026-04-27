@@ -60,7 +60,7 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 	// points to the in_progress path.
 	noteDir := filepath.Dir(notePath)
 	inProgressDir := filepath.Join(filepath.Dir(noteDir), "in_progress")
-	if err := os.MkdirAll(inProgressDir, 0755); err != nil {
+	if err := os.MkdirAll(inProgressDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating in_progress directory: %w", err)
 	}
 	inProgressPath := filepath.Join(inProgressDir, filepath.Base(notePath))
@@ -128,7 +128,7 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 	// The job template already includes a <!-- grove: {"template": "chat"} -->
 	// marker, so we just append the note body and reference below it.
 	updatedContent := string(jobContent) + "\n" + strings.TrimSpace(body) + "\n\n_Promoted from: " + inProgressPath + "_\n"
-	if err := os.WriteFile(jobFilePath, []byte(updatedContent), 0644); err != nil {
+	if err := os.WriteFile(jobFilePath, []byte(updatedContent), 0o644); err != nil {
 		return "", fmt.Errorf("writing job body: %w", err)
 	}
 
@@ -138,7 +138,7 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 	if fm != nil {
 		fm.PlanRef = planRef
 		updatedNote := frontmatter.BuildContent(fm, body)
-		if writeErr := os.WriteFile(inProgressPath, []byte(updatedNote), 0644); writeErr != nil {
+		if writeErr := os.WriteFile(inProgressPath, []byte(updatedNote), 0o644); writeErr != nil {
 			s.Logger.WithError(writeErr).Warn("Failed to update note frontmatter with plan_ref")
 		}
 	}

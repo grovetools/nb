@@ -149,7 +149,6 @@ Examples:
 				}
 			}
 
-			
 			newUlog.Success("Note created").
 				Field("path", note.Path).
 				Field("type", actualNoteType).

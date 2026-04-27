@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/nb/pkg/service"
+	"github.com/spf13/cobra"
 )
 
 var initUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.init")
@@ -22,7 +22,7 @@ This command will:
 - Register the current directory as a workspace
 - Create necessary directory structure`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-	s := *svc
+			s := *svc
 
 			if initMinimal {
 				// Verify global workspace context can be accessed
