@@ -18,6 +18,7 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	coremodels "github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/tui/theme"
+
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/service"
 )

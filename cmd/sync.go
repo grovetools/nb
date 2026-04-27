@@ -5,10 +5,11 @@ import (
 	"fmt"
 
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/sync"
 	"github.com/grovetools/nb/pkg/sync/github"
-	"github.com/spf13/cobra"
 )
 
 var syncUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.sync")

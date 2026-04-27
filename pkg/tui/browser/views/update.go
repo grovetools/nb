@@ -12,6 +12,7 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/util/pathutil"
+
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/tree"
 )

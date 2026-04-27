@@ -10,10 +10,11 @@ import (
 
 	"github.com/grovetools/core/fs"
 	coreworkspace "github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/nb/pkg/frontmatter"
-	"github.com/grovetools/nb/pkg/models"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
+
+	"github.com/grovetools/nb/pkg/frontmatter"
+	"github.com/grovetools/nb/pkg/models"
 )
 
 func Migrate(basePath string, options MigrationOptions, output io.Writer, logger *logrus.Entry) (*MigrationReport, error) {

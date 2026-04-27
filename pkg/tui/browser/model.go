@@ -21,6 +21,7 @@ import (
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
+
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/sync"

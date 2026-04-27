@@ -1,8 +1,9 @@
 package cmd
 
 import (
-	"github.com/grovetools/nb/pkg/service"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/nb/pkg/service"
 )
 
 // NewRemoteCmd creates the `remote` command and its subcommands.

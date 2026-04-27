@@ -7,11 +7,12 @@ import (
 	"strings"
 
 	"github.com/grovetools/flow/pkg/orchestration"
-	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/git"
 	"github.com/grovetools/tend/pkg/harness"
 	"github.com/grovetools/tend/pkg/verify"
+
+	"github.com/grovetools/nb/pkg/frontmatter"
 )
 
 // NotebookPromoteToJobScenario tests the `nb promote` CLI command with a

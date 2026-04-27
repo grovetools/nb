@@ -8,10 +8,11 @@ import (
 	coreconfig "github.com/grovetools/core/config"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/nb/cmd"
-	"github.com/grovetools/nb/pkg/service"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/nb/cmd"
+	"github.com/grovetools/nb/pkg/service"
 )
 
 var (

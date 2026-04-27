@@ -4,8 +4,9 @@ import (
 	"fmt"
 
 	grovelogging "github.com/grovetools/core/logging"
-	"github.com/grovetools/nb/pkg/service"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/nb/pkg/service"
 )
 
 var initUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.init")

@@ -17,6 +17,8 @@ import (
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/core/util/pathutil"
+	"github.com/sirupsen/logrus"
+
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/sync"
@@ -24,7 +26,6 @@ import (
 	"github.com/grovetools/nb/pkg/tree"
 	"github.com/grovetools/nb/pkg/tui/browser/components/confirm"
 	"github.com/grovetools/nb/pkg/tui/browser/views"
-	"github.com/sirupsen/logrus"
 )
 
 // updateViewsState synchronizes the view state with the browser model

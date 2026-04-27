@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/sirupsen/logrus"
+
+	"github.com/grovetools/nb/pkg/frontmatter"
 )
 
 type Migrator struct {

@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/grovetools/nb/pkg/service"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/nb/pkg/service"
 )
 
 func NewConceptCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {

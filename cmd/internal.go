@@ -6,10 +6,11 @@ import (
 
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/models"
-	"github.com/grovetools/nb/pkg/frontmatter"
-	"github.com/grovetools/nb/pkg/service"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/nb/pkg/frontmatter"
+	"github.com/grovetools/nb/pkg/service"
 )
 
 var internalUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.internal")

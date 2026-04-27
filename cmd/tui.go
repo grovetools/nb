@@ -12,10 +12,11 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/util/pathutil"
-	"github.com/grovetools/nb/pkg/service"
-	"github.com/grovetools/nb/pkg/tui/browser"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/nb/pkg/service"
+	"github.com/grovetools/nb/pkg/tui/browser"
 )
 
 // NewTuiCmd creates the `nb tui` command.

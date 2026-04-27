@@ -6,10 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/service"
-	"github.com/sirupsen/logrus"
 )
 
 const syncMarker = "<!-- nb-sync-marker -->"

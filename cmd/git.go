@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"github.com/grovetools/core/git"
-	"github.com/grovetools/nb/pkg/service"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/nb/pkg/service"
 )
 
 // NewGitCmd creates the `nb git` command and its subcommands.

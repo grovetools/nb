@@ -9,9 +9,10 @@ import (
 
 	coreconfig "github.com/grovetools/core/config"
 	coremodels "github.com/grovetools/core/pkg/models"
+	"github.com/sirupsen/logrus"
+
 	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/grovetools/nb/pkg/models"
-	"github.com/sirupsen/logrus"
 )
 
 const (

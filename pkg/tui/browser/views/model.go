@@ -3,6 +3,7 @@ package views
 import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/keymap"
+
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/tree"
 )

@@ -7,8 +7,9 @@ import (
 	"os/exec"
 
 	"github.com/grovetools/core/pkg/tmux"
-	"github.com/grovetools/nb/pkg/service"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/nb/pkg/service"
 )
 
 // NewTmuxTuiCmd returns the command for opening nb tui in a tmux window.

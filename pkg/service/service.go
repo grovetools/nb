@@ -14,11 +14,12 @@ import (
 	coremodels "github.com/grovetools/core/pkg/models"
 	coreworkspace "github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/pathutil"
+	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
+
 	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/tree"
-	"github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v3"
 )
 
 // CreateNoteWithContent creates a new note programmatically without opening an editor.

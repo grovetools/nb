@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grovetools/nb/pkg/frontmatter"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+
+	"github.com/grovetools/nb/pkg/frontmatter"
 )
 
 var (

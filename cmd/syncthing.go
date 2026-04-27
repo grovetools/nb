@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/syncthing"
-	"github.com/spf13/cobra"
 )
 
 // NewSyncthingCmd creates the `nb syncthing` command and its subcommands.
