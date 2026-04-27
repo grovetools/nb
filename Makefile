@@ -26,7 +26,7 @@ LDFLAGS = -ldflags="\
 -X '$(VERSION_PKG).BuildDate=$(BUILD_DATE)'"
 
 # Default target
-.PHONY: all build test clean fmt vet lint run check dev build-all help
+.PHONY: all build test clean fmt fmt-check vet lint run check dev build-all help
 all: build
 
 # Build the binary
@@ -69,6 +69,24 @@ test-run:
 # Run benchmarks
 bench:
 	$(GO) test -bench=. -benchmem ./...
+
+fmt:
+	@echo "Formatting code..."
+	@gofumpt -w .
+
+fmt-check:
+	@unformatted="$$(gofumpt -l . 2>/dev/null)"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "Unformatted files (run 'make fmt'):"; \
+		echo "$$unformatted" | sed 's/^/  /'; \
+		exit 1; \
+	fi
+
+vet:
+	@echo "Running go vet..."
+	@go vet ./...
+
+check: fmt-check vet lint test
 
 # Development build with race detector
 dev:
