@@ -1,6 +1,7 @@
 # .golangci.yml
 run:
-  allow-parallel-runners: true  timeout: 5m
+  allow-parallel-runners: true
+  timeout: 5m
 
 linters:
   enable:
