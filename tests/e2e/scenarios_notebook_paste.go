@@ -69,8 +69,12 @@ notebooks:
 	if err := fs.WriteString(filepath.Join(projectDir, "grove.yml"), "name: paste-project\nversion: '1.0'"); err != nil {
 		return fmt.Errorf("write project config: %w", err)
 	}
-	if _, err := git.SetupTestRepo(projectDir); err != nil {
+	repo, err := git.SetupTestRepo(projectDir)
+	if err != nil {
 		return fmt.Errorf("setup test repo: %w", err)
+	}
+	if err := repo.AddCommit("initial commit"); err != nil {
+		return fmt.Errorf("initial commit: %w", err)
 	}
 	ctx.Set("project_dir", projectDir)
 	workspaceRoot := filepath.Join(notebookRoot, "workspaces", "paste-project")

@@ -418,39 +418,35 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 	archivesView, _ := session.Capture()
 	ctx.ShowCommandOutput("TUI with archives visible", archivesView, "")
 
-	// Frames 35-36: Navigate to .archive folder under inbox
-	// After toggling archives, cursor is on research
-	// Navigate up to inbox
-	_ = session.SendKeys("k")
-	time.Sleep(200 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-	// Expand inbox if not already expanded
-	_ = session.SendKeys("l")
-	time.Sleep(200 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-	// Navigate down through inbox contents to .archive
-	// inbox has: note-with-todos.md, 20251228-my-new-note.md, .archive
-	_ = session.SendKeys("j")
-	time.Sleep(200 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-	_ = session.SendKeys("j")
-	time.Sleep(200 * time.Millisecond)
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-	_ = session.SendKeys("j")
-	time.Sleep(200 * time.Millisecond)
+	// Go to top of tree, then navigate down to .archive and expand it.
+	// Tree structure (with archives visible):
+	//   global          <- gg lands here
+	//   project-A
+	//   │ inbox
+	//   │ │ note-with-todos.md
+	//   │ └ .archive    <- target
+	//   └ research
+	_ = session.SendKeys("g")
+	time.Sleep(100 * time.Millisecond)
+	_ = session.SendKeys("g")
+	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
-	// Frame 37: Expand .archive folder
+	// Navigate down: global -> project-A -> inbox -> note-with-todos.md -> .archive
+	for i := 0; i < 4; i++ {
+		_ = session.SendKeys("j")
+		time.Sleep(200 * time.Millisecond)
+		if err := session.WaitStable(); err != nil {
+			return err
+		}
+	}
+
+	preExpandView, _ := session.Capture()
+	ctx.ShowCommandOutput("TUI before expanding .archive", preExpandView, "")
+
+	// Expand .archive folder
 	_ = session.SendKeys("l")
 	time.Sleep(500 * time.Millisecond)
 	if err := session.WaitStable(); err != nil {
@@ -461,7 +457,7 @@ func testGlobalViewAndVisibility(ctx *harness.Context) error {
 		return err
 	}
 
-	// Frames 38-42: Navigate up to global with 'k' keys (5 times)
+	// Navigate up to global: archived.md -> .archive -> note-with-todos.md -> inbox -> project-A -> global
 	for i := 0; i < 5; i++ {
 		_ = session.SendKeys("k")
 		time.Sleep(200 * time.Millisecond)

@@ -47,7 +47,7 @@ This is a test note with some content.
 
 	// Verify all fields are populated correctly
 	assert.Equal(t, notePath, note.Path)
-	assert.Equal(t, "Test Note", note.Title)
+	assert.Equal(t, "test-note.md", note.Title)
 	assert.Equal(t, "current", string(note.Type))
 	assert.Equal(t, "test-repo", note.Workspace)
 	assert.Equal(t, "main", note.Branch)
@@ -90,7 +90,7 @@ Just a simple note without frontmatter.
 
 	// Verify fields are populated from path and content
 	assert.Equal(t, notePath, note.Path)
-	assert.Equal(t, "Simple Note", note.Title)
+	assert.Equal(t, "simple-note.md", note.Title)
 	assert.Equal(t, "quick", string(note.Type))
 	assert.Equal(t, "global", note.Workspace)
 	assert.Equal(t, "", note.Branch)
