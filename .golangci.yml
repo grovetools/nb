@@ -14,7 +14,7 @@ linters:
     - unused
     - goconst
     - gocyclo
-    - gofmt
+    - gofumpt
     - ineffassign
     - tparallel
 
@@ -24,7 +24,7 @@ linters-settings:
     min-complexity: 50
   goimports:
     # Set the local prefix for this project
-    local-prefixes: github.com/mattsolo1/nb
+    local-prefixes: github.com/grovetools/nb
   revive:
     rules:
       # This rule can be noisy and is often disabled
