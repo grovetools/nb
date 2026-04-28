@@ -122,8 +122,7 @@ build-all:
 # Pass arguments via ARGS, e.g., make test-e2e ARGS="run -i"
 test-e2e: build build-e2e-mocks
 	@echo "Running E2E tests..."
-	@go build -o $(BIN_DIR)/$(E2E_BINARY_NAME) ./tests/e2e/
-	@tend run $(ARGS)
+	@tend run -p $(ARGS)
 
 E2E_MOCK_SRC=tests/e2e/mocks/src
 E2E_MOCK_BIN=tests/e2e/tend/mocks/bin
