@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/compositor"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/embed"
@@ -133,7 +134,7 @@ func (h *cliEnvironmentHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			writeNvimIPC("OPEN", msg.Path)
 			return h, nil
 		}
-		if os.Getenv("TMUX") != "" {
+		if mux.ActiveMux() != mux.MuxNone {
 			return h, h.openInTmuxCmd(msg.Path)
 		}
 		// Fall through to the parent host (StandaloneHost) which runs $EDITOR.
@@ -200,32 +201,37 @@ func (h *cliEnvironmentHost) openInTmuxCmd(path string) tea.Cmd {
 	splitPaneID := h.tmuxSplitPaneID
 	tuiPaneID := h.tmuxTUIPaneID
 	return func() tea.Msg {
+		ctx := context.Background()
+
+		engine, err := mux.DetectMuxEngine(ctx)
+		if err != nil {
+			return tmuxSplitFinishedMsg{err: fmt.Errorf("mux engine detection failed: %w", err)}
+		}
+
+		if tuiEngine, ok := engine.(mux.MuxTUIEngine); ok {
+			isPopup, err := tuiEngine.IsPopup(ctx)
+			if err != nil {
+				return tmuxSplitFinishedMsg{err: fmt.Errorf("IsPopup error: %w", err)}
+			}
+			if isPopup {
+				editor := os.Getenv("EDITOR")
+				if editor == "" {
+					editor = "nvim"
+				}
+				if err := tuiEngine.OpenInEditorWindow(ctx, editor, path, "notebook", 2, false); err != nil {
+					return tmuxSplitFinishedMsg{err: fmt.Errorf("popup mode - failed to open in editor: %w", err)}
+				}
+				if err := tuiEngine.ClosePopup(ctx); err != nil {
+					return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to close popup: %w", err)}
+				}
+				return embed.CloseRequestMsg{}
+			}
+		}
+
 		client, err := tmux.NewClient()
 		if err != nil {
 			return tmuxSplitFinishedMsg{err: fmt.Errorf("tmux client not found: %w", err)}
 		}
-
-		ctx := context.Background()
-		isPopup, err := client.IsPopup(ctx)
-		if err != nil {
-			return tmuxSplitFinishedMsg{err: fmt.Errorf("IsPopup error: %w", err)}
-		}
-
-		if isPopup {
-			editor := os.Getenv("EDITOR")
-			if editor == "" {
-				editor = "nvim"
-			}
-			if err := client.OpenInEditorWindow(ctx, editor, path, "notebook", 2, false); err != nil {
-				return tmuxSplitFinishedMsg{err: fmt.Errorf("popup mode - failed to open in editor: %w", err)}
-			}
-			if err := client.ClosePopup(ctx); err != nil {
-				return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to close popup: %w", err)}
-			}
-			// The popup closing also tears down the TUI, so emit a close request.
-			return embed.CloseRequestMsg{}
-		}
-
 		return openInTmuxSplit(ctx, client, splitPaneID, tuiPaneID, path)
 	}
 }
