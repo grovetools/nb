@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/grovetools/core/pkg/tmux"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/spf13/cobra"
 
 	"github.com/grovetools/nb/pkg/service"
@@ -23,9 +23,17 @@ func NewTmuxTuiCmd(svc **service.Service, workspaceOverride *string) *cobra.Comm
 If the window already exists, it focuses it without disrupting the session.
 If not in a tmux session, falls back to running the TUI directly.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := tmux.NewClient()
+			ctx := context.Background()
+			engine, err := mux.DetectMuxEngine(ctx)
 			if err != nil {
-				// Not in a tmux session, run the TUI directly
+				// Not in a mux session, run the TUI directly
+				tuiCmd := NewTuiCmd(svc, workspaceOverride)
+				return tuiCmd.RunE(cmd, args)
+			}
+
+			tuiEngine, ok := engine.(mux.MuxTUIEngine)
+			if !ok {
+				// Engine doesn't support TUI operations, run directly
 				tuiCmd := NewTuiCmd(svc, workspaceOverride)
 				return tuiCmd.RunE(cmd, args)
 			}
@@ -38,14 +46,11 @@ If not in a tmux session, falls back to running the TUI directly.`,
 
 			command := fmt.Sprintf("%s tui", nbBin)
 
-			// Use the tmux client to manage the window with error handling
-			ctx := context.Background()
-			if err := client.FocusOrRunTUIWithErrorHandling(ctx, command, windowName, -1); err != nil {
+			if err := tuiEngine.FocusOrRunCommandInWindow(ctx, command, windowName, -1); err != nil {
 				return fmt.Errorf("failed to open in tmux window: %w", err)
 			}
 
-			// Close any popup that might have launched this command
-			_ = client.ClosePopup(ctx)
+			_ = tuiEngine.ClosePopup(ctx)
 
 			return nil
 		},

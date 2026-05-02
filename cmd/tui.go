@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/compositor"
 	"github.com/grovetools/core/pkg/mux"
-	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/util/pathutil"
@@ -228,18 +227,14 @@ func (h *cliEnvironmentHost) openInTmuxCmd(path string) tea.Cmd {
 			}
 		}
 
-		client, err := tmux.NewClient()
-		if err != nil {
-			return tmuxSplitFinishedMsg{err: fmt.Errorf("tmux client not found: %w", err)}
-		}
-		return openInTmuxSplit(ctx, client, splitPaneID, tuiPaneID, path)
+		return openInTmuxSplit(ctx, engine, splitPaneID, tuiPaneID, path)
 	}
 }
 
 // openInTmuxSplit reuses the host's existing split pane (if any) or creates a
 // new one alongside the TUI, then returns a tmuxSplitFinishedMsg with the
 // updated pane bookkeeping for the host to absorb.
-func openInTmuxSplit(ctx context.Context, client *tmux.Client, splitPaneID, tuiPaneID, path string) tea.Msg {
+func openInTmuxSplit(ctx context.Context, engine mux.MuxEngine, splitPaneID, tuiPaneID, path string) tea.Msg {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = "vim"
@@ -248,10 +243,10 @@ func openInTmuxSplit(ctx context.Context, client *tmux.Client, splitPaneID, tuiP
 	// If we already have a split pane, try to reuse it.
 	paneStillExists := false
 	if splitPaneID != "" {
-		if client.PaneExists(ctx, splitPaneID) {
+		if exists, _ := engine.PaneExists(ctx, splitPaneID); exists {
 			paneStillExists = true
-			if err := client.SendKeys(ctx, splitPaneID, fmt.Sprintf(":e %s", path), "Enter"); err == nil {
-				if err := client.SelectPane(ctx, splitPaneID); err != nil {
+			if err := engine.SendKeys(ctx, splitPaneID, fmt.Sprintf(":e %s", path), "Enter"); err == nil {
+				if err := engine.SelectPane(ctx, splitPaneID); err != nil {
 					return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to switch to editor: %w", err)}
 				}
 				return tmuxSplitFinishedMsg{paneID: splitPaneID}
@@ -262,12 +257,12 @@ func openInTmuxSplit(ctx context.Context, client *tmux.Client, splitPaneID, tuiP
 
 	shouldClearOldPanes := splitPaneID != "" && !paneStillExists
 
-	newTuiPaneID, err := client.GetCurrentPaneID(ctx)
+	newTuiPaneID, err := engine.GetCurrentPaneID(ctx)
 	if err != nil {
 		return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to get current pane ID: %w", err)}
 	}
 
-	currentWidth, err := client.GetPaneWidth(ctx, "")
+	currentWidth, err := engine.GetPaneWidth(ctx, "")
 	if err != nil {
 		return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to get pane width: %w", err)}
 	}
@@ -294,7 +289,7 @@ func openInTmuxSplit(ctx context.Context, client *tmux.Client, splitPaneID, tuiP
 	}
 
 	commandToRun := fmt.Sprintf("%s %q", editor, path)
-	paneID, err := client.SplitWindow(ctx, "", true, editorWidth, commandToRun)
+	paneID, err := engine.SplitWindow(ctx, "", true, editorWidth, commandToRun)
 	if err != nil {
 		return tmuxSplitFinishedMsg{err: fmt.Errorf("failed to split tmux window: %w", err)}
 	}
