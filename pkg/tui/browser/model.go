@@ -476,10 +476,11 @@ func (m *Model) updatePreviewContent() tea.Cmd {
 		// Emit preview request for the terminal host.
 		if m.previewVisible {
 			if m.hosted {
+				// Re-emit SplitEditorRequestMsg without closing — the host
+				// swaps the buffer in the existing split, preserving the ratio.
 				cmds = append(cmds,
-					func() tea.Msg { return embed.SplitEditorCloseRequestMsg{} },
 					func() tea.Msg {
-						return embed.SplitEditorRequestMsg{Path: path, Ratio: 0.35, Focus: false}
+						return embed.SplitEditorRequestMsg{Path: path, Focus: false}
 					},
 				)
 			} else {
