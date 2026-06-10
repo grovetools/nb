@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	coreconfig "github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
+	grovelogging "github.com/grovetools/core/logging"
 	coremodels "github.com/grovetools/core/pkg/models"
 	coreworkspace "github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/pathutil"
@@ -21,6 +23,12 @@ import (
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/tree"
 )
+
+// serviceUlog routes service-level audit logs through the unified logger.
+// Entries are marked StructuredOnly so they reach the workspace log file
+// without emitting raw structured lines on the user's terminal; user-facing
+// pretty output is owned by the cmd layer (e.g. "Created: <path>").
+var serviceUlog = grovelogging.NewUnifiedLogger("grove-notebook")
 
 // CreateNoteWithContent creates a new note programmatically without opening an editor.
 // This is used by the sync system to create notes for synced items.
@@ -576,13 +584,14 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 		}
 	}
 
-	s.Logger.WithFields(logrus.Fields{
-		"path":      note.Path,
-		"type":      note.Type,
-		"title":     note.Title,
-		"workspace": note.Workspace,
-		"branch":    note.Branch,
-	}).Info("Created new note")
+	serviceUlog.Info("Created new note").
+		Field("path", note.Path).
+		Field("type", note.Type).
+		Field("title", note.Title).
+		Field("workspace", note.Workspace).
+		Field("branch", note.Branch).
+		StructuredOnly().
+		Log(context.Background())
 
 	return note, nil
 }
@@ -2227,7 +2236,10 @@ func (s *Service) UpdateNoteContent(path string, content string) error {
 	note.Branch = branch
 	note.Type = models.NoteType(noteType)
 
-	s.Logger.WithField("path", path).Info("Updated note content")
+	serviceUlog.Info("Updated note content").
+		Field("path", path).
+		StructuredOnly().
+		Log(context.Background())
 
 	notifyDaemonNoteEvent(coremodels.NoteEvent{
 		Event:     coremodels.NoteEventUpdated,
