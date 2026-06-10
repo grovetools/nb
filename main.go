@@ -8,6 +8,7 @@ import (
 	coreconfig "github.com/grovetools/core/config"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/version"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -26,6 +27,15 @@ func main() {
 		"A workspace-based note-taking system",
 	)
 	rootCmd.PersistentFlags().StringVarP(&workspaceOverride, "workspace", "W", "", "Override current workspace context by path")
+
+	vInfo := version.GetInfo()
+	rootCmd.Version = vInfo.Version
+	cli.SetVersionTemplate(rootCmd, cli.VersionInfo{
+		Version:   vInfo.Version,
+		Commit:    vInfo.Commit,
+		BuildDate: vInfo.BuildDate,
+		BuildArch: vInfo.Platform,
+	})
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		// This runs once before any subcommand
