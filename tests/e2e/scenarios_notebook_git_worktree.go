@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -251,8 +252,9 @@ func verifyWorktreeLocation(ctx *harness.Context) error {
 			flowBin = homeBin
 		} else {
 			// Try the real home directory (test sandbox uses fake home)
-			realHomeBin := filepath.Join("/Users/solom4", ".grove", "bin", "flow")
-			if fs.Exists(realHomeBin) {
+			realHome, _ := os.UserHomeDir()
+			realHomeBin := filepath.Join(realHome, ".grove", "bin", "flow")
+			if realHome != "" && fs.Exists(realHomeBin) {
 				flowBin = realHomeBin
 			} else {
 				ctx.ShowCommandOutput("Warning", "flow binary not found, skipping flow command test", "")
@@ -324,8 +326,9 @@ func verifyWorktreeFromNotebook(ctx *harness.Context) error {
 	// Find flow binary
 	flowBin, err := exec.LookPath("flow")
 	if err != nil {
-		realHomeBin := filepath.Join("/Users/solom4", ".grove", "bin", "flow")
-		if fs.Exists(realHomeBin) {
+		realHome, _ := os.UserHomeDir()
+		realHomeBin := filepath.Join(realHome, ".grove", "bin", "flow")
+		if realHome != "" && fs.Exists(realHomeBin) {
 			flowBin = realHomeBin
 		} else {
 			ctx.ShowCommandOutput("Warning", "flow binary not found, skipping this test", "")

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -270,9 +271,11 @@ func findFlowBinary() (string, error) {
 		return bin, nil
 	}
 	// Try the real home directory (test sandbox uses a fake home)
-	realHomeBin := filepath.Join("/Users/solom4", ".grove", "bin", "flow")
-	if fs.Exists(realHomeBin) {
-		return realHomeBin, nil
+	if realHome, err := os.UserHomeDir(); err == nil {
+		realHomeBin := filepath.Join(realHome, ".grove", "bin", "flow")
+		if fs.Exists(realHomeBin) {
+			return realHomeBin, nil
+		}
 	}
 	return "", fmt.Errorf("flow binary not found in PATH or ~/.grove/bin")
 }
