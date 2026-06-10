@@ -31,9 +31,14 @@ This command will:
 				if err != nil {
 					return fmt.Errorf("could not access global workspace: %w", err)
 				}
+				path := workspaceDisplayPath(s, ctx)
+				pretty := "Initialized with global workspace"
+				if path != "" {
+					pretty = fmt.Sprintf("Initialized with global workspace at %s", path)
+				}
 				initUlog.Success("Initialized with global workspace").
-					Field("path", ctx.NotebookContextWorkspace.Path).
-					Pretty(fmt.Sprintf("Initialized with global workspace at %s", ctx.NotebookContextWorkspace.Path)).
+					Field("path", path).
+					Pretty(pretty).
 					PrettyOnly().
 					Emit()
 				return nil
@@ -45,21 +50,25 @@ This command will:
 				return fmt.Errorf("could not determine workspace context: %w", err)
 			}
 
+			path := workspaceDisplayPath(s, ctx)
+			pretty := fmt.Sprintf("Initialized workspace '%s'", ctx.NotebookContextWorkspace.Name)
+			if path != "" {
+				pretty += fmt.Sprintf(" at %s", path)
+			}
+			if ctx.NotebookContextWorkspace.Kind != "" {
+				pretty += fmt.Sprintf("\nKind: %s", ctx.NotebookContextWorkspace.Kind)
+			}
+			if ctx.Branch != "" {
+				pretty += fmt.Sprintf("\nBranch: %s", ctx.Branch)
+			}
+			pretty += "\n\nReady to use! Try 'nb new' to create your first note."
+
 			initUlog.Success("Initialized workspace").
 				Field("name", ctx.NotebookContextWorkspace.Name).
-				Field("path", ctx.NotebookContextWorkspace.Path).
+				Field("path", path).
 				Field("kind", ctx.NotebookContextWorkspace.Kind).
 				Field("branch", ctx.Branch).
-				Pretty(fmt.Sprintf("Initialized workspace '%s' at %s\nKind: %s%s\n\nReady to use! Try 'nb new' to create your first note.",
-					ctx.NotebookContextWorkspace.Name,
-					ctx.NotebookContextWorkspace.Path,
-					ctx.NotebookContextWorkspace.Kind,
-					func() string {
-						if ctx.Branch != "" {
-							return fmt.Sprintf("\nBranch: %s", ctx.Branch)
-						}
-						return ""
-					}())).
+				Pretty(pretty).
 				PrettyOnly().
 				Emit()
 
@@ -70,4 +79,17 @@ This command will:
 	cmd.Flags().BoolVar(&initMinimal, "minimal", false, "Only create global workspace")
 
 	return cmd
+}
+
+// workspaceDisplayPath returns the path to show the user for an initialized
+// workspace. Virtual workspaces like "global" have no on-disk project path,
+// so fall back to the resolved notebook notes root for that context.
+func workspaceDisplayPath(s *service.Service, ctx *service.WorkspaceContext) string {
+	if p := ctx.NotebookContextWorkspace.Path; p != "" {
+		return p
+	}
+	if notesRoot, err := s.GetNotebookLocator().GetNotesDir(ctx.NotebookContextWorkspace, ""); err == nil {
+		return notesRoot
+	}
+	return ""
 }
