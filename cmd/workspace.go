@@ -15,9 +15,11 @@ var workspaceUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.workspace"
 
 func NewWorkspaceCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "workspace",
-		Short: "Manage workspaces (deprecated)",
-		Long:  `Manage workspace registrations and settings. Most of this functionality is now handled by 'grove ws'.`,
+		Use:        "workspace",
+		Short:      "Manage workspaces (deprecated)",
+		Long:       `Manage workspace registrations and settings. Most of this functionality is now handled by 'grove ws'.`,
+		Hidden:     true,
+		Deprecated: "use 'grove ws' for workspace management and 'nb context' for context info.",
 	}
 
 	// Most subcommands are removed as workspace management is now centralized in grove-core and 'grove ws' command.

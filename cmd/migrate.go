@@ -55,14 +55,21 @@ func NewMigrateCmd(svc **service.Service, workspaceOverride *string) *cobra.Comm
 		Use:   "migrate [paths...]",
 		Short: "Migrate and standardize notes",
 		Long: `Migrate notes to standardized format with proper frontmatter.
-	
+
 By default, operates on the current workspace context.
 
 Examples:
   nb migrate --dry-run                    # Preview changes in current context
   nb migrate --fix-titles                 # Fix titles in current context
   nb migrate --global --all               # Migrate all global notes
-  nb migrate --workspace myproject --all  # Migrate entire workspace`,
+  nb migrate --workspace myproject --all  # Migrate entire workspace
+
+Advanced flags (hidden from the flag list, still accepted):
+  Selective fixes:    --fix-titles, --fix-dates, --fix-tags, --fix-ids, --fix-filenames
+  One-shot migrations: --structure, --rename-current-to-inbox, --ensure-type-in-tags,
+                       --workspaces, --source-notebook, --target-notebook, --notebook, --target
+  Tuning:             --force, --recursive, --preserve-timestamps, --no-backup, --report,
+                      --branch, --type`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s := *svc
 
@@ -347,6 +354,24 @@ Examples:
 	cmd.Flags().BoolVar(&migrateVerbose, "verbose", false, "Show detailed output")
 	cmd.Flags().BoolVar(&migrateShowReport, "report", true, "Show migration report")
 	cmd.Flags().BoolVar(&migrateNoBackup, "no-backup", false, "Don't create backup files")
+
+	// Hide advanced/rarely-used flags to keep `nb migrate --help` focused.
+	// They remain fully functional and are documented in the Long help above.
+	hiddenFlags := []string{
+		// Selective fixes (covered by --all for the common case)
+		"fix-titles", "fix-dates", "fix-tags", "fix-ids", "fix-filenames",
+		// One-shot structural/rename migrations
+		"structure", "rename-current-to-inbox", "ensure-type-in-tags",
+		"workspaces", "source-notebook", "target-notebook", "notebook", "target",
+		// Tuning knobs
+		"force", "recursive", "preserve-timestamps", "no-backup", "report",
+		"branch", "type",
+	}
+	for _, name := range hiddenFlags {
+		if err := cmd.Flags().MarkHidden(name); err != nil {
+			panic(fmt.Sprintf("migrate: failed to hide flag %q: %v", name, err))
+		}
+	}
 
 	return cmd
 }
