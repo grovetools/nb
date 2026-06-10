@@ -259,7 +259,6 @@ Examples:
 				filepath.Join(cwd, "obsidian-plugin"),
 				filepath.Join(cwd, "nb-prototype", "obsidian-plugin"),
 				filepath.Join(filepath.Dir(cwd), "obsidian-plugin"),
-				"/Users/msolomon/code/random/note-system/nb-prototype/obsidian-plugin",
 			}
 
 			var pluginSource string
