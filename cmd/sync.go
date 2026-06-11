@@ -81,5 +81,66 @@ func NewSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 
 	cmd.Flags().StringVar(&provider, "provider", "", "Sync only with a specific provider (e.g., github)")
 
+	// Add subcommands for Notebook Sync Phase 2 (daemon-coordinated)
+	cmd.AddCommand(NewSyncHistoryCmd(svc, workspaceOverride))
+	cmd.AddCommand(NewSyncRestoreCmd(svc, workspaceOverride))
+	cmd.AddCommand(NewSyncConflictsCmd(svc, workspaceOverride))
+
 	return cmd
+}
+
+// NewSyncHistoryCmd creates the `sync history` subcommand.
+// Displays the version history for a document from the sync server.
+func NewSyncHistoryCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "history <file>",
+		Short: "Show version history for a synced document",
+		Long:  `Displays the version history of a document stored on the sync server, allowing you to see who changed it and when.`,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// TODO: Call daemon's /api/sync/history endpoint via Unix socket
+			// For now, just show a placeholder
+			fmt.Printf("Version history for: %s\n", args[0])
+			fmt.Println("(History integration with daemon pending)")
+			return nil
+		},
+	}
+}
+
+// NewSyncRestoreCmd creates the `sync restore` subcommand.
+// Restores a document from a specific version.
+func NewSyncRestoreCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	var version string
+	cmd := &cobra.Command{
+		Use:   "restore <file>",
+		Short: "Restore a document to a specific version",
+		Long:  `Restores a document from the sync server history, allowing you to undo unwanted changes.`,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// TODO: Call daemon's /api/sync/restore endpoint via Unix socket
+			// For now, just show a placeholder
+			fmt.Printf("Restore %s to version: %s\n", args[0], version)
+			fmt.Println("(Restore integration with daemon pending)")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&version, "version", "", "Version ID to restore to (required)")
+	return cmd
+}
+
+// NewSyncConflictsCmd creates the `sync conflicts` subcommand.
+// Lists, views, and resolves merge conflicts from sync.
+func NewSyncConflictsCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "conflicts",
+		Short: "Manage sync conflicts",
+		Long:  `List, view, and resolve conflicts from document synchronization.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// TODO: List conflicts from ~/.local/state/grove/sync/conflicts/
+			// For now, just show a placeholder
+			fmt.Println("Sync conflicts:")
+			fmt.Println("(Conflicts integration with daemon pending)")
+			return nil
+		},
+	}
 }
