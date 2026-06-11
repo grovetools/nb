@@ -18,6 +18,8 @@ import (
 type PromoteOptions struct {
 	JobType     string // e.g. "chat", "interactive_agent", "headless_agent", "oneshot"
 	JobTemplate string // e.g. "chat", "" for none
+	Model       string // LLM model to use for this job (optional)
+	Effort      string // Effort level for claude agent jobs (optional)
 }
 
 // PromoteNoteToJob promotes a note to a job in an existing flow plan.
@@ -88,6 +90,8 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 		Type:     jobType,
 		Status:   jobStatus,
 		Template: opts.JobTemplate,
+		Model:    opts.Model,
+		Effort:   opts.Effort,
 		NoteRef:  inProgressPath,
 	}
 	if plan.Config != nil {
