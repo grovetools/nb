@@ -18,6 +18,8 @@ func NewPromoteCmd(svc **service.Service) *cobra.Command {
 	var workspaceDir string
 	var jobType string
 	var jobTemplate string
+	var model string
+	var effort string
 
 	cmd := &cobra.Command{
 		Use:   "promote <note-path>",
@@ -32,7 +34,7 @@ Use --workspace to resolve --plan relative to that workspace's plans directory.
 
 Examples:
   nb promote /path/to/note.md --plan /path/to/plan-dir
-  nb promote ./inbox/my-note.md --plan ~/plans/sprint-42
+  nb promote ./inbox/my-note.md --plan ~/plans/sprint-42 --type headless_agent --model claude-3-5-sonnet --effort large
   nb promote note.md --plan treemux-pt6 --workspace /path/to/workspace`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -61,6 +63,8 @@ Examples:
 			opts := service.PromoteOptions{
 				JobType:     jobType,
 				JobTemplate: jobTemplate,
+				Model:       model,
+				Effort:      effort,
 			}
 			jobFilename, err := s.PromoteNoteToJob(notePath, absPlanDir, opts)
 			if err != nil {
@@ -85,6 +89,8 @@ Examples:
 	cmd.Flags().StringVar(&workspaceDir, "workspace", "", "Workspace directory to resolve --plan relative to its plans/")
 	cmd.Flags().StringVar(&jobType, "type", "chat", "Job type (chat, interactive_agent, headless_agent, oneshot)")
 	cmd.Flags().StringVar(&jobTemplate, "template", "chat", "Job template name")
+	cmd.Flags().StringVar(&model, "model", "", "LLM model to use for this job (e.g., claude-3-5-sonnet-20241022)")
+	cmd.Flags().StringVar(&effort, "effort", "", "Effort level for claude agent jobs; passed to the claude CLI as --effort")
 
 	return cmd
 }
