@@ -494,7 +494,7 @@ func CreateNoteContent(noteType models.NoteType, title, workspace, branch, workt
 			// Simple template variable replacement
 			replacements := map[string]string{
 				"{{.Title}}":     title,
-				"{{.Timestamp}}": time.Now().Format("2006-01-02 15:04:05"),
+				"{{.Timestamp}}": frontmatter.FormatTimestamp(time.Now()),
 				"{{.Date}}":      time.Now().Format("2006-01-02"),
 				"{{.Workspace}}": workspace,
 				"{{.Branch}}":    branch,
@@ -513,7 +513,7 @@ func CreateNoteContent(noteType models.NoteType, title, workspace, branch, workt
 		// Simple template variable replacement
 		replacements := map[string]string{
 			"{{.Title}}":     title,
-			"{{.Timestamp}}": time.Now().Format("2006-01-02 15:04:05"),
+			"{{.Timestamp}}": frontmatter.FormatTimestamp(time.Now()),
 			"{{.Date}}":      time.Now().Format("2006-01-02"),
 			"{{.Workspace}}": workspace,
 			"{{.Branch}}":    branch,

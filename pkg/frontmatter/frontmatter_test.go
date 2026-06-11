@@ -258,7 +258,7 @@ func TestFormatAndParseTimestamp(t *testing.T) {
 	now := time.Date(2023, 1, 15, 14, 30, 45, 0, time.UTC)
 
 	formatted := FormatTimestamp(now)
-	expected := "2023-01-15 14:30:45"
+	expected := "2023-01-15T14:30:45Z" // new writes are RFC3339 UTC
 
 	if formatted != expected {
 		t.Errorf("FormatTimestamp() = %q, want %q", formatted, expected)

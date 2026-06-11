@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/grovetools/core/git"
+	coremodels "github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
@@ -156,6 +157,22 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 			s.Logger.WithError(writeErr).Warn("Failed to update note frontmatter with plan_ref")
 		}
 	}
+
+	// Typed move event for the inbox -> in_progress promotion. PrevPath is the
+	// rename-detection linchpin: the daemon's sync handler turns this into a
+	// first-class document_moved instead of a delete+create pair. Emitted after
+	// the frontmatter rewrite so the daemon indexes the final content (plan_ref).
+	ws, _, noteType := GetNoteMetadata(inProgressPath)
+	prevWs, _, prevType := GetNoteMetadata(notePath)
+	notifyDaemonNoteEvent(coremodels.NoteEvent{
+		Event:         coremodels.NoteEventMoved,
+		Workspace:     ws,
+		NoteType:      noteType,
+		Path:          inProgressPath,
+		PrevWorkspace: prevWs,
+		PrevNoteType:  prevType,
+		PrevPath:      notePath,
+	})
 
 	return jobFilename, nil
 }
