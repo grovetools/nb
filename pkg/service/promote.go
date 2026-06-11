@@ -10,6 +10,7 @@ import (
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/sirupsen/logrus"
 
 	"github.com/grovetools/nb/pkg/frontmatter"
 )
@@ -111,10 +112,16 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 			} else {
 				ecoRoot = node.Path
 			}
-			wtPath := filepath.Join(ecoRoot, ".grove-worktrees", job.Worktree)
-			if repo, branch, _ := git.GetRepoInfo(wtPath); repo != "" {
-				job.Repository = repo
-				job.Branch = branch
+			if wtPath, ok := workspace.FindWorktreePath(ecoRoot, job.Worktree); ok {
+				if repo, branch, _ := git.GetRepoInfo(wtPath); repo != "" {
+					job.Repository = repo
+					job.Branch = branch
+				}
+			} else {
+				s.Logger.WithFields(logrus.Fields{
+					"worktree":  job.Worktree,
+					"ecosystem": ecoRoot,
+				}).Warn("Worktree not found under any worktree base; promoted job will lack repository/branch")
 			}
 		}
 	}
