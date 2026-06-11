@@ -176,14 +176,26 @@ func BuildContent(fm *Frontmatter, bodyContent string) string {
 	return frontmatterStr + "\n" + bodyContent
 }
 
-// FormatTimestamp formats a time.Time into the standard frontmatter timestamp format
+// legacyTimestampFormat is the historical timezone-less frontmatter format.
+// Existing files keep it forever (no mass migration); it remains parseable.
+const legacyTimestampFormat = "2006-01-02 15:04:05"
+
+// FormatTimestamp formats a time.Time into the standard frontmatter timestamp
+// format. New writes are RFC3339 in UTC; legacy timezone-less values in
+// existing files are only re-emitted when nb already rewrites a note's
+// frontmatter for other reasons.
 func FormatTimestamp(t time.Time) string {
-	return t.Format("2006-01-02 15:04:05")
+	return t.UTC().Format(time.RFC3339)
 }
 
-// ParseTimestamp parses a frontmatter timestamp string into time.Time
+// ParseTimestamp parses a frontmatter timestamp string into time.Time.
+// It accepts both the current RFC3339/UTC format and the legacy
+// timezone-less format (dual-read forever, per the sync protocol).
 func ParseTimestamp(s string) (time.Time, error) {
-	return time.Parse("2006-01-02 15:04:05", s)
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	return time.Parse(legacyTimestampFormat, s)
 }
 
 // formatYAMLArray formats a string slice as a YAML flow-style array

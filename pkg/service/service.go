@@ -1934,12 +1934,18 @@ func (s *Service) ArchiveNotes(ctx *WorkspaceContext, paths []string) error {
 			"archive_path": dest,
 		}).Debug("Archived note")
 
+		// Typed archive event: Path is the new .archive location, PrevPath the
+		// original. The daemon needs both to treat the archive as a first-class
+		// move (rename detection) instead of a delete+create pair.
 		ws, _, noteType := GetNoteMetadata(path)
 		notifyDaemonNoteEvent(coremodels.NoteEvent{
-			Event:     coremodels.NoteEventArchived,
-			Workspace: ws,
-			NoteType:  noteType,
-			Path:      path,
+			Event:         coremodels.NoteEventArchived,
+			Workspace:     ws,
+			NoteType:      noteType,
+			Path:          dest,
+			PrevWorkspace: ws,
+			PrevNoteType:  noteType,
+			PrevPath:      path,
 		})
 	}
 	return nil
@@ -2205,6 +2211,14 @@ func (s *Service) buildPathsMap(notebookContext *coreworkspace.WorkspaceNode) (m
 // getNotePathForContext is a convenience wrapper that uses the NotebookLocator.
 func (s *Service) getNotePathForContext(ctx *WorkspaceContext, noteType string) (string, error) {
 	return s.notebookLocator.GetNotesDir(ctx.NotebookContextWorkspace, noteType)
+}
+
+// NoteTypeDir returns the directory that backs a note type in the given
+// workspace context. It mirrors the directory ListNotes walks, so callers
+// (e.g. the daemon-index list path) can filter index entries by path prefix
+// with exact filesystem-walk parity.
+func (s *Service) NoteTypeDir(ctx *WorkspaceContext, noteType models.NoteType) (string, error) {
+	return s.getNotePathForContext(ctx, string(noteType))
 }
 
 // openInEditor opens a file in the configured editor

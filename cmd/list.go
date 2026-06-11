@@ -244,7 +244,13 @@ Examples:
 				noteType = args[0]
 			}
 
-			notes, err := s.ListNotes(wsCtx, models.NoteType(noteType))
+			// Try the daemon's cached note index first; fall back to the
+			// filesystem walk when the daemon is down or has nothing indexed
+			// under the type's directory.
+			notes, err := tryDaemonListNotesForType(ctx, s, wsCtx, models.NoteType(noteType))
+			if notes == nil && err == nil {
+				notes, err = s.ListNotes(wsCtx, models.NoteType(noteType))
+			}
 			if err != nil {
 				return err
 			}
@@ -430,36 +436,91 @@ func tryDaemonListNotes(ctx context.Context, wsFilter, tagFilter string) ([]*mod
 			}
 		}
 
-		noteType := models.NoteType(e.Group)
-		// For notes content dir, group is the subdirectory name (inbox, issues, etc.)
-		// For plans/chats, strip the prefix
-		if e.ContentDir == "plans" {
-			noteType = "plan"
-		} else if e.ContentDir == "chats" {
-			noteType = "chat"
-		} else if parts := strings.SplitN(e.Group, "/", 2); len(parts) > 0 {
-			noteType = models.NoteType(parts[0])
-		}
+		notes = append(notes, noteFromIndexEntry(e))
+	}
 
-		note := &models.Note{
-			Path:             e.Path,
-			Title:            filepath.Base(e.Path),
-			FrontmatterTitle: e.Title,
-			Type:             noteType,
-			Group:            e.Group,
-			Workspace:        e.Workspace,
-			CreatedAt:        e.Created,
-			ModifiedAt:       e.ModTime,
-			ID:               e.ID,
-			Tags:             e.Tags,
-			PlanRef:          e.PlanRef,
+	if len(notes) == 0 {
+		return nil, nil
+	}
+	return notes, nil
+}
+
+// noteFromIndexEntry converts a daemon NoteIndexEntry into an nb Note model.
+func noteFromIndexEntry(e *coremodels.NoteIndexEntry) *models.Note {
+	noteType := models.NoteType(e.Group)
+	// For notes content dir, group is the subdirectory name (inbox, issues, etc.)
+	// For plans/chats, strip the prefix
+	if e.ContentDir == "plans" {
+		noteType = "plan"
+	} else if e.ContentDir == "chats" {
+		noteType = "chat"
+	} else if parts := strings.SplitN(e.Group, "/", 2); len(parts) > 0 {
+		noteType = models.NoteType(parts[0])
+	}
+
+	return &models.Note{
+		Path:             e.Path,
+		Title:            filepath.Base(e.Path),
+		FrontmatterTitle: e.Title,
+		Type:             noteType,
+		Group:            e.Group,
+		Workspace:        e.Workspace,
+		CreatedAt:        e.Created,
+		ModifiedAt:       e.ModTime,
+		ID:               e.ID,
+		Tags:             e.Tags,
+		PlanRef:          e.PlanRef,
+	}
+}
+
+// tryDaemonListNotesForType lists a single note type from the daemon's cached
+// index. It filters index entries by the path prefix of the directory that
+// backs the type, which gives exact parity with the ListNotes filesystem walk
+// (including nested subgroups and .archive contents).
+// Returns nil, nil when the daemon is unavailable or nothing is indexed under
+// the directory — the caller falls back to the filesystem walk.
+func tryDaemonListNotesForType(ctx context.Context, s *service.Service, wsCtx *service.WorkspaceContext, noteType models.NoteType) ([]*models.Note, error) {
+	dirPath, err := s.NoteTypeDir(wsCtx, noteType)
+	if err != nil || dirPath == "" {
+		return nil, nil
+	}
+
+	client := daemon.NewWithAutoStart()
+	defer client.Close()
+
+	if !client.IsRunning() {
+		return nil, nil
+	}
+
+	fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	entries, err := client.GetNoteIndex(fetchCtx, wsCtx.NotebookContextWorkspace.Name)
+	if err != nil || len(entries) == 0 {
+		return nil, nil // Fallback to filesystem
+	}
+
+	prefix := strings.TrimSuffix(dirPath, string(filepath.Separator)) + string(filepath.Separator)
+	notes := make([]*models.Note, 0, len(entries))
+	for _, e := range entries {
+		if e.Type != "note" || !strings.HasPrefix(e.Path, prefix) {
+			continue
 		}
+		note := noteFromIndexEntry(e)
+		// Mirror the filesystem path: ListNotes stamps the requested type and
+		// the context's workspace/branch on every result.
+		note.Type = noteType
+		note.Workspace = wsCtx.NotebookContextWorkspace.Name
+		note.Branch = wsCtx.Branch
 		notes = append(notes, note)
 	}
 
 	if len(notes) == 0 {
 		return nil, nil
 	}
+	// The index is a map server-side; sort by path to match the
+	// lexical order of filepath.Walk.
+	sort.Slice(notes, func(i, j int) bool { return notes[i].Path < notes[j].Path })
 	return notes, nil
 }
 
