@@ -83,23 +83,23 @@ func Build(fm *Frontmatter) string {
 	sb.WriteString("---\n")
 
 	// Always include these fields in a consistent order
-	sb.WriteString(fmt.Sprintf("id: %s\n", fm.ID))
-	sb.WriteString(fmt.Sprintf("title: %s\n", fm.Title))
+	sb.WriteString(fmt.Sprintf("id: %s\n", formatYAMLValue(fm.ID)))
+	sb.WriteString(fmt.Sprintf("title: %s\n", formatYAMLValue(fm.Title)))
 	if fm.Type != "" {
-		sb.WriteString(fmt.Sprintf("type: %s\n", fm.Type))
+		sb.WriteString(fmt.Sprintf("type: %s\n", formatYAMLValue(fm.Type)))
 	}
 	sb.WriteString(fmt.Sprintf("aliases: %s\n", formatYAMLArray(fm.Aliases)))
 	sb.WriteString(fmt.Sprintf("tags: %s\n", formatYAMLArray(fm.Tags)))
 
 	// Optional fields
 	if fm.Repository != "" {
-		sb.WriteString(fmt.Sprintf("repository: %s\n", fm.Repository))
+		sb.WriteString(fmt.Sprintf("repository: %s\n", formatYAMLValue(fm.Repository)))
 	}
 	if fm.Branch != "" {
-		sb.WriteString(fmt.Sprintf("branch: %s\n", fm.Branch))
+		sb.WriteString(fmt.Sprintf("branch: %s\n", formatYAMLValue(fm.Branch)))
 	}
 	if fm.Worktree != "" {
-		sb.WriteString(fmt.Sprintf("worktree: %s\n", fm.Worktree))
+		sb.WriteString(fmt.Sprintf("worktree: %s\n", formatYAMLValue(fm.Worktree)))
 	}
 
 	// Timestamps
@@ -108,29 +108,29 @@ func Build(fm *Frontmatter) string {
 
 	// Special fields
 	if fm.Started != "" {
-		sb.WriteString(fmt.Sprintf("started: %s\n", fm.Started))
+		sb.WriteString(fmt.Sprintf("started: %s\n", formatYAMLValue(fm.Started)))
 	}
 	if fm.PlanRef != "" {
-		sb.WriteString(fmt.Sprintf("plan_ref: %s\n", fm.PlanRef))
+		sb.WriteString(fmt.Sprintf("plan_ref: %s\n", formatYAMLValue(fm.PlanRef)))
 	}
 
 	// Remote sync metadata
 	if fm.Remote != nil {
 		sb.WriteString("remote:\n")
 		if fm.Remote.Provider != "" {
-			sb.WriteString(fmt.Sprintf("  provider: %s\n", fm.Remote.Provider))
+			sb.WriteString(fmt.Sprintf("  provider: %s\n", formatYAMLValue(fm.Remote.Provider)))
 		}
 		if fm.Remote.ID != "" {
-			sb.WriteString(fmt.Sprintf("  id: %s\n", fm.Remote.ID))
+			sb.WriteString(fmt.Sprintf("  id: %s\n", formatYAMLValue(fm.Remote.ID)))
 		}
 		if fm.Remote.URL != "" {
-			sb.WriteString(fmt.Sprintf("  url: %s\n", fm.Remote.URL))
+			sb.WriteString(fmt.Sprintf("  url: %s\n", formatYAMLValue(fm.Remote.URL)))
 		}
 		if fm.Remote.State != "" {
-			sb.WriteString(fmt.Sprintf("  state: %s\n", fm.Remote.State))
+			sb.WriteString(fmt.Sprintf("  state: %s\n", formatYAMLValue(fm.Remote.State)))
 		}
 		if fm.Remote.UpdatedAt != "" {
-			sb.WriteString(fmt.Sprintf("  updated_at: %s\n", fm.Remote.UpdatedAt))
+			sb.WriteString(fmt.Sprintf("  updated_at: %s\n", formatYAMLValue(fm.Remote.UpdatedAt)))
 		}
 		if len(fm.Remote.Labels) > 0 {
 			sb.WriteString(fmt.Sprintf("  labels: %s\n", formatYAMLArray(fm.Remote.Labels)))
@@ -139,19 +139,19 @@ func Build(fm *Frontmatter) string {
 			sb.WriteString(fmt.Sprintf("  assignees: %s\n", formatYAMLArray(fm.Remote.Assignees)))
 		}
 		if fm.Remote.Milestone != "" {
-			sb.WriteString(fmt.Sprintf("  milestone: %s\n", fm.Remote.Milestone))
+			sb.WriteString(fmt.Sprintf("  milestone: %s\n", formatYAMLValue(fm.Remote.Milestone)))
 		}
 	}
 
 	// Blog-specific fields
 	if fm.Description != "" {
-		sb.WriteString(fmt.Sprintf("description: %s\n", fm.Description))
+		sb.WriteString(fmt.Sprintf("description: %s\n", formatYAMLValue(fm.Description)))
 	}
 	if fm.PublishDate != "" {
-		sb.WriteString(fmt.Sprintf("publishDate: %s\n", fm.PublishDate))
+		sb.WriteString(fmt.Sprintf("publishDate: %s\n", formatYAMLValue(fm.PublishDate)))
 	}
 	if fm.UpdatedDate != "" {
-		sb.WriteString(fmt.Sprintf("updatedDate: %s\n", fm.UpdatedDate))
+		sb.WriteString(fmt.Sprintf("updatedDate: %s\n", formatYAMLValue(fm.UpdatedDate)))
 	}
 	if fm.Draft {
 		sb.WriteString("draft: true\n")
@@ -204,9 +204,24 @@ func formatYAMLArray(items []string) string {
 	return fmt.Sprintf("[%s]", strings.Join(quotedItems, ", "))
 }
 
+// formatYAMLValue quotes a string value if it contains YAML-special characters
+func formatYAMLValue(s string) string {
+	if needsQuoting(s) {
+		return fmt.Sprintf("%q", s)
+	}
+	return s
+}
+
 // needsQuoting checks if a string needs to be quoted in YAML
 func needsQuoting(s string) bool {
-	return strings.ContainsAny(s, ",:[]{}\"'")
+	if strings.ContainsAny(s, ",:[]{}\"'#") {
+		return true
+	}
+	// Also check for leading/trailing whitespace
+	if len(s) > 0 && (s[0] == ' ' || s[0] == '\t' || s[len(s)-1] == ' ' || s[len(s)-1] == '\t') {
+		return true
+	}
+	return false
 }
 
 // ExtractPathTags generates tags from a note type path (e.g., "issues/bugs" -> ["issues", "bugs"])

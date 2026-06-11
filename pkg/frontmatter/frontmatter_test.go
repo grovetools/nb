@@ -169,9 +169,28 @@ modified: 2023-01-01 10:00:00
 			},
 			want: `---
 id: special
-title: Note: Special, Characters
+title: "Note: Special, Characters"
 aliases: ["alias:1", "alias,2"]
 tags: ["tag:special", "tag,comma"]
+created: 2023-01-01 10:00:00
+modified: 2023-01-01 10:00:00
+---`,
+		},
+		{
+			name: "colon-containing title (from issue)",
+			fm: &Frontmatter{
+				ID:       "20260611-122606-treemux",
+				Title:    "treemux: drag-select offset ~2 lines; copy banner reflows content during drag; chrome not selectable",
+				Aliases:  []string{},
+				Tags:     []string{"issues", "grovetools"},
+				Created:  "2023-01-01 10:00:00",
+				Modified: "2023-01-01 10:00:00",
+			},
+			want: `---
+id: 20260611-122606-treemux
+title: "treemux: drag-select offset ~2 lines; copy banner reflows content during drag; chrome not selectable"
+aliases: []
+tags: [issues, grovetools]
 created: 2023-01-01 10:00:00
 modified: 2023-01-01 10:00:00
 ---`,
@@ -364,6 +383,45 @@ func TestRoundTrip(t *testing.T) {
 	// Compare frontmatter
 	if !reflect.DeepEqual(parsed, original) {
 		t.Errorf("Round trip frontmatter mismatch\noriginal: %+v\nparsed: %+v", original, parsed)
+	}
+
+	// Compare body (accounting for added newline)
+	expectedBody := "\n" + body
+	if parsedBody != expectedBody {
+		t.Errorf("Round trip body mismatch\noriginal: %q\nparsed: %q", expectedBody, parsedBody)
+	}
+}
+
+func TestRoundTripWithColonInTitle(t *testing.T) {
+	// Test that titles with colons round-trip correctly (regression test for double-frontmatter bug)
+	original := &Frontmatter{
+		ID:       "20260611-122606-treemux",
+		Title:    "treemux: drag-select offset ~2 lines; copy banner reflows content during drag",
+		Aliases:  []string{},
+		Tags:     []string{"issues", "grovetools"},
+		Created:  "2023-01-01 10:00:00",
+		Modified: "2023-01-01 10:00:00",
+	}
+
+	body := "# Issue Description\n\nThis is a test with a colon in the title."
+
+	// Build content
+	content := BuildContent(original, body)
+
+	// Parse it back
+	parsed, parsedBody, err := Parse(content)
+	if err != nil {
+		t.Fatalf("Failed to parse round-trip content with colon in title: %v", err)
+	}
+
+	// Compare frontmatter - must match exactly
+	if !reflect.DeepEqual(parsed, original) {
+		t.Errorf("Round trip with colon in title failed\noriginal: %+v\nparsed: %+v", original, parsed)
+	}
+
+	// Verify title is preserved exactly
+	if parsed.Title != original.Title {
+		t.Errorf("Title mismatch after round trip: got %q, want %q", parsed.Title, original.Title)
 	}
 
 	// Compare body (accounting for added newline)
