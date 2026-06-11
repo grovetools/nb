@@ -39,8 +39,10 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 	// Parse frontmatter to get the body content
 	fm, body, err := frontmatter.Parse(string(noteContent))
 	if err != nil {
-		// Fall back to raw content if parsing fails
-		body = string(noteContent)
+		// On parse failure, strip the frontmatter block textually to avoid double-frontmatter.
+		// Log a warning for visibility.
+		s.Logger.WithError(err).Warnf("Failed to parse frontmatter in note %s, using fallback body extraction", notePath)
+		body = stripFrontmatterBlock(string(noteContent))
 	}
 
 	// Determine the note title
@@ -145,6 +147,32 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 	}
 
 	return jobFilename, nil
+}
+
+// stripFrontmatterBlock removes the frontmatter block from content, returning only the body.
+// If the file starts with "---", it strips everything up to and including the closing "---".
+// If no frontmatter block is found, returns the original content.
+func stripFrontmatterBlock(content string) string {
+	if !strings.HasPrefix(content, "---") {
+		return content
+	}
+
+	// Find the closing "---" delimiter
+	lines := strings.Split(content, "\n")
+	if len(lines) < 2 {
+		return content
+	}
+
+	// Skip the opening "---"
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			// Found the closing delimiter; return everything after it
+			return strings.Join(lines[i+1:], "\n")
+		}
+	}
+
+	// No closing delimiter found, return original content
+	return content
 }
 
 // sanitizeForJobID creates a kebab-case slug from a string for use in job IDs.

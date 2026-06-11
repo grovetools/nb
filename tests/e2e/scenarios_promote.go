@@ -589,3 +589,131 @@ This note will be promoted and then demoted back to inbox.
 		},
 	)
 }
+
+// NotebookPromoteWithBrokenYAMLScenario tests that promote handles broken YAML gracefully
+// without creating double-frontmatter in jobs.
+func NotebookPromoteWithBrokenYAMLScenario() *harness.Scenario {
+	return harness.NewScenario(
+		"notebook-promote-with-broken-yaml",
+		"Verifies nb promote handles broken YAML in notes by stripping frontmatter and avoiding double-frontmatter.",
+		[]string{"notebook", "promote", "yaml-handling"},
+		[]harness.Step{
+			harness.NewStep("Setup with broken YAML note", func(ctx *harness.Context) error {
+				homeDir := ctx.HomeDir()
+				notebookRoot := filepath.Join(homeDir, "notebooks", "test-notebook-broken-yaml")
+
+				// Workspace A: source workspace with a note that has broken YAML
+				wsAInbox := filepath.Join(notebookRoot, "workspaces", "workspace-a", "inbox")
+				if err := fs.CreateDir(wsAInbox); err != nil {
+					return fmt.Errorf("creating workspace-a inbox: %w", err)
+				}
+
+				// This note has invalid YAML: title with unquoted colon that breaks the YAML parser
+				brokenNote := `---
+id: broken-yaml-note
+title: treemux: drag-select offset ~2 lines; copy banner reflows
+tags: [issues, grovetools]
+created: 2023-01-01 10:00:00
+modified: 2023-01-01 10:00:00
+---
+
+# Issue Description
+
+This note has a colon in the title which, when unquoted, creates invalid YAML.
+`
+				notePath := filepath.Join(wsAInbox, "broken-yaml-note.md")
+				if err := fs.WriteString(notePath, brokenNote); err != nil {
+					return fmt.Errorf("writing broken YAML note: %w", err)
+				}
+				ctx.Set("note_path", notePath)
+
+				// Workspace B: target workspace with a plan
+				wsBDir := filepath.Join(notebookRoot, "workspaces", "workspace-b")
+				planDir := filepath.Join(wsBDir, "plans", "test-plan")
+				if err := fs.CreateDir(planDir); err != nil {
+					return fmt.Errorf("creating plan dir: %w", err)
+				}
+
+				planConfig := `name: test-plan
+worktree: ""
+`
+				if err := fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), planConfig); err != nil {
+					return fmt.Errorf("writing plan config: %w", err)
+				}
+
+				ctx.Set("plan_dir", planDir)
+				ctx.Set("notebook_root", notebookRoot)
+
+				return nil
+			}),
+
+			harness.NewStep("Run nb promote on broken YAML note", func(ctx *harness.Context) error {
+				notePath := ctx.GetString("note_path")
+				planDir := ctx.GetString("plan_dir")
+
+				cmd := ctx.Bin("promote", notePath, "--plan", planDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if err := result.AssertSuccess(); err != nil {
+					return fmt.Errorf("nb promote failed: %w", err)
+				}
+
+				// Extract job filename from output
+				lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+				var jobFilename string
+				for i := len(lines) - 1; i >= 0; i-- {
+					line := strings.TrimSpace(lines[i])
+					if line != "" && strings.HasSuffix(line, ".md") {
+						jobFilename = line
+						break
+					}
+				}
+				if jobFilename == "" {
+					return fmt.Errorf("nb promote did not output a job filename")
+				}
+				ctx.Set("job_filename", jobFilename)
+				return nil
+			}),
+
+			harness.NewStep("Verify job has exactly one frontmatter block (no double frontmatter)", func(ctx *harness.Context) error {
+				planDir := ctx.GetString("plan_dir")
+				jobFilename := ctx.GetString("job_filename")
+				jobPath := filepath.Join(planDir, jobFilename)
+
+				jobContent, err := os.ReadFile(jobPath)
+				if err != nil {
+					return fmt.Errorf("reading job file: %w", err)
+				}
+
+				content := string(jobContent)
+
+				// Count frontmatter blocks (delimited by ---)
+				fmCount := strings.Count(content, "\n---\n") + (strings.Count(content[:3], "---"))
+				if strings.HasPrefix(content, "---") {
+					fmCount++
+				}
+				// We expect at most 1 complete frontmatter block (2 --- delimiters)
+				// If we have 4+ ---, that means double-frontmatter (2 blocks = 4 delimiters)
+				if fmCount >= 4 {
+					return fmt.Errorf("job has multiple frontmatter blocks (double-frontmatter bug): content = %s", content)
+				}
+
+				// More direct check: parse the job and verify it has valid structure
+				job, err := orchestration.LoadJob(jobPath)
+				if err != nil {
+					return fmt.Errorf("failed to load job (likely due to double frontmatter): %w", err)
+				}
+
+				// Check that the content has actual body content after the frontmatter
+				// The promoted content should have the note body appended
+				bodyContent := content[strings.Index(content, "---\n")+4:]
+				bodyContent = bodyContent[strings.Index(bodyContent, "---\n")+4:]
+
+				return ctx.Verify(func(v *verify.Collector) {
+					v.Equal("job has valid id", "broken-yaml-note", job.ID)
+					v.NotEqual("job body is not empty", "", strings.TrimSpace(bodyContent))
+				})
+			}),
+		},
+	)
+}
