@@ -4,18 +4,18 @@ import (
 	"fmt"
 
 	coreconfig "github.com/grovetools/core/config"
-	"github.com/mitchellh/mapstructure"
 )
 
 // SyncConfig holds the configuration for a single sync provider for a notebook.
 type SyncConfig struct {
-	Provider   string `mapstructure:"provider"`
-	IssuesType string `mapstructure:"issues_type"`
-	PRsType    string `mapstructure:"prs_type"`
+	Provider   string
+	IssuesType string
+	PRsType    string
 }
 
-// GetSyncConfigForNotebook extracts the sync configurations for a specific notebook
-// from the global grove.yml configuration.
+// GetSyncConfigForNotebook extracts the sync provider configurations for a
+// specific notebook from the global grove config. The legacy list shape of
+// the `sync` key decodes into SyncConfig.Providers in core.
 func GetSyncConfigForNotebook(cfg *coreconfig.Config, notebookName string) ([]SyncConfig, error) {
 	if cfg == nil || cfg.Notebooks == nil || cfg.Notebooks.Definitions == nil {
 		return []SyncConfig{}, nil // No config, no syncs
@@ -27,26 +27,15 @@ func GetSyncConfigForNotebook(cfg *coreconfig.Config, notebookName string) ([]Sy
 	}
 
 	var syncConfigs []SyncConfig
-	syncs, ok := notebookDef.Sync.([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("sync config for notebook '%s' is not a list", notebookName)
-	}
-
-	for i, s := range syncs {
-		syncMap, ok := s.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("sync config entry %d for notebook '%s' is not a map", i, notebookName)
-		}
-
-		var syncConf SyncConfig
-		if err := mapstructure.Decode(syncMap, &syncConf); err != nil {
-			return nil, fmt.Errorf("failed to decode sync config entry %d: %w", i, err)
-		}
-
-		if syncConf.Provider == "" {
+	for i, p := range notebookDef.Sync.Providers {
+		if p.Provider == "" {
 			return nil, fmt.Errorf("sync config entry %d missing 'provider' field", i)
 		}
-		syncConfigs = append(syncConfigs, syncConf)
+		syncConfigs = append(syncConfigs, SyncConfig{
+			Provider:   p.Provider,
+			IssuesType: p.IssuesType,
+			PRsType:    p.PRsType,
+		})
 	}
 
 	return syncConfigs, nil
