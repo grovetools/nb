@@ -621,14 +621,22 @@ func (s *Service) CreateConcept(ctx *WorkspaceContext, title string, options ...
 		return nil, fmt.Errorf("get concepts directory path: %w", err)
 	}
 
-	conceptID := SanitizeFilename(title)
+	conceptID := opts.conceptID
+	if conceptID == "" {
+		conceptID = SanitizeFilename(title)
+	}
 	conceptPath := filepath.Join(conceptsDir, conceptID)
 
 	if err := os.MkdirAll(conceptPath, 0o755); err != nil {
 		return nil, fmt.Errorf("create concept directory: %w", err)
 	}
 
-	// Create concept-manifest.yml
+	// Create concept-manifest.yml. Title goes through yaml.Marshal so
+	// punctuation like ":" can't produce an unparseable manifest.
+	titleYAML, err := yaml.Marshal(title)
+	if err != nil {
+		return nil, fmt.Errorf("marshal concept title: %w", err)
+	}
 	manifestContent := fmt.Sprintf(
 		`id: %s
 title: %s
@@ -638,7 +646,7 @@ related_concepts: []
 related_plans: []
 related_notes: []
 related_skills: []
-`, conceptID, title)
+`, conceptID, strings.TrimSpace(string(titleYAML)))
 	if err := os.WriteFile(filepath.Join(conceptPath, "concept-manifest.yml"), []byte(manifestContent), 0o644); err != nil {
 		return nil, fmt.Errorf("create concept-manifest.yml: %w", err)
 	}
@@ -2297,6 +2305,7 @@ type WorkspaceContext struct {
 type createOptions struct {
 	openEditor bool
 	useGlobal  bool
+	conceptID  string
 }
 
 type CreateOption func(*createOptions)
@@ -2310,6 +2319,13 @@ func WithoutEditor() CreateOption {
 func InGlobalWorkspace() CreateOption {
 	return func(o *createOptions) {
 		o.useGlobal = true
+	}
+}
+
+// WithConceptID overrides the concept directory id derived from the title.
+func WithConceptID(id string) CreateOption {
+	return func(o *createOptions) {
+		o.conceptID = id
 	}
 }
 

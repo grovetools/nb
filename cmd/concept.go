@@ -43,6 +43,7 @@ func NewConceptCmd(svc **service.Service, workspaceOverride *string) *cobra.Comm
 func newConceptNewCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var globalConcept bool
 	var jsonOutput bool
+	var conceptID string
 
 	cmd := &cobra.Command{
 		Use:   "new <title>",
@@ -50,6 +51,7 @@ func newConceptNewCmd(svc **service.Service, workspaceOverride *string) *cobra.C
 		Long:  `Create a new concept with manifest and overview files.`,
 		Example: `  nb concept new "Rate Limiter"
   nb concept new "Authentication System" --json
+  nb concept new "Rate Limiter: Token Buckets" --id rate-limiter
   nb concept new "Shared Utils" --global`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -62,6 +64,9 @@ func newConceptNewCmd(svc **service.Service, workspaceOverride *string) *cobra.C
 			var opts []service.CreateOption
 			if globalConcept {
 				opts = append(opts, service.InGlobalWorkspace())
+			}
+			if conceptID != "" {
+				opts = append(opts, service.WithConceptID(conceptID))
 			}
 
 			note, err := (*svc).CreateConcept(ctx, title, opts...)
@@ -77,8 +82,12 @@ func newConceptNewCmd(svc **service.Service, workspaceOverride *string) *cobra.C
 				if globalConcept {
 					workspaceName = globalStr
 				}
+				resultID := conceptID
+				if resultID == "" {
+					resultID = service.SanitizeFilename(title)
+				}
 				result := service.ConceptInfo{
-					ID:        service.SanitizeFilename(title),
+					ID:        resultID,
 					Title:     title,
 					Path:      note.Path,
 					Workspace: workspaceName,
@@ -99,6 +108,7 @@ func newConceptNewCmd(svc **service.Service, workspaceOverride *string) *cobra.C
 
 	cmd.Flags().BoolVarP(&globalConcept, "global", "g", false, "Create in global workspace")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output result as JSON")
+	cmd.Flags().StringVar(&conceptID, "id", "", "Explicit concept id (directory name); defaults to a slug of the title")
 	return cmd
 }
 
