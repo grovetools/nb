@@ -23,6 +23,7 @@ type KeyMap struct {
 	FilterByTag      key.Binding
 	ToggleGitChanges key.Binding
 	Sort             key.Binding
+	CycleGrouping    key.Binding
 	// Toggle operations (TUI-specific)
 	ToggleArchives  key.Binding
 	ToggleArtifacts key.Binding
@@ -47,9 +48,10 @@ type KeyMap struct {
 	GitStageAll    key.Binding
 	GitUnstageAll  key.Binding
 	// Misc operations (TUI-specific)
-	Preview key.Binding
-	Refresh key.Binding
-	Sync    key.Binding
+	Preview     key.Binding
+	Refresh     key.Binding
+	Sync        key.Binding
+	AutoArchive key.Binding
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -70,7 +72,7 @@ func (k KeyMap) Sections() []keymap.Section {
 			k.FocusSelected, k.FocusRecent, k.JumpToWorkspace,
 		),
 		keymap.NewSection(keymap.SectionFilter,
-			k.FilterByTag, k.ToggleGitChanges, k.Sort,
+			k.FilterByTag, k.ToggleGitChanges, k.Sort, k.CycleGrouping,
 		),
 		keymap.NewSection(keymap.SectionToggle,
 			k.ToggleArchives, k.ToggleArtifacts, k.ToggleGlobal,
@@ -88,7 +90,7 @@ func (k KeyMap) Sections() []keymap.Section {
 			k.GitStageToggle, k.GitStageAll, k.GitUnstageAll, k.GitCommit,
 		),
 		keymap.NewSectionWithIcon("Misc", theme.IconGear,
-			k.Preview, k.Refresh, k.Sync,
+			k.Preview, k.Refresh, k.Sync, k.AutoArchive,
 		),
 		k.Base.SystemSection(),
 	}
@@ -137,6 +139,15 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		Sort: key.NewBinding(
 			key.WithKeys("s"),
 			key.WithHelp("s", "toggle sort order"),
+		),
+		// NOTE: The briefing requested default key "g", but nb's browser already
+		// binds the "gg" go-to-top sequence; a lone "g" is always consumed as the
+		// prefix of that sequence and can never trigger a bare-key action. Per the
+		// "prefer real code over the plan, and note the deviation" rule we bind
+		// CycleGrouping to "o" (unused) instead. Users can remap via config.
+		CycleGrouping: key.NewBinding(
+			key.WithKeys("o"),
+			key.WithHelp("o", "cycle group-by (none/date/status/tag)"),
 		),
 		// Toggle operations
 		ToggleArchives: key.NewBinding(
@@ -230,6 +241,14 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		Sync: key.NewBinding(
 			key.WithKeys("S"),
 			key.WithHelp("S", "sync with remotes"),
+		),
+		// NOTE: The briefing suggested "Shift+S" for auto-archive, but "S" (and
+		// thus Shift+S) is already bound to Sync. We bind AutoArchive to "Z"
+		// (an unused key) instead. It is a MANUAL action only — never run on
+		// startup. Users can remap via config.
+		AutoArchive: key.NewBinding(
+			key.WithKeys("Z"),
+			key.WithHelp("Z", "auto-archive notes older than 30 days"),
 		),
 	}
 

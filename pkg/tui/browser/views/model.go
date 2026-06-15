@@ -120,6 +120,7 @@ type Model struct {
 	selectedTag          string
 	recentNotesMode      bool
 	showGitModifiedOnly  bool
+	groupBy              string // "none", "date", "status", "tag"
 
 	// Git status for rendering indicators
 	gitFileStatus   map[string]string // Key: normalized absolute path, Value: git status code
@@ -139,7 +140,24 @@ func New(keys KeyMap, columnVisibility map[string]bool) Model {
 		cutPaths:         make(map[string]struct{}),
 		columnVisibility: columnVisibility,
 		sequence:         keymap.NewSequenceState(),
+		groupBy:          "none",
 	}
+}
+
+// SetGroupBy sets the active grouping axis ("none", "date", "status", "tag").
+func (m *Model) SetGroupBy(axis string) {
+	if axis == "" {
+		axis = "none"
+	}
+	m.groupBy = axis
+}
+
+// GetGroupBy returns the active grouping axis.
+func (m *Model) GetGroupBy() string {
+	if m.groupBy == "" {
+		return "none"
+	}
+	return m.groupBy
 }
 
 // SetSize sets the dimensions of the view.
