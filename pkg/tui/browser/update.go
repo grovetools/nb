@@ -61,6 +61,10 @@ func (m *Model) updateViewsState() {
 		m.views.FilterDisplayTreeByGitStatus()
 	}
 
+	// Apply priority (critical-only) filter if active. Filter state lives in
+	// the views model and is a no-op when no priority filter is set.
+	m.views.FilterDisplayTreeByPriority()
+
 	// Apply text filter if present (not grep mode and not tag filter mode)
 	if m.filterInput.Value() != "" && !m.isGrepping && !m.isFilteringByTag {
 		m.views.FilterDisplayTree()
@@ -119,6 +123,33 @@ func (m *Model) createPlanCmd(note *models.Note) tea.Cmd {
 		// On success, trigger a full refresh of the note browser
 		return refreshMsg{}
 	})
+}
+
+// bumpSelectedPriority adjusts the priority of the note under the cursor one
+// step more (moreCritical=true) or less critical, writes it to disk, and
+// returns a command that refreshes the browser so the change is reflected.
+// It is a no-op when the cursor is not on a note or the bump hits a ladder end.
+func (m *Model) bumpSelectedPriority(moreCritical bool) tea.Cmd {
+	node := m.views.GetCurrentNode()
+	if node == nil || !node.IsNote() {
+		return nil
+	}
+	note := views.ItemToNote(node.Item)
+	newPriority := views.BumpPriority(note.Priority, moreCritical)
+	if newPriority == note.Priority {
+		// Already at the most/least critical end.
+		return nil
+	}
+	if err := m.service.UpdateNotePriority(note.Path, newPriority); err != nil {
+		m.statusMessage = fmt.Sprintf("Failed to set priority: %s", err)
+		return nil
+	}
+	if newPriority == "" {
+		m.statusMessage = "Cleared priority"
+	} else {
+		m.statusMessage = "Priority set to " + newPriority
+	}
+	return func() tea.Msg { return refreshMsg{} }
 }
 
 // notePromotedToJobMsg is sent after a note has been promoted to a job in a plan.
@@ -940,6 +971,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			return m, nil
 		case key.Matches(msg, m.keys.Sort):
 			m.views.ToggleSortOrder()
+		case key.Matches(msg, m.keys.SortByPriority):
+			if active := m.views.ToggleSortByPriority(); active {
+				m.statusMessage = "Sorting by priority"
+			} else {
+				m.statusMessage = "Sorting by date"
+			}
+			m.updateViewsState()
+		case key.Matches(msg, m.keys.CriticalOnly):
+			if active := m.views.ToggleCriticalFilter(); active {
+				m.statusMessage = "Filtering critical (p0) only"
+			} else {
+				m.statusMessage = "Cleared critical filter"
+			}
+			m.updateViewsState()
+		case key.Matches(msg, m.keys.PriorityUp):
+			return m, m.bumpSelectedPriority(true)
+		case key.Matches(msg, m.keys.PriorityDown):
+			return m, m.bumpSelectedPriority(false)
 		case key.Matches(msg, m.keys.CycleGrouping):
 			m.groupBy = nextGroupBy(m.groupBy)
 			m.views.SetGroupBy(m.groupBy)

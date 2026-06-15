@@ -197,6 +197,39 @@ func (m *Model) adjustScroll() {
 	}
 }
 
+// priorityRank maps a priority string to a sortable key. Empty priority sorts
+// LAST (rank "z") so prioritized notes float to the top when sorting by
+// priority. p0 < p1 < p2 < p3 < "" lexically, which matches "most critical
+// first".
+func priorityRank(priority string) string {
+	if priority == "" {
+		return "z"
+	}
+	return priority
+}
+
+// sortNotes sorts a slice of notes in place. When m.sortByPriority is set,
+// notes are ordered by priority first (p0 most critical, empty last), then by
+// the existing creation-time order (honoring m.sortAscending). When priority
+// sorting is off it preserves the historical CreatedAt ordering.
+//
+// This is the single canonical note comparator; all tree-building sort sites
+// route through it so sort behavior stays consistent.
+func (m *Model) sortNotes(notes []*models.Note) {
+	sort.SliceStable(notes, func(i, j int) bool {
+		if m.sortByPriority {
+			ri, rj := priorityRank(notes[i].Priority), priorityRank(notes[j].Priority)
+			if ri != rj {
+				return ri < rj
+			}
+		}
+		if m.sortAscending {
+			return notes[i].CreatedAt.Before(notes[j].CreatedAt)
+		}
+		return notes[i].CreatedAt.After(notes[j].CreatedAt)
+	})
+}
+
 // BuildDisplayTree constructs the hierarchical list of nodes for rendering.
 func (m *Model) BuildDisplayTree() { //nolint:gocyclo
 	if m.recentNotesMode {
@@ -683,12 +716,7 @@ func (m *Model) BuildDisplayTree() { //nolint:gocyclo
 
 				// Render root notes (e.g. grove.toml) directly under workspace
 				if len(rootNotes) > 0 {
-					sort.SliceStable(rootNotes, func(i, j int) bool {
-						if m.sortAscending {
-							return rootNotes[i].CreatedAt.Before(rootNotes[j].CreatedAt)
-						}
-						return rootNotes[i].CreatedAt.After(rootNotes[j].CreatedAt)
-					})
+					m.sortNotes(rootNotes)
 					for ni, note := range rootNotes {
 						isLastRootNote := ni == len(rootNotes)-1
 						var notePrefix strings.Builder
@@ -839,12 +867,7 @@ func (m *Model) buildTagFilteredTree() {
 			nodes = append(nodes, wsNode)
 
 			// Sort notes within the workspace
-			sort.SliceStable(notesInWs, func(i, j int) bool {
-				if m.sortAscending {
-					return notesInWs[i].CreatedAt.Before(notesInWs[j].CreatedAt)
-				}
-				return notesInWs[i].CreatedAt.After(notesInWs[j].CreatedAt)
-			})
+			m.sortNotes(notesInWs)
 
 			// Add note nodes directly under the workspace
 			for i, note := range notesInWs {
@@ -937,12 +960,7 @@ func (m *Model) addArchiveSubgroup(
 			archivedNotes := archiveSubgroups[archivedName]
 
 			// Sort notes within the archived child
-			sort.SliceStable(archivedNotes, func(i, j int) bool {
-				if m.sortAscending {
-					return archivedNotes[i].CreatedAt.Before(archivedNotes[j].CreatedAt)
-				}
-				return archivedNotes[i].CreatedAt.After(archivedNotes[j].CreatedAt)
-			})
+			m.sortNotes(archivedNotes)
 
 			// If archivedName is empty, these are notes directly in .archive folder
 			if archivedName == "" {
@@ -1073,12 +1091,7 @@ func (m *Model) addClosedSubgroup(
 			closedNotes := closedSubgroups[closedName]
 
 			// Sort notes within the closed child
-			sort.SliceStable(closedNotes, func(i, j int) bool {
-				if m.sortAscending {
-					return closedNotes[i].CreatedAt.Before(closedNotes[j].CreatedAt)
-				}
-				return closedNotes[i].CreatedAt.After(closedNotes[j].CreatedAt)
-			})
+			m.sortNotes(closedNotes)
 
 			// If closedName is empty, these are notes directly in .closed folder
 			if closedName == "" {
@@ -1207,12 +1220,7 @@ func (m *Model) addArtifactSubgroup(
 			isLastJob := ji == len(jobNames)-1
 			jobNotes := artifactJobs[jobName]
 
-			sort.SliceStable(jobNotes, func(i, j int) bool {
-				if m.sortAscending {
-					return jobNotes[i].CreatedAt.Before(jobNotes[j].CreatedAt)
-				}
-				return jobNotes[i].CreatedAt.After(jobNotes[j].CreatedAt)
-			})
+			m.sortNotes(jobNotes)
 
 			// Files directly under .artifacts/ (no per-job subdir): render
 			// straight under the .artifacts node.
@@ -1478,12 +1486,7 @@ func (m *Model) addHoldPlansGroup(nodes *[]*DisplayNode, ws *workspace.Workspace
 			planNotes := holdPlanGroups[planName]
 
 			// Sort notes within the plan
-			sort.SliceStable(planNotes, func(i, j int) bool {
-				if m.sortAscending {
-					return planNotes[i].CreatedAt.Before(planNotes[j].CreatedAt)
-				}
-				return planNotes[i].CreatedAt.After(planNotes[j].CreatedAt)
-			})
+			m.sortNotes(planNotes)
 
 			// Calculate plan prefix
 			var planPrefix strings.Builder
@@ -1667,12 +1670,7 @@ func (m *Model) addNoteNodes(
 	artifactGroupKey string,
 ) {
 	// Sort notes within the group
-	sort.SliceStable(notesInGroup, func(i, j int) bool {
-		if m.sortAscending {
-			return notesInGroup[i].CreatedAt.Before(notesInGroup[j].CreatedAt)
-		}
-		return notesInGroup[i].CreatedAt.After(notesInGroup[j].CreatedAt)
-	})
+	m.sortNotes(notesInGroup)
 
 	jobsForGroup := artifactSubgroups[artifactGroupKey]
 
@@ -1774,12 +1772,7 @@ func (m *Model) addNestedArtifacts(
 		return
 	}
 
-	sort.SliceStable(jobArtifacts, func(i, j int) bool {
-		if m.sortAscending {
-			return jobArtifacts[i].CreatedAt.Before(jobArtifacts[j].CreatedAt)
-		}
-		return jobArtifacts[i].CreatedAt.After(jobArtifacts[j].CreatedAt)
-	})
+	m.sortNotes(jobArtifacts)
 
 	fileIndent := strings.ReplaceAll(artifactsPrefix.String(), "├ ", "│ ")
 	fileIndent = strings.ReplaceAll(fileIndent, "└ ", "  ")
@@ -2334,6 +2327,59 @@ func (m *Model) FilterDisplayTreeByGitStatus() {
 	// Add deleted files to the filtered tree
 	m.AddDeletedFilesToTree()
 
+	m.clampCursor()
+}
+
+// FilterDisplayTreeByPriority filters the tree view to show only notes whose
+// priority matches m.priorityFilter (e.g. "p0" for critical-only), preserving
+// the parent group/workspace nodes that lead to a kept note. When no filter is
+// active it is a no-op. Mirrors FilterDisplayTreeByGitStatus.
+func (m *Model) FilterDisplayTreeByPriority() {
+	if m.priorityFilter == "" {
+		return // No filter to apply
+	}
+
+	fullTree := m.displayNodes
+	nodesToKeep := make(map[int]bool)
+	parentMap := make(map[int]int)
+	lastNodeAtDepth := make(map[int]int)
+
+	// First pass: build parent map
+	for i, node := range fullTree {
+		if node.Depth > 0 {
+			if parentIndex, ok := lastNodeAtDepth[node.Depth-1]; ok {
+				parentMap[i] = parentIndex
+			}
+		}
+		lastNodeAtDepth[node.Depth] = i
+	}
+
+	// Second pass: mark matching notes and their ancestors to keep
+	for i, node := range fullTree {
+		if node.IsNote() {
+			if ItemToNote(node.Item).Priority == m.priorityFilter {
+				curr := i
+				for {
+					nodesToKeep[curr] = true
+					parentIndex, ok := parentMap[curr]
+					if !ok {
+						break
+					}
+					curr = parentIndex
+				}
+			}
+		}
+	}
+
+	// Third pass: build the filtered tree
+	var filteredTree []*DisplayNode
+	for i, node := range fullTree {
+		if nodesToKeep[i] {
+			filteredTree = append(filteredTree, node)
+		}
+	}
+
+	m.displayNodes = filteredTree
 	m.clampCursor()
 }
 
@@ -2902,6 +2948,9 @@ func ItemToNote(item *tree.Item) *models.Note {
 	if planRef, ok := item.Metadata["PlanRef"].(string); ok {
 		note.PlanRef = planRef
 	}
+	if priority, ok := item.Metadata["Priority"].(string); ok {
+		note.Priority = priority
+	}
 	if created, ok := item.Metadata["Created"].(time.Time); ok {
 		note.CreatedAt = created
 	} else {
@@ -2945,6 +2994,7 @@ func noteToItem(note *models.Note) *tree.Item {
 	item.Metadata["Branch"] = note.Branch
 	item.Metadata["Tags"] = note.Tags
 	item.Metadata["PlanRef"] = note.PlanRef
+	item.Metadata["Priority"] = note.Priority
 	item.Metadata["Created"] = note.CreatedAt
 
 	if note.IsArtifact {

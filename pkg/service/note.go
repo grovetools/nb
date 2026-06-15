@@ -123,6 +123,9 @@ func ParseNote(path string) (*models.Note, error) {
 		if fm.PlanRef != "" {
 			note.PlanRef = fm.PlanRef
 		}
+		if fm.Priority != "" {
+			note.Priority = fm.Priority
+		}
 
 		// Parse remote sync fields
 		if fm.Remote != nil {

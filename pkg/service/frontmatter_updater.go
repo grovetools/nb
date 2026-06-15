@@ -3,10 +3,53 @@ package service
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// ValidPriorities is the ordered set of accepted note priority values
+// (p0 = most critical). An empty string clears the priority.
+var ValidPriorities = []string{"p0", "p1", "p2", "p3"}
+
+// IsValidPriority reports whether p is an accepted priority value. The empty
+// string is valid (it clears the field).
+func IsValidPriority(p string) bool {
+	if p == "" {
+		return true
+	}
+	for _, v := range ValidPriorities {
+		if v == p {
+			return true
+		}
+	}
+	return false
+}
+
+// UpdateNotePriority sets (or clears, when priority == "") the `priority`
+// frontmatter field on the note at path, preserving all other frontmatter via
+// the formatting-preserving updateFrontmatterFields helper.
+func (s *Service) UpdateNotePriority(path, priority string) error {
+	if !IsValidPriority(priority) {
+		return fmt.Errorf("invalid priority %q (want one of p0,p1,p2,p3 or empty)", priority)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read note for priority update: %w", err)
+	}
+
+	newContent, err := updateFrontmatterFields(content, map[string]interface{}{"priority": priority})
+	if err != nil {
+		return fmt.Errorf("update priority frontmatter: %w", err)
+	}
+
+	if err := os.WriteFile(path, newContent, 0o644); err != nil {
+		return fmt.Errorf("write note with updated priority: %w", err)
+	}
+	return nil
+}
 
 // parseFrontmatterToMap extracts YAML frontmatter from markdown content.
 // Returns the parsed YAML as a map, the remaining content, and any error.

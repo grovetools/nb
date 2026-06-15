@@ -90,6 +90,31 @@ Content`,
 			wantBody: "\nContent",
 			wantErr:  false,
 		},
+		{
+			name: "frontmatter with priority",
+			content: `---
+id: prio
+title: Critical Note
+aliases: []
+tags: []
+created: 2023-01-01 10:00:00
+modified: 2023-01-01 10:00:00
+priority: p0
+---
+
+Content`,
+			wantFM: &Frontmatter{
+				ID:       "prio",
+				Title:    "Critical Note",
+				Aliases:  []string{},
+				Tags:     []string{},
+				Created:  "2023-01-01 10:00:00",
+				Modified: "2023-01-01 10:00:00",
+				Priority: "p0",
+			},
+			wantBody: "\nContent",
+			wantErr:  false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -172,6 +197,47 @@ id: special
 title: "Note: Special, Characters"
 aliases: ["alias:1", "alias,2"]
 tags: ["tag:special", "tag,comma"]
+created: 2023-01-01 10:00:00
+modified: 2023-01-01 10:00:00
+---`,
+		},
+		{
+			name: "with priority",
+			fm: &Frontmatter{
+				ID:       "prio",
+				Title:    "Critical Note",
+				Aliases:  []string{},
+				Tags:     []string{},
+				Created:  "2023-01-01 10:00:00",
+				Modified: "2023-01-01 10:00:00",
+				Priority: "p0",
+			},
+			want: `---
+id: prio
+title: Critical Note
+aliases: []
+tags: []
+created: 2023-01-01 10:00:00
+modified: 2023-01-01 10:00:00
+priority: p0
+---`,
+		},
+		{
+			name: "empty priority omitted",
+			fm: &Frontmatter{
+				ID:       "noprio",
+				Title:    "Normal Note",
+				Aliases:  []string{},
+				Tags:     []string{},
+				Created:  "2023-01-01 10:00:00",
+				Modified: "2023-01-01 10:00:00",
+				Priority: "",
+			},
+			want: `---
+id: noprio
+title: Normal Note
+aliases: []
+tags: []
 created: 2023-01-01 10:00:00
 modified: 2023-01-01 10:00:00
 ---`,

@@ -174,11 +174,12 @@ func (m *Model) renderTableView() string {
 	nameWidth := colWidths[0]
 	typeWidth := colWidths[1]
 	statusWidth := colWidths[2]
-	tagsWidth := colWidths[3]
-	createdWidth := colWidths[4]
-	modifiedWidth := colWidths[5]
-	workspaceWidth := colWidths[6]
-	pathWidth := colWidths[7]
+	priorityWidth := colWidths[3]
+	tagsWidth := colWidths[4]
+	createdWidth := colWidths[5]
+	modifiedWidth := colWidths[6]
+	workspaceWidth := colWidths[7]
+	pathWidth := colWidths[8]
 
 	// Header
 	var headerParts []string
@@ -189,6 +190,9 @@ func (m *Model) renderTableView() string {
 	}
 	if m.columnVisibility["STATUS"] {
 		headerParts = append(headerParts, separator, padOrTruncate("STATUS", statusWidth))
+	}
+	if m.columnVisibility["PRIORITY"] {
+		headerParts = append(headerParts, separator, padOrTruncate("PRIORITY", priorityWidth))
 	}
 	if m.columnVisibility["TAGS"] {
 		headerParts = append(headerParts, separator, padOrTruncate("TAGS", tagsWidth))
@@ -231,13 +235,16 @@ func (m *Model) renderTableView() string {
 			selCol = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange).Render("▶")
 		}
 
-		var typeCol, statusCol, tagsCol, createdCol, modifiedCol, workspaceCol, pathCol string
+		var typeCol, statusCol, priorityCol, tagsCol, createdCol, modifiedCol, workspaceCol, pathCol string
 		if node.IsNote() {
 			// Extract type from metadata
 			if noteType, ok := node.Item.Metadata["Type"].(string); ok {
 				typeCol = noteType
 			}
 			statusCol = getNoteStatus(ItemToNote(node.Item))
+			if priority, ok := node.Item.Metadata["Priority"].(string); ok {
+				priorityCol = priority
+			}
 			if tags, ok := node.Item.Metadata["Tags"].([]string); ok {
 				tagsCol = strings.Join(tags, ", ")
 			}
@@ -274,6 +281,13 @@ func (m *Model) renderTableView() string {
 		}
 		if m.columnVisibility["STATUS"] {
 			rowParts = append(rowParts, separator, padOrTruncate(statusCol, statusWidth))
+		}
+		if m.columnVisibility["PRIORITY"] {
+			priorityCell := ""
+			if badge := renderPriorityBadge(priorityCol); badge != "" {
+				priorityCell = badge
+			}
+			rowParts = append(rowParts, separator, padOrTruncate(priorityCell, priorityWidth))
 		}
 		if m.columnVisibility["TAGS"] {
 			rowParts = append(rowParts, separator, padOrTruncate(tagsCol, tagsWidth))
@@ -511,6 +525,13 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 		content += " "
 	}
 
+	// Prepend a colored priority badge (e.g. "[p0] ") for prioritized notes.
+	if info.note != nil {
+		if badge := renderPriorityBadge(info.note.Priority); badge != "" {
+			content += badge + " "
+		}
+	}
+
 	// Get search match indices before applying styles to the name
 	matchStart, matchEnd := m.getSearchHighlightIndices(info.name)
 	hasMatch := matchStart != -1
@@ -582,6 +603,30 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 	}
 
 	return content + styledName + gitIndicator + suffix
+}
+
+// renderPriorityBadge returns a colored "[pN]" badge for a note priority, or
+// "" when the priority is unset/unknown. p0 is the most critical (red), p3 the
+// least (dim). Used both in the tree name column and the table PRIORITY column.
+func renderPriorityBadge(priority string) string {
+	var color lipgloss.TerminalColor
+	switch priority {
+	case "p0":
+		color = theme.DefaultTheme.Colors.Red
+	case "p1":
+		color = theme.DefaultTheme.Colors.Orange
+	case "p2":
+		color = theme.DefaultTheme.Colors.Cyan
+	case "p3":
+		color = theme.DefaultTheme.Colors.MutedText
+	default:
+		return ""
+	}
+	style := lipgloss.NewStyle().Foreground(color)
+	if priority == "p0" {
+		style = style.Bold(true)
+	}
+	return style.Render("[" + priority + "]")
 }
 
 // renderGitStatusIndicator returns a styled string for the given git status code.
@@ -680,7 +725,7 @@ func (m *Model) getSearchHighlightIndices(text string) (int, int) {
 }
 
 // calculateTableColumnWidths calculates optimal column widths based on content
-func (m *Model) calculateTableColumnWidths() [8]int {
+func (m *Model) calculateTableColumnWidths() [9]int {
 	// Min and max constraints for each column
 	const minNameWidth = 30
 	const maxNameWidth = 60
@@ -688,6 +733,7 @@ func (m *Model) calculateTableColumnWidths() [8]int {
 	const maxTypeWidth = 25
 	const minStatusWidth = 10
 	const maxStatusWidth = 20
+	const maxPriorityWidth = 8 // Fixed: header "PRIORITY" is the widest value
 	const minTagsWidth = 15
 	const maxTagsWidth = 50
 	const minWorkspaceWidth = 10
@@ -703,6 +749,7 @@ func (m *Model) calculateTableColumnWidths() [8]int {
 	maxName := len("WORKSPACE / NOTE")
 	maxType := len("TYPE")
 	maxStatus := len("STATUS")
+	maxPriority := maxPriorityWidth // Fixed width
 	maxTags := len("TAGS")
 	maxWorkspace := len("WORKSPACE")
 	maxCreated := len("CREATED")
@@ -828,6 +875,9 @@ func (m *Model) calculateTableColumnWidths() [8]int {
 	if !m.columnVisibility["STATUS"] {
 		maxStatus = 0
 	}
+	if !m.columnVisibility["PRIORITY"] {
+		maxPriority = 0
+	}
 	if !m.columnVisibility["TAGS"] {
 		maxTags = 0
 	}
@@ -844,7 +894,7 @@ func (m *Model) calculateTableColumnWidths() [8]int {
 		maxPath = 0
 	}
 
-	result := [8]int{maxName, maxType, maxStatus, maxTags, maxCreated, maxModified, maxWorkspace, maxPath}
+	result := [9]int{maxName, maxType, maxStatus, maxPriority, maxTags, maxCreated, maxModified, maxWorkspace, maxPath}
 
 	// Width-responsive shrinking: if total row width exceeds terminal
 	// width, progressively shrink flexible columns (path, tags, name)
@@ -864,8 +914,8 @@ func (m *Model) calculateTableColumnWidths() [8]int {
 
 		// Shrink columns in priority order: path, tags, name.
 		// Each iteration removes excess from the widest flexible column.
-		shrinkOrder := []int{7, 3, 0} // PATH, TAGS, NAME
-		minWidths := map[int]int{7: minPathWidth, 3: minTagsWidth, 0: minNameWidth}
+		shrinkOrder := []int{8, 4, 0} // PATH, TAGS, NAME
+		minWidths := map[int]int{8: minPathWidth, 4: minTagsWidth, 0: minNameWidth}
 		for _, idx := range shrinkOrder {
 			excess := totalWidth() - m.width
 			if excess <= 0 {

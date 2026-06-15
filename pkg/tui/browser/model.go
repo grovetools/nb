@@ -228,7 +228,7 @@ func New(cfg Config) Model {
 	commitInput.Width = 60
 
 	// Column Visibility Setup - load from state
-	availableColumns := []string{"TYPE", "STATUS", "TAGS", "WORKSPACE", "CREATED", "MODIFIED", "PATH"}
+	availableColumns := []string{"TYPE", "STATUS", "PRIORITY", "TAGS", "WORKSPACE", "CREATED", "MODIFIED", "PATH"}
 
 	// Load saved state
 	state, err := loadState()
@@ -238,6 +238,7 @@ func New(cfg Config) Model {
 			ColumnVisibility: map[string]bool{
 				"TYPE":      true,
 				"STATUS":    true,
+				"PRIORITY":  true,
 				"TAGS":      true,
 				"WORKSPACE": false,
 				"CREATED":   true,
@@ -765,6 +766,7 @@ func loadState() (*tuiState, error) {
 				ColumnVisibility: map[string]bool{
 					"TYPE":      true,
 					"STATUS":    true,
+					"PRIORITY":  true,
 					"TAGS":      true,
 					"WORKSPACE": false,
 					"CREATED":   true,

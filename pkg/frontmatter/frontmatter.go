@@ -37,6 +37,7 @@ type Frontmatter struct {
 	Modified   string   `yaml:"modified"`
 	Started    string   `yaml:"started,omitempty"`  // For LLM notes
 	PlanRef    string   `yaml:"plan_ref,omitempty"` // Reference to associated plan
+	Priority   string   `yaml:"priority,omitempty"` // p0 (most critical) .. p3, empty = none
 
 	// Remote sync metadata
 	Remote *RemoteMetadata `yaml:"remote,omitempty"`
@@ -112,6 +113,9 @@ func Build(fm *Frontmatter) string {
 	}
 	if fm.PlanRef != "" {
 		sb.WriteString(fmt.Sprintf("plan_ref: %s\n", formatYAMLValue(fm.PlanRef)))
+	}
+	if fm.Priority != "" {
+		sb.WriteString(fmt.Sprintf("priority: %s\n", formatYAMLValue(fm.Priority)))
 	}
 
 	// Remote sync metadata

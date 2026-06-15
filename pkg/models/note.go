@@ -34,6 +34,7 @@ type Note struct {
 	IsArchived       bool      `json:"is_archived"`
 	IsArtifact       bool      `json:"is_artifact,omitempty"`
 	PlanRef          string    `json:"plan_ref,omitempty"`
+	Priority         string    `json:"priority,omitempty"` // p0 (most critical) .. p3, empty = none
 
 	// Remote sync metadata
 	Remote *RemoteMetadata `json:"remote,omitempty"`
