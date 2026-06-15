@@ -172,9 +172,18 @@ func (m *Model) createPlanCmd(note *models.Note) tea.Cmd {
 }
 
 // bumpSelectedPriority adjusts the priority of the note under the cursor one
-// step more (moreCritical=true) or less critical, writes it to disk, and
-// returns a command that refreshes the browser so the change is reflected.
-// It is a no-op when the cursor is not on a note or the bump hits a ladder end.
+// step more (moreCritical=true) or less critical and writes it to disk. It is a
+// no-op when the cursor is not on a note or the bump hits a ladder end.
+//
+// The update is OPTIMISTIC: after the disk write succeeds we mutate the
+// in-memory item and rebuild the display tree LOCALLY instead of returning
+// refreshMsg{}. A refresh would re-fetch items from the daemon note index, which
+// re-indexes the just-written file asynchronously (file-watch latency) and so
+// almost always returns the OLD priority — making the bump appear not to stick
+// and corrupting the base value the next bump computes from. The disk write is
+// synchronous (os.WriteFile), so the daemon catches up in the background and a
+// later natural refresh stays consistent. Returns nil (no command) — the rebuild
+// is done in place.
 func (m *Model) bumpSelectedPriority(moreCritical bool) tea.Cmd {
 	node := m.views.GetCurrentNode()
 	if node == nil || !node.IsNote() {
@@ -190,12 +199,42 @@ func (m *Model) bumpSelectedPriority(moreCritical bool) tea.Cmd {
 		m.statusMessage = fmt.Sprintf("Failed to set priority: %s", err)
 		return nil
 	}
+
+	// Update the backing source item so the local rebuild reflects the new value.
+	// BuildDisplayTree reconstructs every display node fresh from m.allItems (via
+	// ItemToNote -> noteToItem), so the display node's Item is a DIFFERENT pointer
+	// from the allItems entry — mutating the allItems entry is what actually
+	// survives the rebuild. We also touch the current node's Item for correctness
+	// in case anything reads it before the rebuild completes.
+	path := note.Path
+	for _, item := range m.allItems {
+		if item.Path == path {
+			if item.Metadata == nil {
+				item.Metadata = make(map[string]interface{})
+			}
+			item.Metadata["Priority"] = newPriority
+		}
+	}
+	if node.Item != nil {
+		if node.Item.Metadata == nil {
+			node.Item.Metadata = make(map[string]interface{})
+		}
+		node.Item.Metadata["Priority"] = newPriority
+	}
+
+	// Rebuild locally (preserves the active filter via updateViewsState) and pin
+	// the cursor to the bumped note by path. When grouped by priority the note
+	// moves to its new bucket on rebuild; pinning by path keeps the cursor on it
+	// instead of stranding it at a now-unrelated index.
+	m.updateViewsState()
+	m.views.SetCursorToPath(path)
+
 	if newPriority == "" {
 		m.statusMessage = "Cleared priority"
 	} else {
 		m.statusMessage = "Priority set to " + newPriority
 	}
-	return func() tea.Msg { return refreshMsg{} }
+	return nil
 }
 
 // notePromotedToJobMsg is sent after a note has been promoted to a job in a plan.

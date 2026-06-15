@@ -408,6 +408,22 @@ func (m *Model) GetCurrentNode() *DisplayNode {
 	return nil
 }
 
+// SetCursorToPath moves the cursor to the display node whose item has the given
+// path, adjusting the scroll so it stays visible. It is a no-op when no such
+// node exists in the current display tree (e.g. the note was filtered out). Used
+// after an optimistic local rebuild (priority bump) to keep the cursor pinned to
+// the note that may have moved buckets (group-by-priority) rather than to a
+// fixed index that would now point at an unrelated row.
+func (m *Model) SetCursorToPath(path string) {
+	for i, node := range m.displayNodes {
+		if node.Item != nil && node.Item.Path == path {
+			m.cursor = i
+			m.adjustScroll()
+			return
+		}
+	}
+}
+
 // GetTargetedNotePaths returns the paths of all selected notes.
 func (m *Model) GetTargetedNotePaths() []string {
 	if len(m.selected) > 0 {
