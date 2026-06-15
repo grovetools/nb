@@ -41,38 +41,45 @@ func TestPriorityRank(t *testing.T) {
 	}
 }
 
-func TestSortNotesByPriority(t *testing.T) {
+// TestPartitionByPriority verifies the group-by-priority axis buckets notes
+// most-critical-first (p0..p3) with unset priority collected last, and drops
+// empty buckets.
+func TestPartitionByPriority(t *testing.T) {
 	now := time.Now()
 	notes := []*models.Note{
 		{Path: "none.md", Priority: "", CreatedAt: now},
 		{Path: "p2.md", Priority: "p2", CreatedAt: now},
 		{Path: "p0.md", Priority: "p0", CreatedAt: now},
-		{Path: "p1.md", Priority: "p1", CreatedAt: now},
+		// no p1 note: that bucket must be dropped
 	}
 
-	m := &Model{sortByPriority: true}
-	m.sortNotes(notes)
+	buckets := partitionByPriority(notes)
 
-	wantOrder := []string{"p0.md", "p1.md", "p2.md", "none.md"}
-	for i, w := range wantOrder {
-		if notes[i].Path != w {
-			t.Errorf("sortNotes priority order[%d] = %q, want %q", i, notes[i].Path, w)
+	wantIDs := []string{"p0", "p2", "none"}
+	if len(buckets) != len(wantIDs) {
+		t.Fatalf("partitionByPriority returned %d buckets, want %d", len(buckets), len(wantIDs))
+	}
+	for i, want := range wantIDs {
+		if buckets[i].id != want {
+			t.Errorf("bucket[%d].id = %q, want %q", i, buckets[i].id, want)
 		}
 	}
 }
 
-func TestSortNotesByDateWhenPriorityDisabled(t *testing.T) {
+// TestSortNotesByDate confirms sortNotes orders by creation time only (priority
+// no longer affects flat ordering after the redesign).
+func TestSortNotesByDate(t *testing.T) {
 	now := time.Now()
 	notes := []*models.Note{
 		{Path: "older.md", Priority: "p0", CreatedAt: now.Add(-time.Hour)},
 		{Path: "newer.md", Priority: "p3", CreatedAt: now},
 	}
 
-	// sortByPriority disabled, sortAscending false (newest first).
-	m := &Model{sortByPriority: false, sortAscending: false}
+	// sortAscending false (newest first); priority must NOT reorder.
+	m := &Model{sortAscending: false}
 	m.sortNotes(notes)
 
 	if notes[0].Path != "newer.md" {
-		t.Errorf("with priority sort disabled, expected date order (newest first); got %q first", notes[0].Path)
+		t.Errorf("expected date order (newest first); got %q first", notes[0].Path)
 	}
 }
