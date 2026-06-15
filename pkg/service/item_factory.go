@@ -37,6 +37,7 @@ func (s *Service) newItemFromFile(path string, info os.FileInfo) (*tree.Item, er
 			item.Metadata["Tags"] = fm.Tags
 			item.Metadata["ID"] = fm.ID
 			item.Metadata["PlanRef"] = fm.PlanRef
+			item.Metadata["Priority"] = fm.Priority
 			if fm.Remote != nil {
 				item.Metadata["RemoteState"] = fm.Remote.State
 			}

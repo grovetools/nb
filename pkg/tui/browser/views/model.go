@@ -133,6 +133,8 @@ type Model struct {
 	recentNotesMode      bool
 	archiveViewMode      bool
 	showGitModifiedOnly  bool
+	sortByPriority       bool   // when true, sortNotes orders by priority first
+	priorityFilter       string // when non-empty, FilterDisplayTreeByPriority keeps only this level
 	groupBy              string // "none", "date", "status", "tag"
 
 	// Flow plan jobs keyed by job ID (the opaque `.artifacts/<jobID>` dir name),
@@ -354,6 +356,55 @@ func (m *Model) SetViewMode(mode ViewMode) {
 func (m *Model) ToggleSortOrder() {
 	m.sortAscending = !m.sortAscending
 	m.BuildDisplayTree()
+}
+
+// ToggleSortByPriority toggles priority-first ordering. When enabled, sortNotes
+// floats prioritized notes (p0..p3) to the top within each group; unprioritized
+// notes sort last. The caller rebuilds the tree (via updateViewsState).
+func (m *Model) ToggleSortByPriority() bool {
+	m.sortByPriority = !m.sortByPriority
+	return m.sortByPriority
+}
+
+// ToggleCriticalFilter toggles the filter that keeps only p0 (critical) notes.
+// Returns the new active state. The caller rebuilds the tree (via
+// updateViewsState), which re-applies FilterDisplayTreeByPriority.
+func (m *Model) ToggleCriticalFilter() bool {
+	if m.priorityFilter == "p0" {
+		m.priorityFilter = ""
+	} else {
+		m.priorityFilter = "p0"
+	}
+	return m.priorityFilter != ""
+}
+
+// BumpPriority returns the priority one step more critical (true) or less
+// critical (false) than the given priority. The ladder is:
+//
+//	(none) -> p3 -> p2 -> p1 -> p0   (more critical)
+//	p0 -> p1 -> p2 -> p3 -> (none)   (less critical)
+//
+// Bumping past either end is a no-op (returns the input unchanged).
+func BumpPriority(priority string, moreCritical bool) string {
+	// Ladder ordered from least to most critical, with "" as least.
+	ladder := []string{"", "p3", "p2", "p1", "p0"}
+	idx := 0
+	for i, p := range ladder {
+		if p == priority {
+			idx = i
+			break
+		}
+	}
+	if moreCritical {
+		if idx < len(ladder)-1 {
+			idx++
+		}
+	} else {
+		if idx > 0 {
+			idx--
+		}
+	}
+	return ladder[idx]
 }
 
 // SetColumnVisibility updates the column visibility settings.

@@ -35,6 +35,8 @@ func NewListCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 		listAllBranches   bool
 		listTag           string
 		listCounts        bool
+		listPriority      string
+		listCriticalOnly  bool
 	)
 
 	cmd := &cobra.Command{
@@ -56,6 +58,19 @@ Examples:
 			wsCtx, err := s.GetWorkspaceContext(*workspaceOverride)
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
+			}
+
+			// Resolve the effective priority filter. --critical-only is
+			// shorthand for --priority p0; both may not conflict.
+			priorityFilter := listPriority
+			if listCriticalOnly {
+				if priorityFilter != "" && priorityFilter != "p0" {
+					return fmt.Errorf("--critical-only conflicts with --priority %s", priorityFilter)
+				}
+				priorityFilter = "p0"
+			}
+			if !service.IsValidPriority(priorityFilter) {
+				return fmt.Errorf("invalid priority %q (want one of p0,p1,p2,p3 or empty)", priorityFilter)
 			}
 
 			// Handle --all-branches flag
@@ -82,6 +97,8 @@ Examples:
 					}
 					repoNotes = filteredNotes
 				}
+
+				repoNotes = filterNotesByPriority(repoNotes, priorityFilter)
 
 				if len(repoNotes) == 0 {
 					if !listJSON {
@@ -152,6 +169,8 @@ Examples:
 					allNotes = filteredNotes
 				}
 
+				allNotes = filterNotesByPriority(allNotes, priorityFilter)
+
 				if len(allNotes) == 0 {
 					if !listJSON {
 						listUlog.Info("No notes found across all workspaces").
@@ -214,6 +233,8 @@ Examples:
 					allNotes = filteredNotes
 				}
 
+				allNotes = filterNotesByPriority(allNotes, priorityFilter)
+
 				if len(allNotes) == 0 {
 					if !listJSON {
 						listUlog.Info("No notes found").
@@ -269,6 +290,8 @@ Examples:
 				notes = filteredNotes
 			}
 
+			notes = filterNotesByPriority(notes, priorityFilter)
+
 			if len(notes) == 0 {
 				if listJSON {
 					listUlog.Info("No notes found").
@@ -305,6 +328,8 @@ Examples:
 	cmd.Flags().BoolVar(&listAllBranches, "all-branches", false, "List notes from all branches in the current repository")
 	cmd.Flags().StringVar(&listTag, "tag", "", "Filter notes by a specific tag")
 	cmd.Flags().BoolVar(&listCounts, "counts", false, "Show aggregate counts per workspace (fast, uses daemon cache with --workspaces)")
+	cmd.Flags().StringVar(&listPriority, "priority", "", "Filter notes by priority level: p0 (most critical) .. p3")
+	cmd.Flags().BoolVar(&listCriticalOnly, "critical-only", false, "Show only p0 (critical) notes; shorthand for --priority p0")
 
 	return cmd
 }
@@ -381,6 +406,34 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// filterNotesByPriority returns only the notes whose Priority matches the
+// requested level. An empty filter is a no-op (returns the input unchanged).
+//
+// The daemon note index does not carry the priority field, so notes sourced
+// from the daemon have an empty Priority. When a filter is active we re-parse
+// each note from disk to populate Priority before comparing. This keeps
+// daemon-backed listings correct at the cost of a stat+parse per note, which
+// only happens when the user explicitly filters.
+func filterNotesByPriority(notes []*models.Note, priority string) []*models.Note {
+	if priority == "" {
+		return notes
+	}
+	filtered := make([]*models.Note, 0, len(notes))
+	for _, note := range notes {
+		p := note.Priority
+		if p == "" {
+			// Daemon-index notes lack priority; re-parse from disk.
+			if parsed, err := service.ParseNote(note.Path); err == nil {
+				p = parsed.Priority
+			}
+		}
+		if p == priority {
+			filtered = append(filtered, note)
+		}
+	}
+	return filtered
 }
 
 func outputJSON(notes []*models.Note) error {

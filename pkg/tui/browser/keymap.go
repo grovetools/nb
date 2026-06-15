@@ -25,6 +25,8 @@ type KeyMap struct {
 	FilterByTag      key.Binding
 	ToggleGitChanges key.Binding
 	Sort             key.Binding
+	SortByPriority   key.Binding
+	CriticalOnly     key.Binding
 	CycleGrouping    key.Binding
 	// Toggle operations (TUI-specific)
 	ToggleArchives  key.Binding
@@ -39,6 +41,8 @@ type KeyMap struct {
 	CreatePlan       key.Binding
 	PromoteToJob     key.Binding
 	Rename           key.Binding
+	PriorityUp       key.Binding
+	PriorityDown     key.Binding
 	// Clipboard operations (TUI-specific)
 	Cut     key.Binding
 	Copy    key.Binding
@@ -75,7 +79,8 @@ func (k KeyMap) Sections() []keymap.Section {
 			k.JumpToWorkspace, k.JumpToArtifacts,
 		),
 		keymap.NewSection(keymap.SectionFilter,
-			k.FilterByTag, k.ToggleGitChanges, k.Sort, k.CycleGrouping,
+			k.FilterByTag, k.ToggleGitChanges, k.Sort, k.SortByPriority,
+			k.CriticalOnly, k.CycleGrouping,
 		),
 		keymap.NewSection(keymap.SectionToggle,
 			k.ToggleArchives, k.ToggleArtifacts, k.ToggleGlobal,
@@ -85,6 +90,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.NewSectionWithIcon("Notes", theme.IconNote,
 			k.CreateNote, k.CreateNoteInbox, k.CreateNoteGlobal,
 			k.CreatePlan, k.PromoteToJob, k.Rename,
+			k.PriorityUp, k.PriorityDown,
 		),
 		keymap.NewSectionWithIcon("Clipboard", theme.IconArchive,
 			k.Cut, k.Copy, k.Paste, k.Archive, k.CopyPath,
@@ -151,6 +157,14 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("s"),
 			key.WithHelp("s", "toggle sort order"),
 		),
+		SortByPriority: key.NewBinding(
+			key.WithKeys("$"),
+			key.WithHelp("$", "toggle sort by priority"),
+		),
+		CriticalOnly: key.NewBinding(
+			key.WithKeys("!"),
+			key.WithHelp("!", "filter critical (p0) only"),
+		),
 		// NOTE: The briefing requested default key "g", but nb's browser already
 		// binds the "gg" go-to-top sequence; a lone "g" is always consumed as the
 		// prefix of that sequence and can never trigger a bare-key action. Per the
@@ -205,6 +219,14 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		Rename: key.NewBinding(
 			key.WithKeys("R"),
 			key.WithHelp("R", "rename note"),
+		),
+		PriorityUp: key.NewBinding(
+			key.WithKeys("{"),
+			key.WithHelp("{", "bump priority more critical"),
+		),
+		PriorityDown: key.NewBinding(
+			key.WithKeys("}"),
+			key.WithHelp("}", "bump priority less critical"),
 		),
 		// Clipboard operations
 		Cut: key.NewBinding(

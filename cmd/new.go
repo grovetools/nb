@@ -24,6 +24,7 @@ func NewNewCmd(svc **service.Service, workspaceOverride *string) *cobra.Command 
 		noEdit     bool
 		globalNote bool
 		fromStdin  bool
+		priority   string
 	)
 
 	cmd := &cobra.Command{
@@ -131,10 +132,22 @@ Examples:
 				return nil
 			}
 
+			// Validate priority before creating so we fail fast.
+			if !service.IsValidPriority(priority) {
+				return fmt.Errorf("invalid priority %q (want one of p0,p1,p2,p3 or empty)", priority)
+			}
+
 			// Create the note
 			note, err := s.CreateNote(ctx, models.NoteType(actualNoteType), title, opts...)
 			if err != nil {
 				return err
+			}
+
+			// Apply priority if requested.
+			if priority != "" {
+				if err := s.UpdateNotePriority(note.Path, priority); err != nil {
+					return fmt.Errorf("set priority: %w", err)
+				}
 			}
 
 			// If we read stdin content, append it to the note
@@ -184,6 +197,7 @@ Examples:
 	cmd.Flags().BoolVar(&noEdit, "no-edit", false, "Don't open editor after creating")
 	cmd.Flags().BoolVarP(&globalNote, "global", "g", false, "Create note in global workspace")
 	cmd.Flags().BoolVar(&fromStdin, "stdin", false, "Read content from stdin (auto-detected when piped)")
+	cmd.Flags().StringVar(&priority, "priority", "", "Priority level: p0 (most critical) .. p3, empty = none")
 
 	return cmd
 }
