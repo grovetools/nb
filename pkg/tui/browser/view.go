@@ -316,14 +316,29 @@ func (m Model) View() string {
 		status = fmt.Sprintf("%d notes shown%s", noteCount, selectionInfo)
 	}
 
-	// Search bar (if active)
+	// Search bar (if active). Mirror nav's manual cursor rendering
+	// (nav/pkg/tui/sessionizer/view.go) instead of bubbletea's
+	// m.filterInput.View(): show the search icon, the value, and a thin "▏"
+	// caret when focused / a fat "█" block when blurred-but-active. The fat
+	// block makes an active-but-unfocused filter always visible.
+	//
+	// The single input carries the mode via its leading prefix ("?" grep,
+	// "#tag"); the raw value (including the prefix) is shown verbatim so the
+	// caret position stays truthful, while the label reflects the parsed mode.
 	var searchBar string
 	if m.filterInput.Focused() || m.filterInput.Value() != "" {
-		prefix := "Search: "
+		label := "Search: "
 		if m.isGrepping {
-			prefix = "Grep: "
+			label = "Grep: "
+		} else if m.isFilteringByTag {
+			label = "Tag: "
 		}
-		searchBar = prefix + m.filterInput.View()
+		val := m.filterInput.Value()
+		caret := "█"
+		if m.filterInput.Focused() {
+			caret = "▏"
+		}
+		searchBar = label + theme.IconSearch + " " + val + caret
 	}
 
 	// Combine components vertically

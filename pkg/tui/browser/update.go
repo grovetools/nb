@@ -29,19 +29,63 @@ import (
 	"github.com/grovetools/nb/pkg/tui/browser/views"
 )
 
-// updateViewsState synchronizes the view state with the browser model
+// parseSearchInput interprets the single search input's leading prefix to pick a
+// search mode, mirroring nav's unified text-input model. A leading '?' routes to
+// content grep, a leading '#' routes to tag filtering, and anything else is a
+// plain case-insensitive substring filter. For tag mode the token after '#' is
+// the (exact) tag name and any text after the first space is an additional
+// substring search within that tag. The returned query is the prefix-stripped
+// filter value that the views layer should match against.
+//
+// This is the single place the prefix is parsed — the views-layer matchers
+// (FilterDisplayTree / ApplyGrepFilter / BuildDisplayTree) stay prefix-agnostic
+// and just consume the derived flags + query.
+func parseSearchInput(raw string) (query string, tag string, isGrep, isTag bool) {
+	switch {
+	case strings.HasPrefix(raw, "?"):
+		return strings.TrimPrefix(raw, "?"), "", true, false
+	case strings.HasPrefix(raw, "#"):
+		rest := strings.TrimPrefix(raw, "#")
+		tagName := rest
+		extra := ""
+		if i := strings.IndexByte(rest, ' '); i >= 0 {
+			tagName = rest[:i]
+			extra = strings.TrimSpace(rest[i+1:])
+		}
+		return extra, tagName, false, true
+	default:
+		return raw, "", false, false
+	}
+}
+
+// updateViewsState synchronizes the view state with the browser model. It parses
+// the search input's prefix (see parseSearchInput) to derive the grep/tag/plain
+// mode rather than relying on standalone mode booleans, then pushes the stripped
+// query + derived flags into the views layer.
 func (m *Model) updateViewsState() {
 	log := logging.NewLogger("tui.browser.update")
 	log.Debug("updateViewsState called")
+
+	query, tag, isGrep, isTag := parseSearchInput(m.filterInput.Value())
+	// Keep the model's mode flags in sync with the parsed input so other call
+	// sites (status bar, view header, second-Esc clear) observe a single source
+	// of truth.
+	m.isGrepping = isGrep
+	m.isFilteringByTag = isTag
+	if isTag {
+		m.selectedTag = tag
+	} else {
+		m.selectedTag = ""
+	}
 
 	m.views.SetParentState(
 		m.service,
 		m.allItems,
 		m.workspaces,
 		m.focusedWorkspace,
-		m.filterInput.Value(),
-		m.isGrepping,
-		m.isFilteringByTag,
+		query,
+		isGrep,
+		isTag,
 		m.selectedTag,
 		m.ecosystemPickerMode,
 		m.hideGlobal,
@@ -56,6 +100,15 @@ func (m *Model) updateViewsState() {
 	)
 	m.views.BuildDisplayTree()
 
+	// Grep matches file content, not the tree, so route to the grep filter and
+	// skip the substring passes below.
+	if isGrep {
+		if query != "" {
+			m.applyGrepFilter()
+		}
+		return
+	}
+
 	// Apply git status filter if active
 	if m.showGitModifiedOnly {
 		m.views.FilterDisplayTreeByGitStatus()
@@ -65,13 +118,10 @@ func (m *Model) updateViewsState() {
 	// the views model and is a no-op when no priority filter is set.
 	m.views.FilterDisplayTreeByPriority()
 
-	// Apply text filter if present (not grep mode and not tag filter mode)
-	if m.filterInput.Value() != "" && !m.isGrepping && !m.isFilteringByTag {
-		m.views.FilterDisplayTree()
-	}
-
-	// Apply text filter on top of tag filter if both are active
-	if m.filterInput.Value() != "" && m.isFilteringByTag {
+	// Apply substring filter if present. In tag mode `query` is the additional
+	// within-tag search (empty unless the user typed "#tag extra"); the tag
+	// itself is already applied during BuildDisplayTree.
+	if query != "" {
 		m.views.FilterDisplayTree()
 	}
 }
@@ -628,30 +678,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			// Note: We check msg.String() directly instead of using key bindings
 			// because m.keys.Confirm includes "y" which should be typed in the input
 			if msg.String() == "esc" { //nolint:goconst
-				m.filterInput.SetValue("")
+				// Vim-style (mirrors nav/pkg/tui/sessionizer/update.go KeyEsc
+				// handler): Esc blurs the input but PRESERVES the filter value so
+				// the user can navigate the filtered results. A second Esc (while
+				// blurred) clears it — handled in the m.keys.Back case below.
 				m.filterInput.Blur()
-				// If we're in tag filter mode, only clear the search, not the tag filter
-				if m.isFilteringByTag {
-					m.updateViewsState()
-					return m, nil
-				}
-				m.isGrepping = false       // Exit grep mode
-				m.isFilteringByTag = false // Exit tag filter mode
-				m.selectedTag = ""
-				m.updateViewsState()
 				return m, nil
 			}
 			if msg.String() == "enter" { //nolint:goconst
 				m.filterInput.Blur()
 				return m, nil
 			}
-			// Pass all other keys to the input
+			// Pass all other keys to the input, then re-sync. updateViewsState
+			// parses the input prefix and routes to grep/tag/plain itself, so we
+			// no longer special-case grep here.
 			m.filterInput, cmd = m.filterInput.Update(msg)
-			if m.isGrepping {
-				m.applyGrepFilter()
-			} else {
-				m.updateViewsState()
-			}
+			m.updateViewsState()
 			return m, cmd
 		}
 
@@ -680,12 +722,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				m.tagPickerMode = false
 				return m, nil
 			case "enter":
-				// Apply the selected tag filter
+				// Apply the selected tag filter by inserting the "#tag " prefix
+				// into the single search input (reconciled model). updateViewsState
+				// parses the prefix; the input stays blurred so the user can
+				// navigate results immediately, and pressing the search/re-enter
+				// key lets them append a within-tag query.
 				if selectedItem, ok := m.tagPicker.SelectedItem().(tagItem); ok {
 					m.tagPickerMode = false
-					m.isFilteringByTag = true
-					m.selectedTag = selectedItem.tag
-					m.filterInput.SetValue("") // Clear filter input for additional search
+					m.filterInput.SetValue("#" + selectedItem.tag + " ")
+					m.filterInput.CursorEnd()
 					// Expand everything when tag filter is active
 					m.views.SetCollapseState(make(map[string]bool))
 					m.updateViewsState()
@@ -912,19 +957,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				m.statusMessage = "No artifacts for this note"
 			}
 		case key.Matches(msg, m.keys.Search):
-			m.isGrepping = false
-			// Don't clear tag filter when searching - allow search on top of tag filter
-			if !m.isFilteringByTag {
-				m.selectedTag = ""
-			}
-			m.filterInput.SetValue("")
-			if m.isFilteringByTag {
+			// Plain substring search. If a tag filter is active, preserve it by
+			// keeping the "#tag " prefix and letting the user append a within-tag
+			// query; otherwise start from an empty input.
+			if m.isFilteringByTag && m.selectedTag != "" {
+				m.filterInput.SetValue("#" + m.selectedTag + " ")
+				m.filterInput.CursorEnd()
 				m.filterInput.Placeholder = fmt.Sprintf("Search in tag '%s'...", m.selectedTag)
 			} else {
-				m.filterInput.Placeholder = "Search notes..."
+				m.filterInput.SetValue("")
+				m.filterInput.Placeholder = "Search notes... (prefix ? to grep, # to tag)"
 			}
 			m.filterInput.Focus()
 			return m, textinput.Blink
+		case key.Matches(msg, m.keys.ReenterSearch):
+			// Vim-style: re-enter (focus) an existing filter without clearing it.
+			// Mirrors nav's 'i' re-enter case (nav/pkg/tui/sessionizer/update.go).
+			// No-op when there is no active filter.
+			if m.filterInput.Value() != "" {
+				m.filterInput.Focus()
+				return m, textinput.Blink
+			}
 		case key.Matches(msg, m.keys.Refresh):
 			return m, func() tea.Msg { return refreshMsg{} }
 		case key.Matches(msg, m.keys.ToggleGitChanges):
@@ -952,15 +1005,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			)
 			return m, nil
 		case key.Matches(msg, m.keys.FilterByTag):
-			m.isGrepping = false
-			// Always show the tag picker - allows switching between tags
+			// Always show the tag picker - allows switching between tags. On
+			// selection it inserts a "#tag " prefix into the single search input.
 			m.tagPickerMode = true
 			m.populateTagPicker()
 			return m, nil
 		case key.Matches(msg, m.keys.Grep):
-			m.isGrepping = true
-			m.isFilteringByTag = false
-			m.filterInput.SetValue("")
+			// Reconciled into the single search input: grep is the "?" prefix.
+			// Pre-fill it and focus; updateViewsState parses the prefix and runs
+			// the content grep.
+			m.filterInput.SetValue("?")
+			m.filterInput.CursorEnd()
 			m.filterInput.Placeholder = "Grep content..."
 			m.filterInput.Focus()
 			return m, textinput.Blink
@@ -1283,13 +1338,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				m.updateViewsState()
 				return m, nil
 			}
-			// If in tag filter mode, clear it
-			if m.isFilteringByTag {
-				m.isFilteringByTag = false
-				m.selectedTag = ""
+			// Second Esc (filter blurred but still active): clear the preserved
+			// filter. The first Esc only blurs (preserves) — see the
+			// m.filterInput.Focused() Esc handler above. Mirrors nav's teardown.
+			// The single input now carries every mode (plain text, "?" grep,
+			// "#tag"), so clearing the value via updateViewsState resets all the
+			// derived mode flags too.
+			if m.filterInput.Value() != "" {
+				wasTag := m.isFilteringByTag
 				m.filterInput.SetValue("")
 				m.updateViewsState()
-				m.statusMessage = "Tag filter cleared"
+				if wasTag {
+					m.statusMessage = "Tag filter cleared"
+				} else {
+					m.statusMessage = "Search cleared"
+				}
 				return m, nil
 			}
 			// If in cut mode, escape cancels the cut operation

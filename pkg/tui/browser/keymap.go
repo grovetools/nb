@@ -23,6 +23,7 @@ type KeyMap struct {
 	JumpToArtifacts key.Binding
 	// Filter operations (TUI-specific)
 	FilterByTag      key.Binding
+	ReenterSearch    key.Binding
 	ToggleGitChanges key.Binding
 	Sort             key.Binding
 	SortByPriority   key.Binding
@@ -79,7 +80,7 @@ func (k KeyMap) Sections() []keymap.Section {
 			k.JumpToWorkspace, k.JumpToArtifacts,
 		),
 		keymap.NewSection(keymap.SectionFilter,
-			k.FilterByTag, k.ToggleGitChanges, k.Sort, k.SortByPriority,
+			k.FilterByTag, k.ReenterSearch, k.ToggleGitChanges, k.Sort, k.SortByPriority,
 			k.CriticalOnly, k.CycleGrouping,
 		),
 		keymap.NewSection(keymap.SectionToggle,
@@ -148,6 +149,14 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		FilterByTag: key.NewBinding(
 			key.WithKeys("&"),
 			key.WithHelp("&", "filter by tag"),
+		),
+		// Re-enter (focus) an existing filter, vim-style. nav binds this to "i"
+		// (nav/pkg/tui/sessionizer/update.go), but "i" is already taken in nb's
+		// browser (CreateNoteInbox). We use "r" (resume search) instead; it is
+		// otherwise unused. Users can remap via config.
+		ReenterSearch: key.NewBinding(
+			key.WithKeys("r"),
+			key.WithHelp("r", "re-enter active search"),
 		),
 		ToggleGitChanges: key.NewBinding(
 			key.WithKeys("<", ">"),
