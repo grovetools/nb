@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/key"
@@ -185,6 +186,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 	case confirm.ConfirmedMsg:
 		// User confirmed the action in the dialog
 		// We need to know which action was confirmed. A simple way is to check the prompt.
+		if strings.Contains(strings.ToLower(m.confirmDialog.Prompt), "auto-archive") {
+			m.service.Logger.WithField("count", len(m.autoArchivePaths)).Info("Auto-archiving stale notes")
+			m.statusMessage = "Auto-archiving..."
+			return m, m.autoArchiveStaleNotesCmd()
+		}
 		if strings.Contains(strings.ToLower(m.confirmDialog.Prompt), "archive") {
 			_, selectedNotes, selectedPlans := m.views.GetCounts()
 			m.service.Logger.WithFields(logrus.Fields{
@@ -496,6 +502,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		}
 		m.allItems = newAllItems
 
+		// Clear any staged auto-archive paths now that they've been processed.
+		m.autoArchivePaths = nil
+
 		// Clear selections
 		m.views.ClearSelections()
 
@@ -720,7 +729,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			if !isFoldPrefix && !keymap.IsPrefixOfAny(buffer, m.keys.Top) && !key.Matches(msg, m.keys.Delete) {
 				m.sequence.Clear()
 			}
+			// Detect fold-changing operations (single-key Left/Right or a completed
+			// z* sequence) so we can persist the updated collapse state afterward.
+			isFoldChange := key.Matches(msg, m.keys.Left) || key.Matches(msg, m.keys.Right) || isFoldMatch
 			m.views, cmd = m.views.Update(msg)
+			if isFoldChange {
+				// Persist collapse state so folds survive a restart.
+				if err := m.saveState(); err != nil {
+					m.statusMessage = "Failed to save fold state: " + err.Error()
+				}
+			}
 			// After any view update that could change the cursor, update the preview.
 			return m, tea.Batch(cmd, m.updatePreviewContent())
 		}
@@ -850,6 +868,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		case key.Matches(msg, m.keys.Sync):
 			m.statusMessage = "Syncing with remotes..."
 			return m, tea.Batch(m.syncWorkspaceCmd(), m.spinner.Tick)
+		case key.Matches(msg, m.keys.AutoArchive):
+			// MANUAL auto-archive: stage notes older than 30 days (by ModTime)
+			// and ask for confirmation. Never runs on startup.
+			m.autoArchivePaths = m.collectStaleNotePaths(autoArchiveMaxAge)
+			if len(m.autoArchivePaths) == 0 {
+				m.statusMessage = "No notes older than 30 days to archive"
+				return m, nil
+			}
+			m.confirmDialog.Activate(
+				fmt.Sprintf("Auto-archive %d notes older than 30 days?", len(m.autoArchivePaths)),
+			)
+			return m, nil
 		case key.Matches(msg, m.keys.FilterByTag):
 			m.isGrepping = false
 			// Always show the tag picker - allows switching between tags
@@ -870,6 +900,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			return m, nil
 		case key.Matches(msg, m.keys.Sort):
 			m.views.ToggleSortOrder()
+		case key.Matches(msg, m.keys.CycleGrouping):
+			m.groupBy = nextGroupBy(m.groupBy)
+			m.views.SetGroupBy(m.groupBy)
+			if m.groupBy == "none" {
+				m.statusMessage = "Group by: none"
+			} else {
+				m.statusMessage = "Group by: " + m.groupBy
+			}
+			m.updateViewsState()
+			if err := m.saveState(); err != nil {
+				m.statusMessage = "Failed to save group-by: " + err.Error()
+			}
 		case key.Matches(msg, m.keys.ToggleArchives):
 			m.showArchives = !m.showArchives
 			m.statusMessage = fmt.Sprintf("Archives: %v (Found %d notes)", m.showArchives, len(m.allItems))
@@ -1566,6 +1608,86 @@ func (m *Model) archiveSelectedNotesCmd() tea.Cmd {
 		return notesArchivedMsg{
 			archivedPaths: archivedPaths,
 			archivedPlans: archivedPlans,
+			err:           archiveErr,
+		}
+	}
+}
+
+// autoArchiveMaxAge is the staleness threshold for the manual auto-archive action.
+const autoArchiveMaxAge = 30 * 24 * time.Hour
+
+// collectStaleNotePaths returns the paths of note items whose ModTime is older
+// than maxAge. It only considers actual notes (skips groups, workspaces, plan
+// directories) so directories are never archived as a side effect.
+func (m *Model) collectStaleNotePaths(maxAge time.Duration) []string {
+	cutoff := time.Now().Add(-maxAge)
+	var paths []string
+	for _, item := range m.allItems {
+		if item == nil || item.IsDir {
+			continue
+		}
+		if item.Type != tree.TypeNote {
+			continue
+		}
+		if item.ModTime.Before(cutoff) {
+			paths = append(paths, item.Path)
+		}
+	}
+	return paths
+}
+
+// autoArchiveStaleNotesCmd archives the paths staged by the manual auto-archive
+// action, grouped by workspace, reusing Service.ArchiveNotes.
+func (m *Model) autoArchiveStaleNotesCmd() tea.Cmd {
+	staged := m.autoArchivePaths
+	return func() tea.Msg {
+		if len(staged) == 0 {
+			return notesArchivedMsg{err: fmt.Errorf("no stale notes to archive")}
+		}
+
+		// Group staged paths by workspace name (via allItems metadata).
+		pathToWorkspace := make(map[string]string)
+		for _, item := range m.allItems {
+			if wsName, ok := item.Metadata["Workspace"].(string); ok {
+				pathToWorkspace[item.Path] = wsName
+			}
+		}
+
+		pathsByWorkspace := make(map[string][]string)
+		for _, p := range staged {
+			ws := pathToWorkspace[p]
+			pathsByWorkspace[ws] = append(pathsByWorkspace[ws], p)
+		}
+
+		var archivedPaths []string
+		var archiveErr error
+		for workspaceName, paths := range pathsByWorkspace {
+			var wsCtx *service.WorkspaceContext
+			var err error
+			if workspaceName == "global" || workspaceName == "" {
+				wsCtx, err = m.service.GetWorkspaceContext("global")
+			} else {
+				wsNode, found := m.findWorkspaceNodeByName(workspaceName)
+				if !found {
+					archiveErr = fmt.Errorf("workspace not found: %s", workspaceName)
+					break
+				}
+				wsCtx, err = m.service.GetWorkspaceContext(wsNode.Path)
+			}
+			if err != nil {
+				archiveErr = fmt.Errorf("failed to get workspace context for %s: %w", workspaceName, err)
+				break
+			}
+			if err := m.service.ArchiveNotes(wsCtx, paths); err != nil {
+				archiveErr = fmt.Errorf("failed to archive notes in workspace %s: %w", workspaceName, err)
+				break
+			}
+			archivedPaths = append(archivedPaths, paths...)
+		}
+
+		return notesArchivedMsg{
+			archivedPaths: archivedPaths,
+			archivedPlans: 0,
 			err:           archiveErr,
 		}
 	}

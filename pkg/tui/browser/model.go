@@ -118,8 +118,27 @@ type Model struct {
 	isCommitting bool
 	commitInput  textinput.Model
 
+	// Grouping axis applied inside directory groups: "none", "date", "status", "tag".
+	groupBy string
+
+	// Paths staged by the MANUAL auto-archive action, pending confirmation.
+	autoArchivePaths []string
+
 	// Hosting context
 	hosted bool // True when running inside groveterm; use SplitEditorRequestMsg
+}
+
+// groupByCycle defines the rotation order for the CycleGrouping keybind.
+var groupByCycle = []string{"none", "date", "status", "tag"}
+
+// nextGroupBy returns the next axis in the cycle after current.
+func nextGroupBy(current string) string {
+	for i, axis := range groupByCycle {
+		if axis == current {
+			return groupByCycle[(i+1)%len(groupByCycle)]
+		}
+	}
+	return groupByCycle[0]
 }
 
 // refreshMsg signals that a full data refresh is required.
@@ -271,6 +290,18 @@ func New(cfg Config) Model {
 	}
 	viewsModel := views.New(viewsKeys, columnVisibility)
 
+	// Seed persisted collapse state and grouping axis from saved state.
+	// Use the existing SetCollapseState setter rather than overwriting the
+	// freshly-make()'d map so folds survive restarts.
+	if state.CollapsedNodes != nil {
+		viewsModel.SetCollapseState(state.CollapsedNodes)
+	}
+	groupBy := state.GroupBy
+	if groupBy == "" {
+		groupBy = "none"
+	}
+	viewsModel.SetGroupBy(groupBy)
+
 	// Initialize preview viewport
 	preview := viewport.New(80, 20) // Initial size, will be updated on WindowSizeMsg
 	preview.Style = lipgloss.NewStyle().
@@ -308,6 +339,7 @@ func New(cfg Config) Model {
 		gitFileStatus:    make(map[string]string),
 		scannedGitRepos:  make(map[string]bool),
 		commitInput:      commitInput,
+		groupBy:          groupBy,
 		hosted:           cfg.Hosted,
 	}
 }
@@ -693,6 +725,12 @@ func (m *Model) getColumnListItems() []list.Item {
 // tuiState holds persistent TUI settings
 type tuiState struct {
 	ColumnVisibility map[string]bool `json:"column_visibility"`
+	// CollapsedNodes persists per-node fold state (keyed by DisplayNode.NodeID())
+	// so that folds survive a restart.
+	CollapsedNodes map[string]bool `json:"collapsed_nodes,omitempty"`
+	// GroupBy persists the active "Group By" axis applied inside directory
+	// groups: one of "none", "date", "status", "tag".
+	GroupBy string `json:"group_by,omitempty"`
 }
 
 // getStateFilePath returns the path to the TUI state file
@@ -746,6 +784,8 @@ func (m *Model) saveState() error {
 
 	state := tuiState{
 		ColumnVisibility: m.columnVisibility,
+		CollapsedNodes:   m.views.GetCollapseState(),
+		GroupBy:          m.groupBy,
 	}
 
 	data, err := json.MarshalIndent(state, "", "  ")

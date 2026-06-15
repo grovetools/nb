@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/pathutil"
 
 	"github.com/grovetools/nb/pkg/models"
@@ -1652,6 +1653,221 @@ func (m *Model) addNoteNodes(
 	}
 }
 
+// syntheticBucket is one bucket produced by a "Group By" axis. The id is used
+// to build a stable synthetic path so the bucket's fold state survives restarts.
+type syntheticBucket struct {
+	id    string // stable, axis-local identifier (e.g. "today", "tag-frontend")
+	label string // display label (e.g. "Today", "#frontend")
+	icon  string // icon string for Item.Metadata["Icon"]
+	notes []*models.Note
+}
+
+// renderSyntheticGroups partitions a group's notes by the active m.groupBy axis
+// into synthetic collapsible bucket nodes inserted beneath the directory group.
+// Each bucket gets a stable synthetic path (".synthetic-<axis>-<id>") so its
+// NodeID() collapse key is unique and persistent. Notes inside an expanded
+// bucket are rendered via addNoteNodes (which forces no further sub-grouping).
+func (m *Model) renderSyntheticGroups(
+	nodes *[]*DisplayNode,
+	notesInGroup []*models.Note,
+	ws *workspace.WorkspaceNode,
+	groupPath string,
+	groupPrefix string,
+	depth int,
+	workspacePathMap map[string]string,
+	hasFollowingSiblings bool,
+	hasSearchFilter bool,
+) {
+	buckets := m.partitionNotes(notesInGroup)
+	if len(buckets) == 0 {
+		// Nothing to bucket: fall back to a flat note list.
+		m.addNoteNodes(nodes, notesInGroup, ws, groupPrefix, depth, workspacePathMap, hasFollowingSiblings)
+		return
+	}
+
+	// The notes live one indentation level beneath the directory group; convert
+	// the group's branch glyphs into vertical continuations for the bucket level.
+	bucketParentPrefix := strings.ReplaceAll(groupPrefix, "├ ", "│ ")
+	bucketParentPrefix = strings.ReplaceAll(bucketParentPrefix, "└ ", "  ")
+
+	numBuckets := len(buckets)
+	for i, bucket := range buckets {
+		isLastBucket := i == numBuckets-1 && !hasFollowingSiblings
+
+		var bucketPrefix strings.Builder
+		bucketPrefix.WriteString(bucketParentPrefix)
+		if isLastBucket {
+			bucketPrefix.WriteString("└ ")
+		} else {
+			bucketPrefix.WriteString("├ ")
+		}
+
+		// Stable synthetic path -> stable NodeID() collapse key.
+		synthPath := filepath.Join(groupPath, ".synthetic-"+m.groupBy+"-"+bucket.id)
+		bucketItem := &tree.Item{
+			Path:  synthPath,
+			Name:  bucket.label,
+			IsDir: true,
+			Type:  tree.TypeGroup,
+			Metadata: map[string]interface{}{
+				"Workspace": ws.Name,
+				"Icon":      bucket.icon,
+			},
+		}
+		bucketNode := &DisplayNode{
+			Item:       bucketItem,
+			Prefix:     bucketPrefix.String(),
+			Depth:      depth + 1,
+			ChildCount: len(bucket.notes),
+		}
+		*nodes = append(*nodes, bucketNode)
+
+		// Render the bucket's notes when expanded.
+		if !m.collapsedNodes[bucketNode.NodeID()] || hasSearchFilter {
+			m.addNoteNodes(nodes, bucket.notes, ws, bucketPrefix.String(), depth+1, workspacePathMap, false)
+		}
+	}
+}
+
+// partitionNotes splits notes into ordered synthetic buckets according to the
+// active m.groupBy axis. Empty buckets are omitted to avoid clutter.
+func (m *Model) partitionNotes(notes []*models.Note) []syntheticBucket {
+	switch m.groupBy {
+	case "date":
+		return partitionByDate(notes)
+	case "status":
+		return partitionByStatus(notes)
+	case "tag":
+		return partitionByTag(notes)
+	default:
+		return nil
+	}
+}
+
+// partitionByDate buckets notes by CreatedAt into Today / This Week / This Month
+// / Older relative to now. Order is fixed; empty buckets are dropped.
+func partitionByDate(notes []*models.Note) []syntheticBucket {
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	weekStart := today.AddDate(0, 0, -int(today.Weekday()))
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+
+	var todayN, weekN, monthN, olderN []*models.Note
+	for _, note := range notes {
+		c := note.CreatedAt
+		switch {
+		case !c.Before(today):
+			todayN = append(todayN, note)
+		case !c.Before(weekStart):
+			weekN = append(weekN, note)
+		case !c.Before(monthStart):
+			monthN = append(monthN, note)
+		default:
+			olderN = append(olderN, note)
+		}
+	}
+
+	var buckets []syntheticBucket
+	appendBucket := func(id, label string, ns []*models.Note) {
+		if len(ns) > 0 {
+			buckets = append(buckets, syntheticBucket{id: id, label: label, icon: theme.IconCalendar, notes: ns})
+		}
+	}
+	appendBucket("today", "Today", todayN)
+	appendBucket("week", "This Week", weekN)
+	appendBucket("month", "This Month", monthN)
+	appendBucket("older", "Older", olderN)
+	return buckets
+}
+
+// partitionByStatus buckets notes by note.Remote.State when present. Local notes
+// with no synced remote state go in a single neutral "No Status" bucket; HasTodos
+// is intentionally NOT used as a status proxy.
+func partitionByStatus(notes []*models.Note) []syntheticBucket {
+	stateOrder := []string{}
+	byState := map[string][]*models.Note{}
+	var noStatus []*models.Note
+
+	for _, note := range notes {
+		if note.Remote != nil && note.Remote.State != "" {
+			state := note.Remote.State
+			if _, seen := byState[state]; !seen {
+				stateOrder = append(stateOrder, state)
+			}
+			byState[state] = append(byState[state], note)
+		} else {
+			noStatus = append(noStatus, note)
+		}
+	}
+	sort.Strings(stateOrder)
+
+	var buckets []syntheticBucket
+	for _, state := range stateOrder {
+		// Use the raw state as both id and a title-cased label.
+		label := strings.ToUpper(state[:1]) + state[1:]
+		buckets = append(buckets, syntheticBucket{
+			id:    "state-" + state,
+			label: label,
+			icon:  theme.IconStatusCompleted,
+			notes: byState[state],
+		})
+	}
+	if len(noStatus) > 0 {
+		buckets = append(buckets, syntheticBucket{
+			id:    "none",
+			label: "No Status",
+			icon:  theme.IconClock,
+			notes: noStatus,
+		})
+	}
+	return buckets
+}
+
+// partitionByTag fans each note out across EVERY tag it carries (so a multi-tag
+// note appears under each tag bucket); notes with no tags go to "untagged".
+// Per-tag bucket counts therefore sum to more than the distinct note count.
+func partitionByTag(notes []*models.Note) []syntheticBucket {
+	tagOrder := []string{}
+	byTag := map[string][]*models.Note{}
+	var untagged []*models.Note
+
+	for _, note := range notes {
+		if len(note.Tags) == 0 {
+			untagged = append(untagged, note)
+			continue
+		}
+		for _, tag := range note.Tags {
+			if tag == "" {
+				continue
+			}
+			if _, seen := byTag[tag]; !seen {
+				tagOrder = append(tagOrder, tag)
+			}
+			byTag[tag] = append(byTag[tag], note)
+		}
+	}
+	sort.Strings(tagOrder)
+
+	var buckets []syntheticBucket
+	for _, tag := range tagOrder {
+		buckets = append(buckets, syntheticBucket{
+			id:    "tag-" + tag,
+			label: "#" + tag,
+			icon:  theme.IconFilter,
+			notes: byTag[tag],
+		})
+	}
+	if len(untagged) > 0 {
+		buckets = append(buckets, syntheticBucket{
+			id:    "untagged",
+			label: "untagged",
+			icon:  theme.IconFilter,
+			notes: untagged,
+		})
+	}
+	return buckets
+}
+
 // renderTree recursively traverses a group tree and generates DisplayNodes.
 // It is a generic function configurable for rendering different types of hierarchical groups.
 func (m *Model) renderTree(
@@ -1759,7 +1975,11 @@ func (m *Model) renderTree(
 				hasFollowingNoteSiblings := hasArchives || hasClosed || hasArtifacts
 
 				if hasNotes {
-					m.addNoteNodes(nodes, child.notes, ws, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings)
+					if m.groupBy != "" && m.groupBy != "none" {
+						m.renderSyntheticGroups(nodes, child.notes, ws, groupPath, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings, hasSearchFilter)
+					} else {
+						m.addNoteNodes(nodes, child.notes, ws, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings)
+					}
 				}
 
 				fullGroupMetadata := config.groupMetadataPrefix + child.fullName

@@ -251,6 +251,15 @@ func (m Model) View() string {
 		headerParts = append(headerParts, " [Git Modified]")
 	}
 
+	// Add group-by indicator when an axis other than "none" is active.
+	if m.groupBy != "" && m.groupBy != "none" {
+		groupStyled := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(theme.DefaultTheme.Colors.Orange).
+			Render(fmt.Sprintf(" [Group: %s]", m.groupBy))
+		headerParts = append(headerParts, groupStyled)
+	}
+
 	// Add tag indicator inline with special styling
 	if m.isFilteringByTag {
 		tagStyled := lipgloss.NewStyle().

@@ -374,6 +374,10 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 				planStatus := m.GetPlanStatus(wsName, groupName)
 				info.indicator = getPlanStatusIcon(planStatus) + " "
 			}
+		} else if icon, ok := node.Item.Metadata["Icon"].(string); ok && icon != "" {
+			// Synthetic group-by bucket nodes inject their own icon via metadata,
+			// since their paths don't exist in the NoteTypes registry.
+			info.indicator = icon
 		} else {
 			// Regular note groups - add their semantic icons
 			icon := getGroupIcon(groupName, m.service.NoteTypes)
