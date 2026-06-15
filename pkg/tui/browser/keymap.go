@@ -18,7 +18,9 @@ type KeyMap struct {
 	FocusParent     key.Binding
 	FocusSelected   key.Binding
 	FocusRecent     key.Binding
+	FocusArchive    key.Binding
 	JumpToWorkspace key.Binding
+	JumpToArtifacts key.Binding
 	// Filter operations (TUI-specific)
 	FilterByTag      key.Binding
 	ToggleGitChanges key.Binding
@@ -69,7 +71,8 @@ func (k KeyMap) Sections() []keymap.Section {
 		// Common sections use standard constants (icons auto-resolved)
 		keymap.NewSection(keymap.SectionFocus,
 			k.FocusEcosystem, k.ClearFocus, k.FocusParent,
-			k.FocusSelected, k.FocusRecent, k.JumpToWorkspace,
+			k.FocusSelected, k.FocusRecent, k.FocusArchive,
+			k.JumpToWorkspace, k.JumpToArtifacts,
 		),
 		keymap.NewSection(keymap.SectionFilter,
 			k.FilterByTag, k.ToggleGitChanges, k.Sort, k.CycleGrouping,
@@ -123,9 +126,17 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("f"),
 			key.WithHelp("f", "focus recent"),
 		),
+		FocusArchive: key.NewBinding(
+			key.WithKeys(","),
+			key.WithHelp(",", "archive view (.archive/.closed)"),
+		),
 		JumpToWorkspace: key.NewBinding(
 			key.WithKeys("1", "2", "3", "4", "5", "6", "7", "8", "9"),
 			key.WithHelp("1-9", "jump to workspace"),
+		),
+		JumpToArtifacts: key.NewBinding(
+			key.WithKeys(";"),
+			key.WithHelp(";", "jump to job artifacts"),
 		),
 		// Filter operations
 		FilterByTag: key.NewBinding(

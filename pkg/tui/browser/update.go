@@ -50,7 +50,9 @@ func (m *Model) updateViewsState() {
 		m.showOnHold,
 		m.recentNotesMode,
 		m.showGitModifiedOnly,
+		m.archiveViewMode,
 		m.gitFileStatus,
+		m.jobs,
 	)
 	m.views.BuildDisplayTree()
 
@@ -270,6 +272,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			m.loadingCount--
 		}
 		m.allItems = msg.items
+		m.jobs = msg.jobs
 		// Set collapse state on focus change OR on initial load
 		if m.focusChanged || len(m.views.GetCollapseState()) == 0 {
 			m.setCollapseStateForFocus()
@@ -822,6 +825,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		case key.Matches(msg, m.keys.FocusRecent):
 			m.recentNotesMode = !m.recentNotesMode
 			if m.recentNotesMode {
+				// Recent and archive views are mutually exclusive; clear archive
+				// without re-saving (the saved state belongs to the default view).
+				m.archiveViewMode = false
 				// Save current state and switch to recent notes mode
 				m.savedViewMode = m.views.GetViewMode()
 				m.views.SetViewMode(views.TableView)
@@ -840,6 +846,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				m.statusMessage = "Default view restored"
 			}
 			m.updateViewsState()
+		case key.Matches(msg, m.keys.FocusArchive):
+			// Only the default view's state should be saved for restoration. If
+			// recent mode is currently active its TableView/column overrides are
+			// already applied, so we switch directly without re-saving.
+			cameFromRecent := m.recentNotesMode
+			m.recentNotesMode = false
+			m.archiveViewMode = !m.archiveViewMode
+			if m.archiveViewMode {
+				if !cameFromRecent {
+					// Save current (default) state and switch to the archive list
+					m.savedViewMode = m.views.GetViewMode()
+					m.savedModVisibility = m.columnVisibility["MODIFIED"]
+					m.savedWsVisibility = m.columnVisibility["WORKSPACE"]
+				}
+				m.views.SetViewMode(views.TableView)
+				m.columnVisibility["MODIFIED"] = true
+				m.columnVisibility["WORKSPACE"] = true
+				m.views.SetColumnVisibility(m.columnVisibility)
+				m.statusMessage = "Archive view (.archive/.closed)"
+			} else {
+				// Restore previous state
+				m.views.SetViewMode(m.savedViewMode)
+				m.columnVisibility["MODIFIED"] = m.savedModVisibility
+				m.columnVisibility["WORKSPACE"] = m.savedWsVisibility
+				m.views.SetColumnVisibility(m.columnVisibility)
+				m.statusMessage = "Default view restored"
+			}
+			m.updateViewsState()
+		case key.Matches(msg, m.keys.JumpToArtifacts):
+			if m.views.JumpToArtifactsForNote() {
+				m.statusMessage = "Jumped to job artifacts"
+			} else {
+				m.statusMessage = "No artifacts for this note"
+			}
 		case key.Matches(msg, m.keys.Search):
 			m.isGrepping = false
 			// Don't clear tag filter when searching - allow search on top of tag filter

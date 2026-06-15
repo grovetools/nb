@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,6 +13,7 @@ import (
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/pathutil"
+	"github.com/grovetools/flow/pkg/orchestration"
 
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/tree"
@@ -23,6 +25,63 @@ type workspacesLoadedMsg struct {
 
 type itemsLoadedMsg struct {
 	items []*tree.Item
+	// jobs maps a flow job ID (the opaque `.artifacts/<jobID>` dir name) to its
+	// loaded Job, so the view can resolve human titles and correlate artifacts
+	// with their owning job markdown file. Built by loadPlanJobs.
+	jobs map[string]*orchestration.Job
+}
+
+// loadPlanJobs discovers every plan directory referenced by the loaded items
+// (via their `.artifacts` paths) and loads each plan with orchestration.LoadPlan,
+// merging all jobs into a single map keyed by job ID.
+//
+// nb already depends on flow/pkg/orchestration (see nb/pkg/service/promote.go),
+// so there is no new import boundary. LoadPlan walks the dir once and parses the
+// job frontmatter; we only call it per discovered plan dir (not per note), so it
+// stays off the render hot path — it runs inside the items-fetch command.
+func loadPlanJobs(items []*tree.Item) map[string]*orchestration.Job {
+	// Collect unique plan directories. Two sources, so titles/badges resolve
+	// whether or not artifacts are currently visible:
+	//   1. Artifact item paths "<planDir>/.artifacts/<jobID>/<file>" — the
+	//      segment before "/.artifacts/" is the plan directory.
+	//   2. Plan job markdown files, whose Group metadata is "plans/<planName>";
+	//      the file's parent directory is the plan directory.
+	planDirs := make(map[string]struct{})
+	for _, item := range items {
+		if idx := strings.Index(item.Path, "/.artifacts/"); idx >= 0 {
+			planDirs[item.Path[:idx]] = struct{}{}
+			continue
+		}
+		if item.IsDir {
+			continue
+		}
+		if group, ok := item.Metadata["Group"].(string); ok && strings.HasPrefix(group, "plans/") {
+			// Skip archived/closed plan files — their parent isn't a live plan dir.
+			if strings.Contains(item.Path, "/.archive/") || strings.Contains(item.Path, "/.closed/") {
+				continue
+			}
+			planDirs[filepath.Dir(item.Path)] = struct{}{}
+		}
+	}
+
+	if len(planDirs) == 0 {
+		return nil
+	}
+
+	jobs := make(map[string]*orchestration.Job)
+	for dir := range planDirs {
+		plan, err := orchestration.LoadPlan(dir)
+		if err != nil {
+			continue
+		}
+		for id, job := range plan.JobsByID {
+			jobs[id] = job
+		}
+	}
+	if len(jobs) == 0 {
+		return nil
+	}
+	return jobs
 }
 
 func fetchFocusedItemsCmd(svc *service.Service, focusedWS *workspace.WorkspaceNode, showArtifacts bool) tea.Cmd {
@@ -35,7 +94,7 @@ func fetchFocusedItemsCmd(svc *service.Service, focusedWS *workspace.WorkspaceNo
 			sort.Slice(items, func(i, j int) bool {
 				return items[i].ModTime.After(items[j].ModTime)
 			})
-			return itemsLoadedMsg{items: items}
+			return itemsLoadedMsg{items: items, jobs: loadPlanJobs(items)}
 		}
 
 		// Fall back to filesystem walk
@@ -91,7 +150,7 @@ func fetchFocusedItemsCmd(svc *service.Service, focusedWS *workspace.WorkspaceNo
 		sort.Slice(allItems, func(i, j int) bool {
 			return allItems[i].ModTime.After(allItems[j].ModTime)
 		})
-		return itemsLoadedMsg{items: allItems}
+		return itemsLoadedMsg{items: allItems, jobs: loadPlanJobs(allItems)}
 	}
 }
 
@@ -270,7 +329,7 @@ func fetchAllItemsCmd(svc *service.Service, showArtifacts bool) tea.Cmd {
 				sort.Slice(items, func(i, j int) bool {
 					return items[i].ModTime.After(items[j].ModTime)
 				})
-				return itemsLoadedMsg{items: items}
+				return itemsLoadedMsg{items: items, jobs: loadPlanJobs(items)}
 			}
 		}
 
@@ -290,7 +349,7 @@ func fetchAllItemsCmd(svc *service.Service, showArtifacts bool) tea.Cmd {
 		sort.Slice(items, func(i, j int) bool {
 			return items[i].ModTime.After(items[j].ModTime)
 		})
-		return itemsLoadedMsg{items: items}
+		return itemsLoadedMsg{items: items, jobs: loadPlanJobs(items)}
 	}
 }
 

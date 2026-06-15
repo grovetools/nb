@@ -1,8 +1,12 @@
 package views
 
 import (
+	"path/filepath"
+	"strings"
+
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/flow/pkg/orchestration"
 
 	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/tree"
@@ -27,6 +31,11 @@ type DisplayNode struct {
 	ChildCount   int          // For groups: number of child items
 	RelativePath string       // Shortened display path for notes
 	LinkedNode   *DisplayNode // For notes, points to the plan node; for plans, points to the note node
+
+	// HasNestedArtifacts marks a note (plan job markdown) that has artifact
+	// children nested directly beneath it (Phase 3). Such a note is foldable
+	// even though it is not a directory; its collapse key is its NodeID().
+	HasNestedArtifacts bool
 }
 
 // NodeID returns a unique identifier for this node (for tracking collapsed state).
@@ -40,9 +49,11 @@ func (n *DisplayNode) NodeID() string {
 	return "file:" + n.Item.Path
 }
 
-// IsFoldable returns true if this node can be collapsed/expanded.
+// IsFoldable returns true if this node can be collapsed/expanded. Directories
+// are always foldable; note rows become foldable when artifacts are nested
+// directly beneath them (Phase 3).
 func (n *DisplayNode) IsFoldable() bool {
-	return n.Item != nil && n.Item.IsDir
+	return n.Item != nil && (n.Item.IsDir || n.HasNestedArtifacts)
 }
 
 // GroupKey returns a unique key for this group (for selection tracking).
@@ -95,6 +106,7 @@ type Model struct {
 	sortAscending    bool
 	jumpMap          map[rune]int
 	collapsedNodes   map[string]bool
+	seededCollapse   map[string]bool // node IDs whose default-collapse has been applied once
 	selected         map[string]struct{}
 	selectedGroups   map[string]struct{}
 	cutPaths         map[string]struct{}
@@ -119,8 +131,19 @@ type Model struct {
 	isFilteringByTag     bool
 	selectedTag          string
 	recentNotesMode      bool
+	archiveViewMode      bool
 	showGitModifiedOnly  bool
 	groupBy              string // "none", "date", "status", "tag"
+
+	// Flow plan jobs keyed by job ID (the opaque `.artifacts/<jobID>` dir name),
+	// supplied by the parent controller. Derived lookup maps are rebuilt in
+	// SetParentState: jobIDToTitle resolves an artifact dir to a human title,
+	// jobFileToID maps a plan job markdown filename to its job ID (for nesting
+	// and the artifact-count badge).
+	jobs              map[string]*orchestration.Job
+	jobIDToTitle      map[string]string
+	jobFileToID       map[string]string
+	jobIDToArtifactCt map[string]int // job ID -> number of artifact files under .artifacts/<jobID>
 
 	// Git status for rendering indicators
 	gitFileStatus   map[string]string // Key: normalized absolute path, Value: git status code
@@ -135,6 +158,7 @@ func New(keys KeyMap, columnVisibility map[string]bool) Model {
 		sortAscending:    false,
 		jumpMap:          make(map[rune]int),
 		collapsedNodes:   make(map[string]bool), // Start with all expanded
+		seededCollapse:   make(map[string]bool),
 		selected:         make(map[string]struct{}),
 		selectedGroups:   make(map[string]struct{}),
 		cutPaths:         make(map[string]struct{}),
@@ -176,8 +200,9 @@ func (m *Model) SetParentState(
 	isGrepping bool,
 	isFilteringByTag bool,
 	selectedTag string,
-	ecoPickerMode, hideGlobal, showArchives, showArtifacts, showOnHold, recentNotesMode, showGitModifiedOnly bool,
+	ecoPickerMode, hideGlobal, showArchives, showArtifacts, showOnHold, recentNotesMode, showGitModifiedOnly, archiveViewMode bool,
 	gitFileStatus map[string]string,
+	jobs map[string]*orchestration.Job,
 ) {
 	m.service = service
 	m.allItems = allItems
@@ -194,7 +219,120 @@ func (m *Model) SetParentState(
 	m.showOnHold = showOnHold
 	m.recentNotesMode = recentNotesMode
 	m.showGitModifiedOnly = showGitModifiedOnly
+	m.archiveViewMode = archiveViewMode
 	m.gitFileStatus = gitFileStatus
+	m.setJobs(jobs)
+}
+
+// setJobs stores the flow job map and rebuilds the derived lookup maps used
+// during rendering (jobIDToTitle, jobFileToID). Done once per items refresh so
+// the render path only does cheap map lookups.
+func (m *Model) setJobs(jobs map[string]*orchestration.Job) {
+	m.jobs = jobs
+	m.jobIDToTitle = make(map[string]string, len(jobs))
+	m.jobFileToID = make(map[string]string, len(jobs))
+	for id, job := range jobs {
+		if job == nil {
+			continue
+		}
+		if job.Title != "" {
+			m.jobIDToTitle[id] = job.Title
+		}
+		if job.Filename != "" {
+			m.jobFileToID[job.Filename] = id
+		}
+	}
+
+	// Count artifact files per job ID by scanning loaded items for paths of the
+	// form "<planDir>/.artifacts/<jobID>/<file>". Counting only files (not the
+	// per-job dir itself) yields the badge number rendered on job rows.
+	m.jobIDToArtifactCt = make(map[string]int)
+	for _, item := range m.allItems {
+		if item.IsDir {
+			continue
+		}
+		idx := strings.Index(item.Path, "/.artifacts/")
+		if idx < 0 {
+			continue
+		}
+		rest := item.Path[idx+len("/.artifacts/"):]
+		slash := strings.IndexByte(rest, '/')
+		if slash <= 0 {
+			// File sits directly under .artifacts (no per-job subdir) — not
+			// attributable to a job, so skip for badge purposes.
+			continue
+		}
+		jobID := rest[:slash]
+		m.jobIDToArtifactCt[jobID]++
+	}
+}
+
+// jobIDForNote resolves the flow job ID for a note display node, if the node is
+// a plan job markdown file with a matching entry in the loaded job map. Returns
+// ("", false) for non-job notes or when no plan metadata is available.
+func (m *Model) jobIDForNote(node *DisplayNode) (string, bool) {
+	if node == nil || node.Item == nil || node.Item.IsDir {
+		return "", false
+	}
+	group, _ := node.Item.Metadata["Group"].(string)
+	if !strings.HasPrefix(group, "plans/") {
+		return "", false
+	}
+	filename := filepath.Base(node.Item.Path)
+	id, ok := m.jobFileToID[filename]
+	return id, ok
+}
+
+// artifactCountForNote returns the number of artifact files owned by the plan
+// job represented by this note, or 0 when the note isn't a job / has none.
+func (m *Model) artifactCountForNote(node *DisplayNode) int {
+	id, ok := m.jobIDForNote(node)
+	if !ok {
+		return 0
+	}
+	return m.jobIDToArtifactCt[id]
+}
+
+// JumpToArtifactsForNote moves the cursor to the .artifacts/<jobID> directory
+// node owned by the note currently under the cursor, expanding the enclosing
+// .artifacts parent if it was collapsed. Returns true on success. It is a no-op
+// (returning false) when the current node is not a job, has no artifacts, or no
+// matching artifact directory is present in the display tree.
+func (m *Model) JumpToArtifactsForNote() bool {
+	node := m.GetCurrentNode()
+	jobID, ok := m.jobIDForNote(node)
+	if !ok || m.jobIDToArtifactCt[jobID] == 0 {
+		return false
+	}
+
+	// Phase 3 nests artifacts under the owning job row: the "artifacts" node
+	// lives at "<noteDir>/.artifacts-nested/<noteFilename>". Otherwise (orphans /
+	// group-by) artifacts sit in a standalone dir ending "/.artifacts/<jobID>".
+	notePath := node.Item.Path
+	nestedSuffix := "/.artifacts-nested/" + filepath.Base(notePath)
+	standaloneSuffix := "/.artifacts/" + jobID
+
+	// Make sure the note row is expanded so its nested artifacts node can render,
+	// and expand any collapsed standalone .artifacts group for the orphan case.
+	delete(m.collapsedNodes, "file:"+notePath)
+	for _, dn := range m.displayNodes {
+		if dn.Item != nil && dn.Item.IsDir && strings.HasSuffix(dn.Item.Path, "/.artifacts") {
+			delete(m.collapsedNodes, dn.NodeID())
+		}
+	}
+	m.BuildDisplayTree()
+
+	for i, dn := range m.displayNodes {
+		if dn.Item == nil || !dn.Item.IsDir {
+			continue
+		}
+		if strings.HasSuffix(dn.Item.Path, nestedSuffix) || strings.HasSuffix(dn.Item.Path, standaloneSuffix) {
+			m.cursor = i
+			m.adjustScroll()
+			return true
+		}
+	}
+	return false
 }
 
 // ToggleViewMode switches between tree and table views.
@@ -401,9 +539,25 @@ func (m *Model) GetDisplayNodes() []*DisplayNode {
 	return m.displayNodes
 }
 
-// SetCollapseState sets the collapsed state for all nodes.
+// SetCollapseState sets the collapsed state for all nodes. The default-collapse
+// seed tracking is reset so that .artifacts/.archive/.closed defaults re-apply
+// for the freshly built state (e.g. after a focus change).
 func (m *Model) SetCollapseState(collapsed map[string]bool) {
 	m.collapsedNodes = collapsed
+	m.seededCollapse = make(map[string]bool)
+}
+
+// seedCollapsedDefault collapses nodeID by default the first time it is seen,
+// without clobbering a later user toggle. Once seeded, subsequent rebuilds leave
+// the user's expand/collapse choice intact.
+func (m *Model) seedCollapsedDefault(nodeID string) {
+	if m.seededCollapse[nodeID] {
+		return
+	}
+	m.seededCollapse[nodeID] = true
+	if _, set := m.collapsedNodes[nodeID]; !set {
+		m.collapsedNodes[nodeID] = true
+	}
 }
 
 // GetCollapseState returns the current collapse state.
