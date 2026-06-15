@@ -21,6 +21,7 @@ import (
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/flow/pkg/orchestration"
 
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/service"
@@ -49,7 +50,8 @@ type Model struct {
 	spinner             spinner.Model
 	loadingCount        int
 	recentNotesMode     bool           // Whether to show only recent notes
-	savedViewMode       views.ViewMode // View mode to restore when exiting recent notes mode
+	archiveViewMode     bool           // Whether to show the flat archive/closed browse list
+	savedViewMode       views.ViewMode // View mode to restore when exiting recent notes / archive mode
 	savedModVisibility  bool           // Saved visibility state for MODIFIED column
 	savedWsVisibility   bool           // Saved visibility state for WORKSPACE column
 
@@ -126,6 +128,12 @@ type Model struct {
 
 	// Hosting context
 	hosted bool // True when running inside groveterm; use SplitEditorRequestMsg
+
+	// Flow plan jobs keyed by job ID (the opaque `.artifacts/<jobID>` dir name).
+	// Loaded by loadPlanJobs in io.go and refreshed on each itemsLoadedMsg. Used
+	// to resolve human-readable artifact titles and correlate artifacts with the
+	// owning job markdown file (nesting / count badge).
+	jobs map[string]*orchestration.Job
 }
 
 // groupByCycle defines the rotation order for the CycleGrouping keybind.

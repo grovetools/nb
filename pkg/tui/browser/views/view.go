@@ -359,8 +359,16 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 			}
 		} else if idx := strings.Index(groupName, "/.artifacts/"); idx >= 0 {
 			// For artifact job-dir nodes, display only the job name (the part
-			// after `<parent>/.artifacts/`), not the full path.
-			info.name = groupName[idx+len("/.artifacts/"):]
+			// after `<parent>/.artifacts/`), not the full path. The raw name is
+			// an opaque job ID; resolve it to the human-readable job title when
+			// the plan's JobsByID map has a match, otherwise fall back to the ID
+			// (handles UUID-only dirs and orphaned/deleted jobs gracefully).
+			jobID := groupName[idx+len("/.artifacts/"):]
+			if title, ok := m.jobIDToTitle[jobID]; ok && title != "" {
+				info.name = title
+			} else {
+				info.name = jobID
+			}
 		} else if node.IsPlan() {
 			// Handle plan nodes (but not archive nodes that start with "plans/")
 			info.isPlan = true
@@ -410,6 +418,16 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 			if err == nil {
 				info.gitStatus = m.gitFileStatus[normalizedPath]
 			}
+		}
+		// Artifact-count badge: for a plan job markdown, resolve its job ID by
+		// filename and show how many artifact files it owns. Skipped silently
+		// when the file isn't a job or has no artifacts.
+		if count := m.artifactCountForNote(node); count > 0 {
+			noun := "artifacts"
+			if count == 1 {
+				noun = "artifact"
+			}
+			info.suffix += fmt.Sprintf(" [%d %s]", count, noun)
 		}
 	}
 
