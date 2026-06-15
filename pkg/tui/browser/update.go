@@ -114,10 +114,6 @@ func (m *Model) updateViewsState() {
 		m.views.FilterDisplayTreeByGitStatus()
 	}
 
-	// Apply priority (critical-only) filter if active. Filter state lives in
-	// the views model and is a no-op when no priority filter is set.
-	m.views.FilterDisplayTreeByPriority()
-
 	// Apply substring filter if present. In tag mode `query` is the additional
 	// within-tag search (empty unless the user typed "#tag extra"); the tag
 	// itself is already applied during BuildDisplayTree.
@@ -957,9 +953,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				m.statusMessage = "No artifacts for this note"
 			}
 		case key.Matches(msg, m.keys.Search):
-			// Plain substring search. If a tag filter is active, preserve it by
-			// keeping the "#tag " prefix and letting the user append a within-tag
-			// query; otherwise start from an empty input.
+			// The search key both starts a new search AND re-enters an existing
+			// one (vim-style). When the filter input is blurred-but-active (has a
+			// value), '/' re-focuses it WITHOUT clearing — preserving the value so
+			// the user can keep editing the same query. The Esc-preserve /
+			// second-Esc-clear flow stays intact because we never reset here.
+			if m.filterInput.Value() != "" {
+				m.filterInput.CursorEnd()
+				m.filterInput.Focus()
+				return m, textinput.Blink
+			}
+			// No active filter: start fresh. If a tag filter is active, preserve
+			// it by keeping the "#tag " prefix and letting the user append a
+			// within-tag query; otherwise start from an empty input.
 			if m.isFilteringByTag && m.selectedTag != "" {
 				m.filterInput.SetValue("#" + m.selectedTag + " ")
 				m.filterInput.CursorEnd()
@@ -970,14 +976,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			}
 			m.filterInput.Focus()
 			return m, textinput.Blink
-		case key.Matches(msg, m.keys.ReenterSearch):
-			// Vim-style: re-enter (focus) an existing filter without clearing it.
-			// Mirrors nav's 'i' re-enter case (nav/pkg/tui/sessionizer/update.go).
-			// No-op when there is no active filter.
-			if m.filterInput.Value() != "" {
-				m.filterInput.Focus()
-				return m, textinput.Blink
-			}
 		case key.Matches(msg, m.keys.Refresh):
 			return m, func() tea.Msg { return refreshMsg{} }
 		case key.Matches(msg, m.keys.ToggleGitChanges):
@@ -1026,20 +1024,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			return m, nil
 		case key.Matches(msg, m.keys.Sort):
 			m.views.ToggleSortOrder()
-		case key.Matches(msg, m.keys.SortByPriority):
-			if active := m.views.ToggleSortByPriority(); active {
-				m.statusMessage = "Sorting by priority"
-			} else {
-				m.statusMessage = "Sorting by date"
-			}
-			m.updateViewsState()
-		case key.Matches(msg, m.keys.CriticalOnly):
-			if active := m.views.ToggleCriticalFilter(); active {
-				m.statusMessage = "Filtering critical (p0) only"
-			} else {
-				m.statusMessage = "Cleared critical filter"
-			}
-			m.updateViewsState()
 		case key.Matches(msg, m.keys.PriorityUp):
 			return m, m.bumpSelectedPriority(true)
 		case key.Matches(msg, m.keys.PriorityDown):

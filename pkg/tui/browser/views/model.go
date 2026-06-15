@@ -133,9 +133,7 @@ type Model struct {
 	recentNotesMode      bool
 	archiveViewMode      bool
 	showGitModifiedOnly  bool
-	sortByPriority       bool   // when true, sortNotes orders by priority first
-	priorityFilter       string // when non-empty, FilterDisplayTreeByPriority keeps only this level
-	groupBy              string // "none", "date", "status", "tag"
+	groupBy              string // "none", "date", "status", "tag", "priority"
 
 	// Flow plan jobs keyed by job ID (the opaque `.artifacts/<jobID>` dir name),
 	// supplied by the parent controller. Derived lookup maps are rebuilt in
@@ -246,8 +244,13 @@ func (m *Model) setJobs(jobs map[string]*orchestration.Job) {
 	}
 
 	// Count artifact files per job ID by scanning loaded items for paths of the
-	// form "<planDir>/.artifacts/<jobID>/<file>". Counting only files (not the
-	// per-job dir itself) yields the badge number rendered on job rows.
+	// form "<planDir>/.artifacts/<jobID>/<file>". This MUST match the set the
+	// nested "artifacts (N)" node renders (addNestedArtifacts), which is the
+	// exact-match subgroup keyed by jobID — i.e. only files that are DIRECT
+	// children of ".artifacts/<jobID>/". Files in deeper subdirs
+	// (".artifacts/<jobID>/sub/file") land in a different subgroup
+	// ("<jobID>/sub") that the per-job nested node never shows, so they must be
+	// excluded here too or the badge will disagree with the expanded count.
 	m.jobIDToArtifactCt = make(map[string]int)
 	for _, item := range m.allItems {
 		if item.IsDir {
@@ -262,6 +265,11 @@ func (m *Model) setJobs(jobs map[string]*orchestration.Job) {
 		if slash <= 0 {
 			// File sits directly under .artifacts (no per-job subdir) — not
 			// attributable to a job, so skip for badge purposes.
+			continue
+		}
+		// Only count direct children of the per-job dir; reject any deeper
+		// nesting so the badge equals the nested node's ChildCount.
+		if strings.IndexByte(rest[slash+1:], '/') >= 0 {
 			continue
 		}
 		jobID := rest[:slash]
@@ -356,26 +364,6 @@ func (m *Model) SetViewMode(mode ViewMode) {
 func (m *Model) ToggleSortOrder() {
 	m.sortAscending = !m.sortAscending
 	m.BuildDisplayTree()
-}
-
-// ToggleSortByPriority toggles priority-first ordering. When enabled, sortNotes
-// floats prioritized notes (p0..p3) to the top within each group; unprioritized
-// notes sort last. The caller rebuilds the tree (via updateViewsState).
-func (m *Model) ToggleSortByPriority() bool {
-	m.sortByPriority = !m.sortByPriority
-	return m.sortByPriority
-}
-
-// ToggleCriticalFilter toggles the filter that keeps only p0 (critical) notes.
-// Returns the new active state. The caller rebuilds the tree (via
-// updateViewsState), which re-applies FilterDisplayTreeByPriority.
-func (m *Model) ToggleCriticalFilter() bool {
-	if m.priorityFilter == "p0" {
-		m.priorityFilter = ""
-	} else {
-		m.priorityFilter = "p0"
-	}
-	return m.priorityFilter != ""
 }
 
 // BumpPriority returns the priority one step more critical (true) or less

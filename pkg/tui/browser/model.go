@@ -137,7 +137,7 @@ type Model struct {
 }
 
 // groupByCycle defines the rotation order for the CycleGrouping keybind.
-var groupByCycle = []string{"none", "date", "status", "tag"}
+var groupByCycle = []string{"none", "date", "status", "tag", "priority"}
 
 // nextGroupBy returns the next axis in the cycle after current.
 func nextGroupBy(current string) string {

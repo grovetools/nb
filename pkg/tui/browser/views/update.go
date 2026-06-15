@@ -198,9 +198,10 @@ func (m *Model) adjustScroll() {
 }
 
 // priorityRank maps a priority string to a sortable key. Empty priority sorts
-// LAST (rank "z") so prioritized notes float to the top when sorting by
+// LAST (rank "z") so prioritized notes float to the top when ordering by
 // priority. p0 < p1 < p2 < p3 < "" lexically, which matches "most critical
-// first".
+// first". This is the priority comparator used by the group-by-priority axis
+// (partitionByPriority).
 func priorityRank(priority string) string {
 	if priority == "" {
 		return "z"
@@ -208,21 +209,15 @@ func priorityRank(priority string) string {
 	return priority
 }
 
-// sortNotes sorts a slice of notes in place. When m.sortByPriority is set,
-// notes are ordered by priority first (p0 most critical, empty last), then by
-// the existing creation-time order (honoring m.sortAscending). When priority
-// sorting is off it preserves the historical CreatedAt ordering.
+// sortNotes sorts a slice of notes in place by creation time, honoring
+// m.sortAscending. Priority no longer affects flat ordering — it is surfaced
+// exclusively through the group-by-priority axis (partitionByPriority, which
+// orders buckets most-critical-first) and the per-priority filename coloring.
 //
 // This is the single canonical note comparator; all tree-building sort sites
 // route through it so sort behavior stays consistent.
 func (m *Model) sortNotes(notes []*models.Note) {
 	sort.SliceStable(notes, func(i, j int) bool {
-		if m.sortByPriority {
-			ri, rj := priorityRank(notes[i].Priority), priorityRank(notes[j].Priority)
-			if ri != rj {
-				return ri < rj
-			}
-		}
 		if m.sortAscending {
 			return notes[i].CreatedAt.Before(notes[j].CreatedAt)
 		}
@@ -1882,9 +1877,55 @@ func (m *Model) partitionNotes(notes []*models.Note) []syntheticBucket {
 		return partitionByStatus(notes)
 	case "tag":
 		return partitionByTag(notes)
+	case "priority":
+		return partitionByPriority(notes)
 	default:
 		return nil
 	}
+}
+
+// partitionByPriority buckets notes by their priority frontmatter field, most
+// critical first (p0, p1, p2, p3), with unset/empty priority collected into a
+// trailing "none" bucket. Empty buckets are dropped. Intra-bucket order is left
+// to addNoteNodes -> sortNotes (date order), which is sufficient because every
+// note in a bucket shares the same priority.
+func partitionByPriority(notes []*models.Note) []syntheticBucket {
+	// Ladder ordered most-critical first; "" (none) handled separately so it
+	// always sorts last.
+	order := []string{"p0", "p1", "p2", "p3"}
+	byPriority := map[string][]*models.Note{}
+	var none []*models.Note
+
+	for _, note := range notes {
+		switch priorityRank(note.Priority) {
+		case "p0", "p1", "p2", "p3":
+			byPriority[note.Priority] = append(byPriority[note.Priority], note)
+		default:
+			none = append(none, note)
+		}
+	}
+
+	var buckets []syntheticBucket
+	for _, p := range order {
+		if len(byPriority[p]) == 0 {
+			continue
+		}
+		buckets = append(buckets, syntheticBucket{
+			id:    p,
+			label: strings.ToUpper(p), // "P0".."P3"
+			icon:  theme.IconFire,
+			notes: byPriority[p],
+		})
+	}
+	if len(none) > 0 {
+		buckets = append(buckets, syntheticBucket{
+			id:    "none",
+			label: "No Priority",
+			icon:  theme.IconClock,
+			notes: none,
+		})
+	}
+	return buckets
 }
 
 // partitionByDate buckets notes by CreatedAt into Today / This Week / This Month
@@ -2327,59 +2368,6 @@ func (m *Model) FilterDisplayTreeByGitStatus() {
 	// Add deleted files to the filtered tree
 	m.AddDeletedFilesToTree()
 
-	m.clampCursor()
-}
-
-// FilterDisplayTreeByPriority filters the tree view to show only notes whose
-// priority matches m.priorityFilter (e.g. "p0" for critical-only), preserving
-// the parent group/workspace nodes that lead to a kept note. When no filter is
-// active it is a no-op. Mirrors FilterDisplayTreeByGitStatus.
-func (m *Model) FilterDisplayTreeByPriority() {
-	if m.priorityFilter == "" {
-		return // No filter to apply
-	}
-
-	fullTree := m.displayNodes
-	nodesToKeep := make(map[int]bool)
-	parentMap := make(map[int]int)
-	lastNodeAtDepth := make(map[int]int)
-
-	// First pass: build parent map
-	for i, node := range fullTree {
-		if node.Depth > 0 {
-			if parentIndex, ok := lastNodeAtDepth[node.Depth-1]; ok {
-				parentMap[i] = parentIndex
-			}
-		}
-		lastNodeAtDepth[node.Depth] = i
-	}
-
-	// Second pass: mark matching notes and their ancestors to keep
-	for i, node := range fullTree {
-		if node.IsNote() {
-			if ItemToNote(node.Item).Priority == m.priorityFilter {
-				curr := i
-				for {
-					nodesToKeep[curr] = true
-					parentIndex, ok := parentMap[curr]
-					if !ok {
-						break
-					}
-					curr = parentIndex
-				}
-			}
-		}
-	}
-
-	// Third pass: build the filtered tree
-	var filteredTree []*DisplayNode
-	for i, node := range fullTree {
-		if nodesToKeep[i] {
-			filteredTree = append(filteredTree, node)
-		}
-	}
-
-	m.displayNodes = filteredTree
 	m.clampCursor()
 }
 

@@ -525,12 +525,8 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 		content += " "
 	}
 
-	// Prepend a colored priority badge (e.g. "[p0] ") for prioritized notes.
-	if info.note != nil {
-		if badge := renderPriorityBadge(info.note.Priority); badge != "" {
-			content += badge + " "
-		}
-	}
+	// Priority is no longer shown as an inline "[pN]" text badge; the note
+	// FILENAME color conveys it instead (see priority coloring in step 3 below).
 
 	// Get search match indices before applying styles to the name
 	matchStart, matchEnd := m.getSearchHighlightIndices(info.name)
@@ -562,6 +558,19 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 		style = style.Foreground(theme.DefaultTheme.Colors.Pink)
 	}
 	// Notes in completed group use default text color (only icon is green)
+
+	// Color the FILENAME by priority — this replaces the old inline "[pN]"
+	// badge. p0 = red (bold), p1 = orange; p2/p3 stay default/dim (no override)
+	// so only genuinely critical work draws the eye. Applied last among the
+	// text-color rules so priority wins over the review-group pink.
+	if info.note != nil {
+		switch info.note.Priority {
+		case "p0":
+			style = style.Foreground(theme.DefaultTheme.Colors.Red).Bold(true)
+		case "p1":
+			style = style.Foreground(theme.DefaultTheme.Colors.Orange)
+		}
+	}
 
 	// 4. Apply state modifiers
 	if info.note != nil {
@@ -607,7 +616,9 @@ func (m *Model) styleNodeContent(info nodeRenderInfo, isSelected bool) string {
 
 // renderPriorityBadge returns a colored "[pN]" badge for a note priority, or
 // "" when the priority is unset/unknown. p0 is the most critical (red), p3 the
-// least (dim). Used both in the tree name column and the table PRIORITY column.
+// least (dim). Used by the optional table PRIORITY column. The tree view no
+// longer shows this badge inline — there, priority is conveyed by filename
+// color (see styleNodeContent).
 func renderPriorityBadge(priority string) string {
 	var color lipgloss.TerminalColor
 	switch priority {

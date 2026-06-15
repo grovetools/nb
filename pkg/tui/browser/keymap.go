@@ -23,11 +23,8 @@ type KeyMap struct {
 	JumpToArtifacts key.Binding
 	// Filter operations (TUI-specific)
 	FilterByTag      key.Binding
-	ReenterSearch    key.Binding
 	ToggleGitChanges key.Binding
 	Sort             key.Binding
-	SortByPriority   key.Binding
-	CriticalOnly     key.Binding
 	CycleGrouping    key.Binding
 	// Toggle operations (TUI-specific)
 	ToggleArchives  key.Binding
@@ -80,8 +77,7 @@ func (k KeyMap) Sections() []keymap.Section {
 			k.JumpToWorkspace, k.JumpToArtifacts,
 		),
 		keymap.NewSection(keymap.SectionFilter,
-			k.FilterByTag, k.ReenterSearch, k.ToggleGitChanges, k.Sort, k.SortByPriority,
-			k.CriticalOnly, k.CycleGrouping,
+			k.FilterByTag, k.ToggleGitChanges, k.Sort, k.CycleGrouping,
 		),
 		keymap.NewSection(keymap.SectionToggle,
 			k.ToggleArchives, k.ToggleArtifacts, k.ToggleGlobal,
@@ -150,14 +146,6 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("&"),
 			key.WithHelp("&", "filter by tag"),
 		),
-		// Re-enter (focus) an existing filter, vim-style. nav binds this to "i"
-		// (nav/pkg/tui/sessionizer/update.go), but "i" is already taken in nb's
-		// browser (CreateNoteInbox). We use "r" (resume search) instead; it is
-		// otherwise unused. Users can remap via config.
-		ReenterSearch: key.NewBinding(
-			key.WithKeys("r"),
-			key.WithHelp("r", "re-enter active search"),
-		),
 		ToggleGitChanges: key.NewBinding(
 			key.WithKeys("<", ">"),
 			key.WithHelp("<,>", "git changes"),
@@ -166,14 +154,6 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("s"),
 			key.WithHelp("s", "toggle sort order"),
 		),
-		SortByPriority: key.NewBinding(
-			key.WithKeys("$"),
-			key.WithHelp("$", "toggle sort by priority"),
-		),
-		CriticalOnly: key.NewBinding(
-			key.WithKeys("!"),
-			key.WithHelp("!", "filter critical (p0) only"),
-		),
 		// NOTE: The briefing requested default key "g", but nb's browser already
 		// binds the "gg" go-to-top sequence; a lone "g" is always consumed as the
 		// prefix of that sequence and can never trigger a bare-key action. Per the
@@ -181,7 +161,7 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		// CycleGrouping to "o" (unused) instead. Users can remap via config.
 		CycleGrouping: key.NewBinding(
 			key.WithKeys("o"),
-			key.WithHelp("o", "cycle group-by (none/date/status/tag)"),
+			key.WithHelp("o", "cycle group-by (none/date/status/tag/priority)"),
 		),
 		// Toggle operations
 		ToggleArchives: key.NewBinding(
