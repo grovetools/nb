@@ -113,7 +113,7 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 			} else {
 				ecoRoot = node.Path
 			}
-			if wtPath, ok := workspace.FindWorktreePath(ecoRoot, job.Worktree); ok {
+			if wtPath, ok := workspace.ResolveWorktreePathByName(ecoRoot, job.Worktree, nil); ok {
 				if repo, branch, _ := git.GetRepoInfo(wtPath); repo != "" {
 					job.Repository = repo
 					job.Branch = branch
