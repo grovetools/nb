@@ -331,6 +331,8 @@ func (m *Model) JumpToArtifactsForNote() bool {
 		}
 	}
 	m.BuildDisplayTree()
+	m.FilterDisplayTreeByGitStatus()
+	m.FilterDisplayTree()
 
 	for i, dn := range m.displayNodes {
 		if dn.Item == nil || !dn.Item.IsDir {
@@ -364,6 +366,8 @@ func (m *Model) SetViewMode(mode ViewMode) {
 func (m *Model) ToggleSortOrder() {
 	m.sortAscending = !m.sortAscending
 	m.BuildDisplayTree()
+	m.FilterDisplayTreeByGitStatus()
+	m.FilterDisplayTree()
 }
 
 // BumpPriority returns the priority one step more critical (true) or less
@@ -500,6 +504,8 @@ func (m *Model) ToggleFold() {
 		m.collapsedNodes[nodeID] = true
 	}
 	m.BuildDisplayTree()
+	m.FilterDisplayTreeByGitStatus()
+	m.FilterDisplayTree()
 }
 
 // initializeChildGroupCollapseState sets the default collapse state for child groups
