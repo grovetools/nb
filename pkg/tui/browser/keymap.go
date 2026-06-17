@@ -190,8 +190,8 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("n", "create note at cursor"),
 		),
 		CreateNoteInbox: key.NewBinding(
-			key.WithKeys("i"),
-			key.WithHelp("i", "inbox note (quick capture)"),
+			key.WithKeys("a"),
+			key.WithHelp("a", "inbox note (quick capture)"),
 		),
 		CreateNoteGlobal: key.NewBinding(
 			key.WithKeys("I"),

@@ -2269,6 +2269,7 @@ func (m *Model) FilterDisplayTree() {
 	}
 
 	// Second pass: mark nodes to keep
+	matchedGroups := make(map[int]bool)
 	for i, node := range fullTree {
 		match := false
 
@@ -2296,10 +2297,27 @@ func (m *Model) FilterDisplayTree() {
 				}
 				curr = parentIndex
 			}
+			if node.IsGroup() {
+				matchedGroups[i] = true
+			}
 		}
 	}
 
-	// Third pass: build the filtered tree
+	// Third pass: for directly matched groups, include all descendants
+	for i, node := range fullTree {
+		if !matchedGroups[i] {
+			continue
+		}
+		// Walk forward to find all descendants (nodes with Depth > this node's depth)
+		for j := i + 1; j < len(fullTree); j++ {
+			if fullTree[j].Depth <= node.Depth {
+				break // Exited this node's subtree
+			}
+			nodesToKeep[j] = true
+		}
+	}
+
+	// Fourth pass: build the filtered tree
 	var filteredTree []*DisplayNode
 	for i, node := range fullTree {
 		if nodesToKeep[i] {
@@ -2652,6 +2670,8 @@ func (m *Model) toggleFold() {
 		m.collapsedNodes[nodeID] = true
 	}
 	m.BuildDisplayTree()
+	m.FilterDisplayTreeByGitStatus()
+	m.FilterDisplayTree()
 }
 
 func (m *Model) openFold() {
@@ -2664,6 +2684,8 @@ func (m *Model) openFold() {
 	}
 	delete(m.collapsedNodes, node.NodeID())
 	m.BuildDisplayTree()
+	m.FilterDisplayTreeByGitStatus()
+	m.FilterDisplayTree()
 }
 
 func (m *Model) closeFold() {
@@ -2676,6 +2698,8 @@ func (m *Model) closeFold() {
 	}
 	m.collapsedNodes[node.NodeID()] = true
 	m.BuildDisplayTree()
+	m.FilterDisplayTreeByGitStatus()
+	m.FilterDisplayTree()
 }
 
 func (m *Model) closeAllFolds() {
@@ -2685,11 +2709,15 @@ func (m *Model) closeAllFolds() {
 		}
 	}
 	m.BuildDisplayTree()
+	m.FilterDisplayTreeByGitStatus()
+	m.FilterDisplayTree()
 }
 
 func (m *Model) openAllFolds() {
 	m.collapsedNodes = make(map[string]bool)
 	m.BuildDisplayTree()
+	m.FilterDisplayTreeByGitStatus()
+	m.FilterDisplayTree()
 }
 
 func (m *Model) closeFoldRecursive(cursorIndex int) {
@@ -2716,6 +2744,8 @@ func (m *Model) closeFoldRecursive(cursorIndex int) {
 		}
 	}
 	m.BuildDisplayTree()
+	m.FilterDisplayTreeByGitStatus()
+	m.FilterDisplayTree()
 }
 
 func (m *Model) openFoldRecursive(cursorIndex int) {
@@ -2771,6 +2801,8 @@ func (m *Model) openFoldRecursive(cursorIndex int) {
 	}
 
 	m.BuildDisplayTree()
+	m.FilterDisplayTreeByGitStatus()
+	m.FilterDisplayTree()
 }
 
 func (m *Model) toggleFoldRecursive(cursorIndex int) {

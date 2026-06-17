@@ -1015,6 +1015,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			}
 			m.filterInput.Focus()
 			return m, textinput.Blink
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "i":
+			// Vim-style: 'i' re-enters search (insert mode) if filter has value
+			if m.filterInput.Value() != "" {
+				m.filterInput.CursorEnd()
+				m.filterInput.Focus()
+				return m, textinput.Blink
+			}
 		case key.Matches(msg, m.keys.Refresh):
 			return m, func() tea.Msg { return refreshMsg{} }
 		case key.Matches(msg, m.keys.ToggleGitChanges):
