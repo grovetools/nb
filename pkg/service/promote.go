@@ -22,6 +22,7 @@ type PromoteOptions struct {
 	JobTemplate string // e.g. "chat", "" for none
 	Model       string // LLM model to use for this job (optional)
 	Effort      string // Effort level for claude agent jobs (optional)
+	Skill       string // Skill name to inject into the agent context, written to job frontmatter (optional)
 }
 
 // PromoteNoteToJob promotes a note to a job in an existing flow plan.
@@ -94,6 +95,7 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 		Template: opts.JobTemplate,
 		Model:    opts.Model,
 		Effort:   opts.Effort,
+		Skill:    opts.Skill,
 		NoteRef:  inProgressPath,
 	}
 	if plan.Config != nil {

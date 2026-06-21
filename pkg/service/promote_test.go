@@ -87,6 +87,56 @@ func TestPromoteNoteToJob_WarnsWhenWorktreeMissing(t *testing.T) {
 	}
 }
 
+// TestPromoteNoteToJob_WritesSkillFrontmatter verifies parity with
+// `flow plan add --skill`: a non-empty PromoteOptions.Skill is written into the
+// promoted job's frontmatter as `skill:`. Resolution itself happens at job run
+// time (via the executor), so promote only needs to persist the field.
+func TestPromoteNoteToJob_WritesSkillFrontmatter(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("GROVE_HOME", "")
+
+	ecoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ecoRoot, "grove.yml"),
+		[]byte("version: '1.0'\nname: my-eco\n"), 0o644); err != nil {
+		t.Fatalf("write grove.yml: %v", err)
+	}
+	t.Chdir(ecoRoot)
+
+	planDir := filepath.Join(t.TempDir(), "my-plan")
+	if err := os.MkdirAll(planDir, 0o755); err != nil {
+		t.Fatalf("mkdir plan: %v", err)
+	}
+
+	noteDir := filepath.Join(t.TempDir(), "nb", "current")
+	if err := os.MkdirAll(noteDir, 0o755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	notePath := filepath.Join(noteDir, "20250101-skill-note.md")
+	noteContent := "---\nid: 20250101-skill-note\ntitle: Skill Note\n---\n\nNote body.\n"
+	if err := os.WriteFile(notePath, []byte(noteContent), 0o644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+
+	logger, _ := logtest.NewNullLogger()
+	svc := &Service{Logger: logrus.NewEntry(logger)}
+
+	jobFilename, err := svc.PromoteNoteToJob(notePath, planDir, PromoteOptions{
+		JobType: "interactive_agent",
+		Skill:   "grove-feature-subcoordinator",
+	})
+	if err != nil {
+		t.Fatalf("PromoteNoteToJob: %v", err)
+	}
+
+	jobBytes, err := os.ReadFile(filepath.Join(planDir, jobFilename))
+	if err != nil {
+		t.Fatalf("read job file: %v", err)
+	}
+	if !strings.Contains(string(jobBytes), "skill: grove-feature-subcoordinator") {
+		t.Errorf("job frontmatter missing skill field; got:\n%s", jobBytes)
+	}
+}
+
 func TestStripFrontmatterBlock(t *testing.T) {
 	tests := []struct {
 		name     string
