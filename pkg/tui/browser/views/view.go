@@ -372,16 +372,24 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 				info.indicator = icon
 			}
 		} else if idx := strings.Index(groupName, "/.artifacts/"); idx >= 0 {
-			// For artifact job-dir nodes, display only the job name (the part
-			// after `<parent>/.artifacts/`), not the full path. The raw name is
-			// an opaque job ID; resolve it to the human-readable job title when
-			// the plan's JobsByID map has a match, otherwise fall back to the ID
-			// (handles UUID-only dirs and orphaned/deleted jobs gracefully).
-			jobID := groupName[idx+len("/.artifacts/"):]
-			if title, ok := m.jobIDToTitle[jobID]; ok && title != "" {
-				info.name = title
+			// For artifact dir nodes, display only the LAST path segment of the
+			// nested tree, not the full path. The portion after `.artifacts/`
+			// may be a multi-segment chain (e.g. "<jobID>/workflows/wf_x/agents")
+			// rendered as a properly nested tree; each node shows just its own
+			// segment. The TOP job-dir segment is an opaque job ID, so resolve it
+			// to the human-readable job title when the plan's JobsByID map has a
+			// match (falling back to the ID for UUID-only / orphaned dirs).
+			rel := groupName[idx+len("/.artifacts/"):]
+			if slash := strings.IndexByte(rel, '/'); slash >= 0 {
+				// Deeper directory: label by the final path segment as-is.
+				info.name = rel[strings.LastIndexByte(rel, '/')+1:]
 			} else {
-				info.name = jobID
+				// Top job-dir segment: resolve the job ID to a friendly title.
+				if title, ok := m.jobIDToTitle[rel]; ok && title != "" {
+					info.name = title
+				} else {
+					info.name = rel
+				}
 			}
 		} else if node.IsPlan() {
 			// Handle plan nodes (but not archive nodes that start with "plans/")

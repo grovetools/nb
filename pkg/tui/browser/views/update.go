@@ -1169,18 +1169,50 @@ func (m *Model) addArtifactSubgroup(
 	parentName string,
 	parentGroup string,
 ) {
-	// Sort job names for stable rendering
-	var jobNames []string
-	for name := range artifactJobs {
-		jobNames = append(jobNames, name)
+	// The keys of artifactJobs are full relative paths under .artifacts/ (e.g.
+	// "test-2b3a8ac9/workflows/wf_xxx/agents"). Build an in-memory tree from
+	// those segments so nested directories render as a properly indented tree,
+	// preserving intermediate dirs (e.g. "workflows/") that would otherwise be
+	// dropped. The empty key ("") means files sit directly under .artifacts/.
+	artifactsTree := newGroupTreeNode("", "")
+	var rootNotes []*models.Note // notes directly under .artifacts/ (jobName == "")
+	for jobName, notes := range artifactJobs {
+		if jobName == "" {
+			rootNotes = append(rootNotes, notes...)
+			continue
+		}
+		parts := strings.Split(jobName, "/")
+		currentNode := artifactsTree
+		for i, part := range parts {
+			if _, ok := currentNode.children[part]; !ok {
+				fullName := strings.Join(parts[:i+1], "/")
+				currentNode.children[part] = newGroupTreeNode(part, fullName)
+				currentNode.childKeys = append(currentNode.childKeys, part)
+			}
+			currentNode = currentNode.children[part]
+		}
+		currentNode.notes = notes
 	}
-	sort.Strings(jobNames)
+	// Sort child keys at every level for stable rendering.
+	var sortNodes func(*groupTreeNode)
+	sortNodes = func(n *groupTreeNode) {
+		sort.Strings(n.childKeys)
+		for _, c := range n.children {
+			sortNodes(c)
+		}
+	}
+	sortNodes(artifactsTree)
 
-	// Count total artifact files across all jobs
-	totalArtifacts := 0
-	for _, notes := range artifactJobs {
-		totalArtifacts += len(notes)
+	// Count total artifact files across the whole subtree.
+	var countAll func(*groupTreeNode) int
+	countAll = func(n *groupTreeNode) int {
+		total := len(n.notes)
+		for _, c := range n.children {
+			total += countAll(c)
+		}
+		return total
 	}
+	totalArtifacts := countAll(artifactsTree) + len(rootNotes)
 
 	// Calculate .artifacts prefix (last child under this group)
 	var artifactsPrefix strings.Builder
@@ -1210,75 +1242,134 @@ func (m *Model) addArtifactSubgroup(
 	// Check if .artifacts parent is collapsed (collapsed by default on first sight)
 	artifactsParentNodeID := artifactsParentNode.NodeID()
 	m.seedCollapsedDefault(artifactsParentNodeID)
-	if !m.collapsedNodes[artifactsParentNodeID] || hasSearchFilter {
-		for ji, jobName := range jobNames {
-			isLastJob := ji == len(jobNames)-1
-			jobNotes := artifactJobs[jobName]
+	if m.collapsedNodes[artifactsParentNodeID] && !hasSearchFilter {
+		return
+	}
 
-			m.sortNotes(jobNotes)
+	// Render the directory subtree beneath .artifacts. Files directly under
+	// .artifacts (rootNotes) render after the dir children, and govern the
+	// last-child glyph of the deepest dir branch.
+	hasRootNotes := len(rootNotes) > 0
+	m.renderArtifactTree(nodes, ws, artifactsTree, artifactsPrefix.String(), ws.Depth+3,
+		hasSearchFilter, workspacePathMap, parentPath, parentGroup, hasRootNotes)
 
-			// Files directly under .artifacts/ (no per-job subdir): render
-			// straight under the .artifacts node.
-			if jobName == "" {
-				for ni, note := range jobNotes {
-					isLastNote := ni == len(jobNotes)-1 && isLastJob
-					var notePrefix strings.Builder
-					noteIndent := strings.ReplaceAll(artifactsPrefix.String(), "├ ", "│ ")
-					noteIndent = strings.ReplaceAll(noteIndent, "└ ", "  ")
-					notePrefix.WriteString(noteIndent)
-					if isLastNote {
-						notePrefix.WriteString("└ ")
-					} else {
-						notePrefix.WriteString("├ ")
-					}
-					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
-				}
-				continue
-			}
-
-			// Per-job subdir node
-			var jobPrefix strings.Builder
-			jobIndent := strings.ReplaceAll(artifactsPrefix.String(), "├ ", "│ ")
-			jobIndent = strings.ReplaceAll(jobIndent, "└ ", "  ")
-			jobPrefix.WriteString(jobIndent)
-			if isLastJob {
-				jobPrefix.WriteString("└ ")
+	if hasRootNotes {
+		m.sortNotes(rootNotes)
+		noteIndent := strings.ReplaceAll(artifactsPrefix.String(), "├ ", "│ ")
+		noteIndent = strings.ReplaceAll(noteIndent, "└ ", "  ")
+		for ni, note := range rootNotes {
+			isLastNote := ni == len(rootNotes)-1
+			var notePrefix strings.Builder
+			notePrefix.WriteString(noteIndent)
+			if isLastNote {
+				notePrefix.WriteString("└ ")
 			} else {
-				jobPrefix.WriteString("├ ")
+				notePrefix.WriteString("├ ")
 			}
+			*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
+		}
+	}
+}
 
-			jobItem := &tree.Item{
-				Path:     filepath.Join(parentPath, ".artifacts", jobName),
-				Name:     parentName + "/.artifacts/" + jobName,
-				IsDir:    true,
-				Type:     tree.TypeGroup,
-				Metadata: make(map[string]interface{}),
-			}
-			jobItem.Metadata["Workspace"] = ws.Name
-			jobItem.Metadata["Group"] = parentGroup + "/.artifacts/" + jobName
-			jobNode := &DisplayNode{
-				Item:       jobItem,
-				Prefix:     jobPrefix.String(),
-				Depth:      ws.Depth + 3,
-				ChildCount: len(jobNotes),
-			}
-			*nodes = append(*nodes, jobNode)
+// renderArtifactTree recursively renders the directory tree built from the
+// post-`.artifacts/` path segments. Each segment becomes its own group node
+// (including intermediate dirs like "workflows/"), indented one level deeper,
+// with ├/└ branch glyphs. Leaf dirs render their artifact files beneath them.
+// Group metadata carries the full path under .artifacts so labels can resolve
+// the job-dir title (top segment) and NodeIDs stay stable across rebuilds.
+func (m *Model) renderArtifactTree(
+	nodes *[]*DisplayNode,
+	ws *workspace.WorkspaceNode,
+	n *groupTreeNode,
+	parentPrefix string,
+	depth int,
+	hasSearchFilter bool,
+	workspacePathMap map[string]string,
+	parentPath string,
+	parentGroup string,
+	hasFollowingSiblings bool,
+) {
+	numChildren := len(n.childKeys)
+	for i, key := range n.childKeys {
+		child := n.children[key]
+		isLastChild := (i == numChildren-1) && !hasFollowingSiblings
 
-			jobNodeID := jobNode.NodeID()
-			if !m.collapsedNodes[jobNodeID] || hasSearchFilter {
-				for ni, note := range jobNotes {
-					isLastNote := ni == len(jobNotes)-1
-					var notePrefix strings.Builder
-					noteIndent := strings.ReplaceAll(jobPrefix.String(), "├ ", "│ ")
-					noteIndent = strings.ReplaceAll(noteIndent, "└ ", "  ")
-					notePrefix.WriteString(noteIndent)
-					if isLastNote {
-						notePrefix.WriteString("└ ")
-					} else {
-						notePrefix.WriteString("├ ")
-					}
-					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 4, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
+		var childPrefix strings.Builder
+		childPrefix.WriteString(parentPrefix)
+		if isLastChild {
+			childPrefix.WriteString("└ ")
+		} else {
+			childPrefix.WriteString("├ ")
+		}
+
+		// child.fullName is the relative path under .artifacts (e.g.
+		// "test-2b3a8ac9/workflows"). Metadata["Group"] carries the full
+		// path so view.go can label by the last segment / resolve the job
+		// title for the top segment.
+		fullPath := parentGroup + "/.artifacts/" + child.fullName
+		dirItem := &tree.Item{
+			Path:     filepath.Join(parentPath, ".artifacts", filepath.FromSlash(child.fullName)),
+			Name:     fullPath,
+			IsDir:    true,
+			Type:     tree.TypeGroup,
+			Metadata: make(map[string]interface{}),
+		}
+		dirItem.Metadata["Workspace"] = ws.Name
+		dirItem.Metadata["Group"] = fullPath
+
+		childCount := len(child.notes)
+		if childCount == 0 {
+			var countChildren func(*groupTreeNode) int
+			countChildren = func(node *groupTreeNode) int {
+				count := len(node.notes)
+				for _, c := range node.children {
+					count += countChildren(c)
 				}
+				return count
+			}
+			childCount = countChildren(child)
+		}
+
+		dirNode := &DisplayNode{
+			Item:       dirItem,
+			Prefix:     childPrefix.String(),
+			Depth:      depth,
+			ChildCount: childCount,
+		}
+		*nodes = append(*nodes, dirNode)
+
+		dirNodeID := dirNode.NodeID()
+		if m.collapsedNodes[dirNodeID] && !hasSearchFilter {
+			continue
+		}
+
+		var nextParentPrefix string
+		if isLastChild {
+			nextParentPrefix = parentPrefix + "  "
+		} else {
+			nextParentPrefix = parentPrefix + "│ "
+		}
+
+		// Recurse into subdirectories first; the leaf's own files (if any)
+		// follow, so any subdirs are non-last when files exist beneath them.
+		hasOwnNotes := len(child.notes) > 0
+		m.renderArtifactTree(nodes, ws, child, nextParentPrefix, depth+1,
+			hasSearchFilter, workspacePathMap, parentPath, parentGroup, hasOwnNotes)
+
+		if hasOwnNotes {
+			m.sortNotes(child.notes)
+			noteIndent := strings.ReplaceAll(childPrefix.String(), "├ ", "│ ")
+			noteIndent = strings.ReplaceAll(noteIndent, "└ ", "  ")
+			for ni, note := range child.notes {
+				isLastNote := ni == len(child.notes)-1
+				var notePrefix strings.Builder
+				notePrefix.WriteString(noteIndent)
+				if isLastNote {
+					notePrefix.WriteString("└ ")
+				} else {
+					notePrefix.WriteString("├ ")
+				}
+				*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: depth + 1, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
 			}
 		}
 	}
