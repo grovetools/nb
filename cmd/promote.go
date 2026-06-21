@@ -20,6 +20,7 @@ func NewPromoteCmd(svc **service.Service) *cobra.Command {
 	var jobTemplate string
 	var model string
 	var effort string
+	var skill string
 
 	cmd := &cobra.Command{
 		Use:   "promote <note-path>",
@@ -35,7 +36,8 @@ Use --workspace to resolve --plan relative to that workspace's plans directory.
 Examples:
   nb promote /path/to/note.md --plan /path/to/plan-dir
   nb promote ./inbox/my-note.md --plan ~/plans/sprint-42 --type headless_agent --model claude-3-5-sonnet --effort large
-  nb promote note.md --plan treemux-pt6 --workspace /path/to/workspace`,
+  nb promote note.md --plan treemux-pt6 --workspace /path/to/workspace
+  nb promote note.md --plan feature-x --type interactive_agent --skill grove-feature-subcoordinator`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s := *svc
@@ -65,6 +67,7 @@ Examples:
 				JobTemplate: jobTemplate,
 				Model:       model,
 				Effort:      effort,
+				Skill:       skill,
 			}
 			jobFilename, err := s.PromoteNoteToJob(notePath, absPlanDir, opts)
 			if err != nil {
@@ -91,6 +94,7 @@ Examples:
 	cmd.Flags().StringVar(&jobTemplate, "template", "chat", "Job template name")
 	cmd.Flags().StringVar(&model, "model", "", "LLM model to use for this job (e.g., claude-3-5-sonnet-20241022)")
 	cmd.Flags().StringVar(&effort, "effort", "", "Effort level for claude agent jobs; passed to the claude CLI as --effort")
+	cmd.Flags().StringVar(&skill, "skill", "", "Skill name to inject into the agent context (parity with flow plan add --skill; resolved at job run time)")
 
 	return cmd
 }
