@@ -2019,26 +2019,47 @@ func partitionByPriority(notes []*models.Note) []syntheticBucket {
 	return buckets
 }
 
-// partitionByDate buckets notes by CreatedAt into Today / This Week / This Month
-// / Older relative to now. Order is fixed; empty buckets are dropped.
+// partitionByDate buckets notes by CreatedAt into granular relative buckets:
+// Today / Yesterday / 2 Days Ago / 3 Days Ago / This Week / Last Week /
+// This Month / Icebox, relative to now. Order is fixed (most recent first);
+// empty buckets are dropped.
+//
+// Each note lands in the first (most-recent) bucket whose threshold it is at or
+// after. The relative day-buckets (today..3 days ago) take precedence over the
+// calendar-week buckets, so early in the week the "3 days ago" bucket may reach
+// into last week's calendar days and "This Week" may be empty — that is by
+// design and produces no misrouting, since first-match gives every note exactly
+// one bucket and empty buckets are dropped.
 func partitionByDate(notes []*models.Note) []syntheticBucket {
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	yesterday := today.AddDate(0, 0, -1)
+	twoDaysAgo := today.AddDate(0, 0, -2)
+	threeDaysAgo := today.AddDate(0, 0, -3)
 	weekStart := today.AddDate(0, 0, -int(today.Weekday()))
+	lastWeekStart := weekStart.AddDate(0, 0, -7)
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 
-	var todayN, weekN, monthN, olderN []*models.Note
+	var todayN, yesterdayN, twoN, threeN, weekN, lastWeekN, monthN, iceboxN []*models.Note
 	for _, note := range notes {
 		c := note.CreatedAt
 		switch {
 		case !c.Before(today):
 			todayN = append(todayN, note)
+		case !c.Before(yesterday):
+			yesterdayN = append(yesterdayN, note)
+		case !c.Before(twoDaysAgo):
+			twoN = append(twoN, note)
+		case !c.Before(threeDaysAgo):
+			threeN = append(threeN, note)
 		case !c.Before(weekStart):
 			weekN = append(weekN, note)
+		case !c.Before(lastWeekStart):
+			lastWeekN = append(lastWeekN, note)
 		case !c.Before(monthStart):
 			monthN = append(monthN, note)
 		default:
-			olderN = append(olderN, note)
+			iceboxN = append(iceboxN, note)
 		}
 	}
 
@@ -2049,9 +2070,13 @@ func partitionByDate(notes []*models.Note) []syntheticBucket {
 		}
 	}
 	appendBucket("today", "Today", todayN)
+	appendBucket("yesterday", "Yesterday", yesterdayN)
+	appendBucket("2-days-ago", "2 Days Ago", twoN)
+	appendBucket("3-days-ago", "3 Days Ago", threeN)
 	appendBucket("week", "This Week", weekN)
+	appendBucket("last-week", "Last Week", lastWeekN)
 	appendBucket("month", "This Month", monthN)
-	appendBucket("older", "Older", olderN)
+	appendBucket("icebox", "Icebox", iceboxN)
 	return buckets
 }
 

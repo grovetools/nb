@@ -11,7 +11,7 @@ func TestPartitionByDate(t *testing.T) {
 	now := time.Now()
 	notes := []*models.Note{
 		{Path: "today.md", CreatedAt: now},
-		{Path: "older.md", CreatedAt: now.AddDate(0, -2, 0)},
+		{Path: "icebox.md", CreatedAt: now.AddDate(0, -2, 0)},
 	}
 
 	buckets := partitionByDate(notes)
@@ -21,14 +21,56 @@ func TestPartitionByDate(t *testing.T) {
 	if buckets[0].id != "today" || buckets[0].label != "Today" {
 		t.Errorf("expected first bucket to be Today, got %q/%q", buckets[0].id, buckets[0].label)
 	}
-	if buckets[len(buckets)-1].id != "older" {
-		t.Errorf("expected last bucket to be older, got %q", buckets[len(buckets)-1].id)
+	if buckets[len(buckets)-1].id != "icebox" {
+		t.Errorf("expected last bucket to be icebox, got %q", buckets[len(buckets)-1].id)
 	}
-	// Empty buckets (week, month) must be omitted.
+	// Empty buckets (yesterday, week, month, ...) must be omitted.
 	for _, b := range buckets {
 		if len(b.notes) == 0 {
 			t.Errorf("bucket %q is empty but was not omitted", b.id)
 		}
+	}
+}
+
+// TestPartitionByDateGranularDays verifies the relative day-buckets (yesterday,
+// 2 days ago, 3 days ago) are split out and ordered most-recent-first. Notes are
+// anchored at noon of each day so they land squarely inside the target bucket
+// regardless of the current time of day.
+func TestPartitionByDateGranularDays(t *testing.T) {
+	now := time.Now()
+	noon := func(daysAgo int) time.Time {
+		d := now.AddDate(0, 0, -daysAgo)
+		return time.Date(d.Year(), d.Month(), d.Day(), 12, 0, 0, 0, d.Location())
+	}
+	notes := []*models.Note{
+		{Path: "today.md", CreatedAt: noon(0)},
+		{Path: "yesterday.md", CreatedAt: noon(1)},
+		{Path: "two.md", CreatedAt: noon(2)},
+		{Path: "three.md", CreatedAt: noon(3)},
+	}
+
+	buckets := partitionByDate(notes)
+
+	byID := map[string]int{}
+	order := []string{}
+	for _, b := range buckets {
+		byID[b.id] = len(b.notes)
+		order = append(order, b.id)
+	}
+
+	for _, id := range []string{"today", "yesterday", "2-days-ago", "3-days-ago"} {
+		if byID[id] != 1 {
+			t.Errorf("expected exactly 1 note in bucket %q, got %d", id, byID[id])
+		}
+	}
+
+	// The relative day-buckets must appear in most-recent-first order.
+	rank := map[string]int{}
+	for i, id := range order {
+		rank[id] = i
+	}
+	if !(rank["today"] < rank["yesterday"] && rank["yesterday"] < rank["2-days-ago"] && rank["2-days-ago"] < rank["3-days-ago"]) {
+		t.Errorf("expected most-recent-first order, got %v", order)
 	}
 }
 
