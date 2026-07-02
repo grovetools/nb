@@ -6,7 +6,6 @@ import (
 
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/models"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/grovetools/nb/pkg/frontmatter"
@@ -59,10 +58,8 @@ func newUpdateNoteCmd(svc **service.Service) *cobra.Command {
 				return fmt.Errorf("failed to append content to note: %w", err)
 			}
 
-			(*svc).Logger.WithField("path", notePath).Info("Appended content to note")
-
 			ws, _, noteType := service.GetNoteMetadata(notePath)
-			notifyDaemonNoteEventCmd(models.NoteEvent{
+			service.EmitNoteEvent(models.NoteEvent{
 				Event:     models.NoteEventUpdated,
 				Workspace: ws,
 				NoteType:  noteType,
@@ -148,14 +145,8 @@ func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 				return fmt.Errorf("failed to write note file: %w", err)
 			}
 
-			(*svc).Logger.WithFields(logrus.Fields{
-				"path":  notePath,
-				"field": fieldName,
-				"value": fieldValue,
-			}).Info("Updated note frontmatter")
-
 			ws, _, noteType := service.GetNoteMetadata(notePath)
-			notifyDaemonNoteEventCmd(models.NoteEvent{
+			service.EmitNoteEvent(models.NoteEvent{
 				Event:     models.NoteEventUpdated,
 				Workspace: ws,
 				NoteType:  noteType,
