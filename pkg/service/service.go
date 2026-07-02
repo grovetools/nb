@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -74,7 +73,7 @@ func (s *Service) CreateNoteWithContent(
 		return nil, fmt.Errorf("parse created note: %w", err)
 	}
 
-	notifyDaemonNoteEvent(coremodels.NoteEvent{
+	EmitNoteEvent(coremodels.NoteEvent{
 		Event:     coremodels.NoteEventCreated,
 		Workspace: ctx.NotebookContextWorkspace.Name,
 		NoteType:  string(noteType),
@@ -114,7 +113,7 @@ func (s *Service) UpdateNoteWithContent(
 	}
 
 	ws, _, noteType := GetNoteMetadata(notePath)
-	notifyDaemonNoteEvent(coremodels.NoteEvent{
+	EmitNoteEvent(coremodels.NoteEvent{
 		Event:     coremodels.NoteEventUpdated,
 		Workspace: ws,
 		NoteType:  noteType,
@@ -126,8 +125,6 @@ func (s *Service) UpdateNoteWithContent(
 
 // DeleteNotes removes note files from the filesystem.
 func (s *Service) DeleteNotes(paths []string) error {
-	s.Logger.WithField("count", len(paths)).Warn("Deleting notes")
-
 	var errs []string
 	for _, path := range paths {
 		ws, _, noteType := GetNoteMetadata(path)
@@ -135,8 +132,7 @@ func (s *Service) DeleteNotes(paths []string) error {
 			s.Logger.WithError(err).WithField("path", path).Error("Failed to delete note")
 			errs = append(errs, fmt.Sprintf("failed to delete %s: %v", path, err))
 		} else {
-			s.Logger.WithField("path", path).Warn("Deleted note")
-			notifyDaemonNoteEvent(coremodels.NoteEvent{
+			EmitNoteEvent(coremodels.NoteEvent{
 				Event:     coremodels.NoteEventDeleted,
 				Workspace: ws,
 				NoteType:  noteType,
@@ -241,7 +237,7 @@ func (s *Service) transferNotes(sourcePaths []string, destWorkspace *coreworkspa
 		if mode == "copy" {
 			eventType = coremodels.NoteEventCreated
 		}
-		notifyDaemonNoteEvent(coremodels.NoteEvent{
+		EmitNoteEvent(coremodels.NoteEvent{
 			Event:         eventType,
 			Workspace:     destWorkspace.Name,
 			NoteType:      destGroup,
@@ -570,7 +566,7 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 	note.Branch = currentContext.Branch
 	note.Type = noteType
 
-	notifyDaemonNoteEvent(coremodels.NoteEvent{
+	EmitNoteEvent(coremodels.NoteEvent{
 		Event:     coremodels.NoteEventCreated,
 		Workspace: currentContext.NotebookContextWorkspace.Name,
 		NoteType:  string(noteType),
@@ -583,15 +579,6 @@ func (s *Service) CreateNote(ctx *WorkspaceContext, noteType models.NoteType, ti
 			s.Logger.WithError(err).Warn("Failed to open editor")
 		}
 	}
-
-	serviceUlog.Info("Created new note").
-		Field("path", note.Path).
-		Field("type", note.Type).
-		Field("title", note.Title).
-		Field("workspace", note.Workspace).
-		Field("branch", note.Branch).
-		StructuredOnly().
-		Log(context.Background())
 
 	return note, nil
 }
@@ -688,7 +675,7 @@ related_skills: []
 		return nil, fmt.Errorf("create overview.md: %w", err)
 	}
 
-	notifyDaemonNoteEvent(coremodels.NoteEvent{
+	EmitNoteEvent(coremodels.NoteEvent{
 		Event:     coremodels.NoteEventCreated,
 		Workspace: currentContext.NotebookContextWorkspace.Name,
 		NoteType:  "concepts",
@@ -1938,7 +1925,7 @@ func (s *Service) ArchiveNotes(ctx *WorkspaceContext, paths []string) error {
 		// original. The daemon needs both to treat the archive as a first-class
 		// move (rename detection) instead of a delete+create pair.
 		ws, _, noteType := GetNoteMetadata(path)
-		notifyDaemonNoteEvent(coremodels.NoteEvent{
+		EmitNoteEvent(coremodels.NoteEvent{
 			Event:         coremodels.NoteEventArchived,
 			Workspace:     ws,
 			NoteType:      noteType,
@@ -2258,12 +2245,7 @@ func (s *Service) UpdateNoteContent(path string, content string) error {
 	note.Branch = branch
 	note.Type = models.NoteType(noteType)
 
-	serviceUlog.Info("Updated note content").
-		Field("path", path).
-		StructuredOnly().
-		Log(context.Background())
-
-	notifyDaemonNoteEvent(coremodels.NoteEvent{
+	EmitNoteEvent(coremodels.NoteEvent{
 		Event:     coremodels.NoteEventUpdated,
 		Workspace: ws,
 		NoteType:  noteType,

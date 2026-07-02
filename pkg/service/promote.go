@@ -166,7 +166,7 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 	// the frontmatter rewrite so the daemon indexes the final content (plan_ref).
 	ws, _, noteType := GetNoteMetadata(inProgressPath)
 	prevWs, _, prevType := GetNoteMetadata(notePath)
-	notifyDaemonNoteEvent(coremodels.NoteEvent{
+	EmitNoteEvent(coremodels.NoteEvent{
 		Event:         coremodels.NoteEventMoved,
 		Workspace:     ws,
 		NoteType:      noteType,
