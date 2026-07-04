@@ -15,12 +15,12 @@ type KeyMap struct {
 	// Focus operations (TUI-specific)
 	FocusEcosystem  key.Binding
 	ClearFocus      key.Binding
-	FocusParent     key.Binding
 	FocusSelected   key.Binding
 	FocusRecent     key.Binding
 	FocusArchive    key.Binding
-	JumpToWorkspace key.Binding
 	JumpToArtifacts key.Binding
+	// Search operations (TUI-specific)
+	ReEnterSearch key.Binding
 	// Filter operations (TUI-specific)
 	FilterByTag      key.Binding
 	ToggleGitChanges key.Binding
@@ -52,7 +52,6 @@ type KeyMap struct {
 	GitStageAll    key.Binding
 	GitUnstageAll  key.Binding
 	// Misc operations (TUI-specific)
-	Preview     key.Binding
 	Refresh     key.Binding
 	Sync        key.Binding
 	AutoArchive key.Binding
@@ -67,14 +66,20 @@ func (k KeyMap) ShortHelp() []key.Binding {
 func (k KeyMap) Sections() []keymap.Section {
 	return []keymap.Section{
 		k.Base.NavigationSection(),
+		// Actions (Base): confirm/back/edit/delete(dd)/yank(yy)/rename/refresh/copy-path.
+		// These are all handled in update.go but were previously invisible in help.
+		k.Base.ActionsSection(),
 		k.Base.SelectionSection(),
-		k.Base.SearchSection(),
+		// Search plus the TUI-specific "i" re-enter-search binding.
+		k.Base.SearchSection().With(k.ReEnterSearch),
+		// Scoped View section: nb only implements switch-view (tab) and preview (v).
+		keymap.ViewSection(k.SwitchView, k.TogglePreview),
 		k.Base.FoldSection(),
 		// Common sections use standard constants (icons auto-resolved)
 		keymap.NewSection(keymap.SectionFocus,
-			k.FocusEcosystem, k.ClearFocus, k.FocusParent,
+			k.FocusEcosystem, k.ClearFocus,
 			k.FocusSelected, k.FocusRecent, k.FocusArchive,
-			k.JumpToWorkspace, k.JumpToArtifacts,
+			k.JumpToArtifacts,
 		),
 		keymap.NewSection(keymap.SectionFilter,
 			k.FilterByTag, k.ToggleGitChanges, k.Sort, k.CycleGrouping,
@@ -96,7 +101,7 @@ func (k KeyMap) Sections() []keymap.Section {
 			k.GitStageToggle, k.GitStageAll, k.GitUnstageAll, k.GitCommit,
 		),
 		keymap.NewSectionWithIcon("Misc", theme.IconGear,
-			k.Preview, k.Refresh, k.Sync, k.AutoArchive,
+			k.Refresh, k.Sync, k.AutoArchive,
 		),
 		k.Base.SystemSection(),
 	}
@@ -117,10 +122,6 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("ctrl+g"),
 			key.WithHelp("ctrl+g", "clear focus"),
 		),
-		FocusParent: key.NewBinding(
-			key.WithKeys(""),
-			key.WithHelp("", "focus parent (disabled)"),
-		),
 		FocusSelected: key.NewBinding(
 			key.WithKeys("."),
 			key.WithHelp(".", "focus selected"),
@@ -133,13 +134,14 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys(","),
 			key.WithHelp(",", "archive view (.archive/.closed)"),
 		),
-		JumpToWorkspace: key.NewBinding(
-			key.WithKeys("1", "2", "3", "4", "5", "6", "7", "8", "9"),
-			key.WithHelp("1-9", "jump to workspace"),
-		),
 		JumpToArtifacts: key.NewBinding(
 			key.WithKeys(";"),
 			key.WithHelp(";", "jump to job artifacts"),
+		),
+		// Search operations
+		ReEnterSearch: key.NewBinding(
+			key.WithKeys("i"),
+			key.WithHelp("i", "re-enter search (vim insert)"),
 		),
 		// Filter operations
 		FilterByTag: key.NewBinding(
@@ -148,7 +150,9 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		),
 		ToggleGitChanges: key.NewBinding(
 			key.WithKeys("<", ">"),
-			key.WithHelp("<,>", "git changes"),
+			// Help label uses "/" so it is treated as an alternate-key list and
+			// not audited as a single-key label (keys are "<" and ">").
+			key.WithHelp("</>", "git changes"),
 		),
 		Sort: key.NewBinding(
 			key.WithKeys("s"),
@@ -252,10 +256,6 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("+", "unstage all"),
 		),
 		// Misc operations
-		Preview: key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "toggle preview focus"),
-		),
 		Refresh: key.NewBinding(
 			key.WithKeys("ctrl+r"),
 			key.WithHelp("ctrl+r", "refresh"),
@@ -273,6 +273,25 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("Z", "auto-archive notes older than 30 days"),
 		),
 	}
+
+	// The nb browser is not a tabbed pager: it does not implement the Base
+	// tab/focus navigation bindings. Disable them so help stays truthful and
+	// AuditCoverage does not flag them as hidden-but-enabled. The scoped View
+	// section above exposes only what the browser actually handles
+	// (switch-view + preview).
+	km.NextTab.SetEnabled(false)
+	km.PrevTab.SetEnabled(false)
+	km.FocusNext.SetEnabled(false)
+	km.FocusPrev.SetEnabled(false)
+	km.Tab1.SetEnabled(false)
+	km.Tab2.SetEnabled(false)
+	km.Tab3.SetEnabled(false)
+	km.Tab4.SetEnabled(false)
+	km.Tab5.SetEnabled(false)
+	km.Tab6.SetEnabled(false)
+	km.Tab7.SetEnabled(false)
+	km.Tab8.SetEnabled(false)
+	km.Tab9.SetEnabled(false)
 
 	// Apply TUI-specific overrides from config
 	keymap.ApplyTUIOverrides(cfg, "nb", "browser", &km)
