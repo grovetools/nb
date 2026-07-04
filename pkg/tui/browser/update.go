@@ -877,48 +877,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				// Re-fetch all notes for the global view
 				return m, tea.Batch(fetchAllItemsCmd(m.service, m.showArtifacts), m.spinner.Tick)
 			}
-		case key.Matches(msg, m.keys.FocusParent):
-			if m.focusedWorkspace != nil {
-				var parent *workspace.WorkspaceNode
-
-				// Try to find parent in this order:
-				// 1. ParentEcosystemPath (immediate parent ecosystem)
-				// 2. RootEcosystemPath (if not already at root)
-				// 3. ParentProjectPath (parent project)
-				// 4. nil (go to global view)
-
-				var parentPath string
-				if m.focusedWorkspace.ParentEcosystemPath != "" {
-					parentPath = m.focusedWorkspace.ParentEcosystemPath
-				} else if m.focusedWorkspace.RootEcosystemPath != "" &&
-					m.focusedWorkspace.RootEcosystemPath != m.focusedWorkspace.Path {
-					// Not at root yet, go to root ecosystem
-					parentPath = m.focusedWorkspace.RootEcosystemPath
-				} else if m.focusedWorkspace.ParentProjectPath != "" {
-					parentPath = m.focusedWorkspace.ParentProjectPath
-				}
-
-				if parentPath != "" {
-					// Find the parent workspace node
-					for _, ws := range m.workspaces {
-						isSame, _ := pathutil.ComparePaths(ws.Path, parentPath)
-						if isSame {
-							parent = ws
-							break
-						}
-					}
-				}
-
-				m.loadingCount++
-				m.focusedWorkspace = parent // This can be nil if no parent is found, effectively clearing focus
-				m.focusChanged = true
-				// Re-fetch notes for the new focus level
-				if m.focusedWorkspace != nil {
-					return m, tea.Batch(fetchFocusedItemsCmd(m.service, m.focusedWorkspace, m.showArtifacts), m.spinner.Tick)
-				} else {
-					return m, tea.Batch(fetchAllItemsCmd(m.service, m.showArtifacts), m.spinner.Tick)
-				}
-			}
 		case key.Matches(msg, m.keys.FocusSelected):
 			node := m.views.GetCurrentNode()
 			if node != nil && node.IsWorkspace() {
@@ -1015,7 +973,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			}
 			m.filterInput.Focus()
 			return m, textinput.Blink
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "i":
+		case key.Matches(msg, m.keys.ReEnterSearch):
 			// Vim-style: 'i' re-enters search (insert mode) if filter has value
 			if m.filterInput.Value() != "" {
 				m.filterInput.CursorEnd()
@@ -1288,9 +1246,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 					}
 				}
 			}
-		case key.Matches(msg, m.keys.Preview): // Tab
-			m.previewFocused = !m.previewFocused
-			return m, nil
 		case key.Matches(msg, m.keys.TogglePreview): // v - split preview mode
 			node := m.views.GetCurrentNode()
 			if node == nil || !node.IsNote() {
