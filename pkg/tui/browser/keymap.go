@@ -94,8 +94,10 @@ func (k KeyMap) Sections() []keymap.Section {
 			k.CreatePlan, k.PromoteToJob, k.Rename,
 			k.PriorityUp, k.PriorityDown,
 		),
+		// CopyPath (ctrl+y) is already surfaced by Base.ActionsSection above;
+		// it is not repeated here to keep a single `copy_path` ConfigKey.
 		keymap.NewSectionWithIcon("Clipboard", theme.IconArchive,
-			k.Cut, k.Copy, k.Paste, k.Archive, k.CopyPath,
+			k.Cut, k.Copy, k.Paste, k.Archive,
 		),
 		keymap.NewSection(keymap.SectionGit,
 			k.GitStageToggle, k.GitStageAll, k.GitUnstageAll, k.GitCommit,
@@ -279,6 +281,14 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 	// AuditCoverage does not flag them as hidden-but-enabled. The scoped View
 	// section above exposes only what the browser actually handles
 	// (switch-view + preview).
+	// The TUI-specific Rename (R, "rename note") and Refresh (ctrl+r) fields
+	// above shadow Base.Rename/Base.Refresh with the same keys, and update.go
+	// handles rename/refresh via those top-level fields. Disable the Base copies
+	// so the merged export carries a single `rename`/`refresh` ConfigKey instead
+	// of a duplicate from Base.ActionsSection.
+	km.Base.Rename.SetEnabled(false)
+	km.Base.Refresh.SetEnabled(false)
+
 	km.NextTab.SetEnabled(false)
 	km.PrevTab.SetEnabled(false)
 	km.FocusNext.SetEnabled(false)
