@@ -18,11 +18,30 @@ import (
 
 // PromoteOptions configures the job created by PromoteNoteToJob.
 type PromoteOptions struct {
-	JobType     string // e.g. "chat", "interactive_agent", "headless_agent", "oneshot"
-	JobTemplate string // e.g. "chat", "" for none
-	Model       string // LLM model to use for this job (optional)
-	Effort      string // Effort level for claude agent jobs (optional)
-	Skill       string // Skill name to inject into the agent context, written to job frontmatter (optional)
+	JobType     string   // e.g. "chat", "interactive_agent", "headless_agent", "oneshot"
+	JobTemplate string   // e.g. "chat", "" for none
+	Model       string   // LLM model to use for this job (optional)
+	Effort      string   // Effort level for claude agent jobs (optional)
+	Skill       string   // Skill name to inject into the agent context, written to job frontmatter (optional)
+	DependsOn   []string // Job filenames in the target plan the promoted job depends on (optional)
+}
+
+// PromoteResult records one note→job promotion within a batch.
+type PromoteResult struct {
+	NotePath    string `json:"note"`
+	JobFilename string `json:"job_file"`
+}
+
+// PromotePreview describes what promoting a note WOULD create, without writing.
+type PromotePreview struct {
+	NotePath         string   `json:"note"`
+	Title            string   `json:"title"`
+	JobType          string   `json:"job_type"`
+	Model            string   `json:"model,omitempty"`
+	Skill            string   `json:"skill,omitempty"`
+	DependsOn        []string `json:"depends_on,omitempty"`
+	PredictedJobFile string   `json:"predicted_job_file"`
+	InProgressPath   string   `json:"in_progress_path"`
 }
 
 // PromoteNoteToJob promotes a note to a job in an existing flow plan.
@@ -35,30 +54,15 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 		return "", fmt.Errorf("loading plan %s: %w", planDir, err)
 	}
 
-	// Read note content from disk
-	noteContent, err := os.ReadFile(notePath)
-	if err != nil {
-		return "", fmt.Errorf("reading note: %w", err)
+	// Validate declared dependencies against the plan before any mutation,
+	// matching flow plan add semantics (deps are job filenames).
+	if err := validateJobDependencies(plan, opts.DependsOn); err != nil {
+		return "", err
 	}
 
-	// Parse frontmatter to get the body content
-	fm, body, err := frontmatter.Parse(string(noteContent))
+	fm, body, noteTitle, err := s.parseNoteForPromotion(notePath)
 	if err != nil {
-		// On parse failure, strip the frontmatter block textually to avoid double-frontmatter.
-		// Log a warning for visibility.
-		s.Logger.WithError(err).Warnf("Failed to parse frontmatter in note %s, using fallback body extraction", notePath)
-		body = stripFrontmatterBlock(string(noteContent))
-	}
-
-	// Determine the note title
-	noteTitle := ""
-	if fm != nil {
-		noteTitle = fm.Title
-	}
-	if noteTitle == "" {
-		// Derive from filename: strip date prefix and extension
-		base := strings.TrimSuffix(filepath.Base(notePath), filepath.Ext(notePath))
-		noteTitle = base
+		return "", err
 	}
 
 	// Generate a unique job ID
@@ -88,15 +92,16 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 		jobStatus = orchestration.JobStatusPending
 	}
 	job := &orchestration.Job{
-		ID:       jobID,
-		Title:    noteTitle,
-		Type:     jobType,
-		Status:   jobStatus,
-		Template: opts.JobTemplate,
-		Model:    opts.Model,
-		Effort:   opts.Effort,
-		Skill:    opts.Skill,
-		NoteRef:  inProgressPath,
+		ID:        jobID,
+		Title:     noteTitle,
+		Type:      jobType,
+		Status:    jobStatus,
+		Template:  opts.JobTemplate,
+		Model:     opts.Model,
+		Effort:    opts.Effort,
+		Skill:     opts.Skill,
+		DependsOn: opts.DependsOn,
+		NoteRef:   inProgressPath,
 	}
 	if plan.Config != nil {
 		if plan.Config.Worktree != "" {
@@ -177,6 +182,143 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 	})
 
 	return jobFilename, nil
+}
+
+// PromoteNotesToJobs promotes a batch of notes into one plan (a triage
+// roster). All inputs are preflighted before the first note moves: the plan
+// must load, dependencies must exist, and every note must be a readable file —
+// so validation failures cost nothing. A mid-batch I/O failure stops the batch
+// and returns the results already promoted alongside the error.
+func (s *Service) PromoteNotesToJobs(notePaths []string, planDir string, opts PromoteOptions) ([]PromoteResult, error) {
+	if len(notePaths) == 0 {
+		return nil, fmt.Errorf("no notes to promote")
+	}
+
+	// Preflight: plan + deps
+	plan, err := orchestration.LoadPlan(planDir)
+	if err != nil {
+		return nil, fmt.Errorf("loading plan %s: %w", planDir, err)
+	}
+	if err := validateJobDependencies(plan, opts.DependsOn); err != nil {
+		return nil, err
+	}
+
+	// Preflight: every note exists, is a regular file, and appears once
+	seen := make(map[string]struct{}, len(notePaths))
+	for _, p := range notePaths {
+		if _, dup := seen[p]; dup {
+			return nil, fmt.Errorf("note listed twice: %s", p)
+		}
+		seen[p] = struct{}{}
+		info, err := os.Stat(p)
+		if err != nil {
+			return nil, fmt.Errorf("note not found: %s: %w", p, err)
+		}
+		if info.IsDir() {
+			return nil, fmt.Errorf("note is a directory: %s", p)
+		}
+	}
+
+	results := make([]PromoteResult, 0, len(notePaths))
+	for i, p := range notePaths {
+		jobFilename, err := s.PromoteNoteToJob(p, planDir, opts)
+		if err != nil {
+			return results, fmt.Errorf("promoted %d of %d notes; %s failed: %w", i, len(notePaths), p, err)
+		}
+		results = append(results, PromoteResult{NotePath: p, JobFilename: jobFilename})
+	}
+	return results, nil
+}
+
+// PreviewPromoteNotes computes what PromoteNotesToJobs would create, without
+// writing or moving anything. Predicted job filenames assume the batch runs
+// against the plan in its current state.
+func (s *Service) PreviewPromoteNotes(notePaths []string, planDir string, opts PromoteOptions) ([]PromotePreview, error) {
+	plan, err := orchestration.LoadPlan(planDir)
+	if err != nil {
+		return nil, fmt.Errorf("loading plan %s: %w", planDir, err)
+	}
+	if err := validateJobDependencies(plan, opts.DependsOn); err != nil {
+		return nil, err
+	}
+
+	nextNum, err := orchestration.GetNextJobNumber(plan.Directory)
+	if err != nil {
+		return nil, fmt.Errorf("getting next job number: %w", err)
+	}
+
+	jobType := string(orchestration.JobTypeChat)
+	if opts.JobType != "" {
+		jobType = opts.JobType
+	}
+
+	previews := make([]PromotePreview, 0, len(notePaths))
+	for i, p := range notePaths {
+		if _, err := os.Stat(p); err != nil {
+			return nil, fmt.Errorf("note not found: %s: %w", p, err)
+		}
+		_, _, title, err := s.parseNoteForPromotion(p)
+		if err != nil {
+			return nil, err
+		}
+		previews = append(previews, PromotePreview{
+			NotePath:         p,
+			Title:            title,
+			JobType:          jobType,
+			Model:            opts.Model,
+			Skill:            opts.Skill,
+			DependsOn:        opts.DependsOn,
+			PredictedJobFile: orchestration.GenerateJobFilename(nextNum+i, title),
+			InProgressPath:   filepath.Join(filepath.Dir(filepath.Dir(p)), "in_progress", filepath.Base(p)),
+		})
+	}
+	return previews, nil
+}
+
+// parseNoteForPromotion reads a note and returns its frontmatter (nil when
+// unparseable), body, and resolved title — the shared front half of promote
+// and its dry-run preview.
+func (s *Service) parseNoteForPromotion(notePath string) (fm *frontmatter.Frontmatter, body string, title string, err error) {
+	noteContent, err := os.ReadFile(notePath)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("reading note: %w", err)
+	}
+
+	fm, body, parseErr := frontmatter.Parse(string(noteContent))
+	if parseErr != nil {
+		// On parse failure, strip the frontmatter block textually to avoid double-frontmatter.
+		// Log a warning for visibility.
+		s.Logger.WithError(parseErr).Warnf("Failed to parse frontmatter in note %s, using fallback body extraction", notePath)
+		fm = nil
+		body = stripFrontmatterBlock(string(noteContent))
+	}
+
+	if fm != nil {
+		title = fm.Title
+	}
+	if title == "" {
+		// Derive from filename: strip extension
+		title = strings.TrimSuffix(filepath.Base(notePath), filepath.Ext(notePath))
+	}
+	return fm, body, title, nil
+}
+
+// validateJobDependencies checks each declared dependency is an existing job
+// filename in the plan, matching flow plan add's validation.
+func validateJobDependencies(plan *orchestration.Plan, deps []string) error {
+	for _, dep := range deps {
+		found := false
+		for _, j := range plan.Jobs {
+			if j.Filename == dep {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("dependency not found in plan: %s", dep)
+		}
+	}
+	return nil
 }
 
 // stripFrontmatterBlock removes the frontmatter block from content, returning only the body.
