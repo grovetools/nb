@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -95,6 +96,7 @@ func NewSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 	// Add subcommands for Notebook Sync Phase 2 (daemon-coordinated)
 	cmd.AddCommand(NewSyncHistoryCmd(svc, workspaceOverride))
 	cmd.AddCommand(NewSyncRestoreCmd(svc, workspaceOverride))
+	cmd.AddCommand(NewSyncAdoptCmd(svc, workspaceOverride))
 	cmd.AddCommand(NewSyncConflictsCmd(svc, workspaceOverride))
 
 	return cmd
@@ -187,6 +189,66 @@ func NewSyncRestoreCmd(svc **service.Service, workspaceOverride *string) *cobra.
 	return cmd
 }
 
+// NewSyncAdoptCmd creates the `sync adopt` subcommand: the one sanctioned,
+// user-initiated write that resolves a diverged document. Sync itself never
+// writes the notebook tree (strict push-only, S5); when a push-side rebase
+// merges a remote edit that the local file does not carry, the document enters
+// the `diverged` state and its local file is deliberately left alone. `adopt`
+// fetches the server head from the daemon and writes it over the local file —
+// the user asked for it, so this is not sync writing the tree. Distinct from
+// `restore`, which plays back a specific historical version.
+func NewSyncAdoptCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "adopt <file>",
+		Short: "Adopt the server head for a diverged document",
+		Long: `Take the current server head as the local content for a document that has
+diverged (a merged remote edit the local file does not carry). Sync never
+writes the notebook tree on its own; adopt is the explicit, user-initiated
+write that resolves the divergence.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			absPath, err := filepath.Abs(args[0])
+			if err != nil {
+				return err
+			}
+			workspace, relPath, err := resolveSyncDocRef(*svc, *workspaceOverride, args[0])
+			if err != nil {
+				return err
+			}
+
+			reqBody, err := json.Marshal(map[string]string{"workspace": workspace, "path": relPath})
+			if err != nil {
+				return err
+			}
+			resp, err := daemonSyncRequest(cmd.Context(), http.MethodPost, "/api/sync/adopt", bytes.NewReader(reqBody))
+			if err != nil {
+				return fmt.Errorf("daemon request failed (is groved running?): %w", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			content, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return err
+			}
+			if resp.StatusCode == http.StatusConflict {
+				return fmt.Errorf("cannot adopt %s/%s yet: %s (the merged push must drain first)",
+					workspace, relPath, strings.TrimSpace(string(content)))
+			}
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("daemon returned %d: %s", resp.StatusCode, strings.TrimSpace(string(content)))
+			}
+
+			// The sanctioned user-initiated write (mirrors NewSyncRestoreCmd).
+			if err := os.WriteFile(absPath, content, 0o644); err != nil {
+				return fmt.Errorf("write adopted content: %w", err)
+			}
+			notifyDaemonRefreshCmd()
+			fmt.Printf("Adopted %s/%s at server head (%d bytes)\n", workspace, relPath, len(content))
+			return nil
+		},
+	}
+}
+
 // NewSyncConflictsCmd creates the `sync conflicts` subcommand.
 // Lists, views, and resolves merge conflicts from sync.
 func NewSyncConflictsCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
@@ -251,9 +313,13 @@ func resolveSyncDocRef(s *service.Service, workspaceOverride, fileArg string) (s
 	return workspace, filepath.ToSlash(rel), nil
 }
 
-// daemonSyncGet performs a GET against the global daemon's unix socket.
-// Sync credentials live exclusively in the daemon; nb never sees the token.
-func daemonSyncGet(ctx context.Context, requestPath string) ([]byte, error) {
+// daemonSyncRequest performs an arbitrary-method request against the global
+// daemon's unix socket and returns the raw response (caller closes the body).
+// A JSON body sets Content-Type. Sync credentials live exclusively in the
+// daemon; nb never sees the token. daemonSyncGet is the GET convenience built on
+// top; POST callers (nb sync adopt) use this directly so they can branch on the
+// status code (e.g. 409 pending-push).
+func daemonSyncRequest(ctx context.Context, method, requestPath string, body io.Reader) (*http.Response, error) {
 	socketPath := paths.SocketPath()
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -265,11 +331,20 @@ func daemonSyncGet(ctx context.Context, requestPath string) ([]byte, error) {
 		},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://groved"+requestPath, nil)
+	req, err := http.NewRequestWithContext(ctx, method, "http://groved"+requestPath, body)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Do(req)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return client.Do(req)
+}
+
+// daemonSyncGet performs a GET against the global daemon's unix socket,
+// returning the body only on a 200.
+func daemonSyncGet(ctx context.Context, requestPath string) ([]byte, error) {
+	resp, err := daemonSyncRequest(ctx, http.MethodGet, requestPath, nil)
 	if err != nil {
 		return nil, fmt.Errorf("daemon request failed (is groved running?): %w", err)
 	}
