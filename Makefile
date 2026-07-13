@@ -25,6 +25,32 @@ LDFLAGS = -ldflags="\
 -X '$(VERSION_PKG).Branch=$(GIT_BRANCH)' \
 -X '$(VERSION_PKG).BuildDate=$(BUILD_DATE)'"
 
+# --- Cross-compile contract (set by `grove build --target`) ---
+# GROVE_BUILD_OUT redirects output so cross binaries never clobber native bin/.
+# GROVE_TARGET_* win over a plain GOOS/GOARCH env and are applied only to the
+# final `go build` (via the existing cross-compile branch below). cgo repo:
+# CC/CXX come from the orchestrator (e.g. zig cc -target ...).
+ifneq ($(strip $(GROVE_BUILD_OUT)),)
+BUILD_DIR = $(GROVE_BUILD_OUT)
+endif
+ifneq ($(strip $(GROVE_TARGET_GOOS)),)
+GOOS = $(GROVE_TARGET_GOOS)
+GOARCH = $(GROVE_TARGET_GOARCH)
+GO_CROSS_ENV = CGO_ENABLED=1
+ifneq ($(strip $(GROVE_TARGET_CC)),)
+GO_CROSS_ENV += CC="$(GROVE_TARGET_CC)"
+endif
+ifneq ($(strip $(GROVE_TARGET_CXX)),)
+GO_CROSS_ENV += CXX="$(GROVE_TARGET_CXX)"
+endif
+ifneq ($(strip $(GROVE_TARGET_CGO_CFLAGS)),)
+GO_CROSS_ENV += CGO_CFLAGS="$(GROVE_TARGET_CGO_CFLAGS)"
+endif
+ifneq ($(strip $(GROVE_TARGET_CGO_LDFLAGS)),)
+GO_CROSS_ENV += CGO_LDFLAGS="$(GROVE_TARGET_CGO_LDFLAGS)"
+endif
+endif
+
 # Default target
 .PHONY: all build test clean fmt fmt-check vet lint run check dev build-all help
 all: build
@@ -35,7 +61,7 @@ build:
 	@echo "Building $(BINARY_NAME) version $(VERSION)..."
 	@if [ -n "$(GOOS)" ] && [ -n "$(GOARCH)" ]; then \
 		echo "Cross-compiling for $(GOOS)/$(GOARCH)..."; \
-		GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .; \
+		GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO_CROSS_ENV) $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .; \
 	else \
 		$(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .; \
 	fi
