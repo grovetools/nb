@@ -722,6 +722,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			}
 			if msg.String() == "enter" { //nolint:goconst
 				m.filterInput.Blur()
+				// Reveal: accepting a non-empty search lands the cursor on the
+				// first matching note instead of wherever it was clamped.
+				if m.filterInput.Value() != "" {
+					m.views.CursorToFirstNote()
+				}
 				return m, nil
 			}
 			// Pass all other keys to the input, then re-sync. updateViewsState
