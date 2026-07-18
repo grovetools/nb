@@ -41,12 +41,12 @@ type Model struct {
 	width               int
 	height              int
 	filterInput         textinput.Model
-	sequence            *keymap.SequenceState // For detecting multi-key sequences (gg, dd, z*)
-	showArchives        bool                  // Whether to show .archive and .closed directories
-	showArtifacts       bool                  // Whether to show .artifacts directories
-	hideGlobal          bool                  // Whether to hide the global workspace node
-	showOnHold          bool                  // Whether to show on-hold plans
-	showGitModifiedOnly bool                  // Whether to show only notes with git changes
+	whichKey            keymap.WhichKeyHost // Chord/which-key mixin: shared sequence engine (gg, dd, z*, yy) + t…/g… namespaces + popup show-delay
+	showArchives        bool                // Whether to show .archive and .closed directories
+	showArtifacts       bool                // Whether to show .artifacts directories
+	hideGlobal          bool                // Whether to hide the global workspace node
+	showOnHold          bool                // Whether to show on-hold plans
+	showGitModifiedOnly bool                // Whether to show only notes with git changes
 	spinner             spinner.Model
 	loadingCount        int
 	recentNotesMode     bool           // Whether to show only recent notes
@@ -322,7 +322,7 @@ func New(cfg Config) Model {
 		keys:             keys,
 		help:             helpModel,
 		filterInput:      ti,
-		sequence:         keymap.NewSequenceState(),
+		whichKey:         keymap.NewWhichKeyHost(svc.CoreConfig, keys.Namespaces()...),
 		spinner:          s,
 		loadingCount:     2,     // For initial workspaces + notes load
 		showArchives:     false, // Default to hiding archives
