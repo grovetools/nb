@@ -3,6 +3,8 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -36,6 +38,7 @@ func NewConceptCmd(svc **service.Service, workspaceOverride *string) *cobra.Comm
 	cmd.AddCommand(newConceptDirCmd(svc, workspaceOverride))
 	cmd.AddCommand(newConceptPathCmd(svc, workspaceOverride))
 	cmd.AddCommand(newConceptSearchCmd(svc, workspaceOverride))
+	cmd.AddCommand(newConceptGapCmd(svc, workspaceOverride))
 
 	return cmd
 }
@@ -456,17 +459,26 @@ func newConceptSearchCmd(svc **service.Service, workspaceOverride *string) *cobr
 	var jsonOutput bool
 	var filesOnly bool
 	var ecosystem bool
+	var limit int
+	var searchIn string
 
 	cmd := &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search concepts across all workspaces",
-		Long:  `Search for a query string within concept files across the entire ecosystem.`,
+		Long: `Search for a query within concept files and rank the matching concepts.
+
+Multi-word queries are tokenized on whitespace: concepts matching ANY token are
+returned, ranked by token coverage and where the hits land (manifest title
+beats description beats overview.md beats other files). Tokens are matched as
+literal case-insensitive substrings, never as regexes.`,
 		Example: `  nb concept search "auth"
-  nb concept search "session" --ecosystem --json
+  nb concept search "model resolution" --ecosystem --json
+  nb concept search "session" --in role --limit 5
   nb concept search "workspace" --ecosystem --files-only --json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query := args[0]
+			opts := service.ConceptSearchOptions{In: searchIn, Limit: limit}
 
 			var results []service.ConceptSearchResult
 			var err error
@@ -476,56 +488,26 @@ func newConceptSearchCmd(svc **service.Service, workspaceOverride *string) *cobr
 				if ctxErr != nil {
 					return fmt.Errorf("get workspace context: %w", ctxErr)
 				}
-				results, err = (*svc).SearchEcosystemConcepts(ctx, query)
+				results, err = (*svc).SearchEcosystemConcepts(ctx, query, opts)
 			} else {
-				results, err = (*svc).SearchConcepts(query)
+				results, err = (*svc).SearchConcepts(query, opts)
 			}
 			if err != nil {
 				return err
 			}
 
 			if filesOnly {
-				// Group files by concept ID
-				type conceptFilesResult struct {
-					Workspace string   `json:"workspace"`
-					ConceptID string   `json:"concept_id"`
-					Files     []string `json:"files"`
-				}
-				var grouped []conceptFilesResult
-				conceptIndex := make(map[string]int)
-
-				for _, result := range results {
-					key := result.Workspace + "/" + result.ConceptID
-					if idx, exists := conceptIndex[key]; exists {
-						grouped[idx].Files = append(grouped[idx].Files, result.FilePath)
-					} else {
-						conceptIndex[key] = len(grouped)
-						grouped = append(grouped, conceptFilesResult{
-							Workspace: result.Workspace,
-							ConceptID: result.ConceptID,
-							Files:     []string{result.FilePath},
-						})
+				for i := range results {
+					for j := range results[i].Files {
+						results[i].Files[j].Matches = nil
 					}
 				}
-
-				if jsonOutput {
-					data, err := json.Marshal(grouped)
-					if err != nil {
-						return fmt.Errorf("marshal json: %w", err)
-					}
-					fmt.Println(string(data))
-				} else {
-					for _, g := range grouped {
-						fmt.Printf("%s/%s:\n", g.Workspace, g.ConceptID)
-						for _, fp := range g.Files {
-							fmt.Printf("  %s\n", fp)
-						}
-					}
-				}
-				return nil
 			}
 
 			if jsonOutput {
+				if results == nil {
+					results = []service.ConceptSearchResult{}
+				}
 				data, err := json.Marshal(results)
 				if err != nil {
 					return fmt.Errorf("marshal json: %w", err)
@@ -539,17 +521,24 @@ func newConceptSearchCmd(svc **service.Service, workspaceOverride *string) *cobr
 				return nil
 			}
 
-			// Count total matches
-			totalMatches := 0
-			for _, r := range results {
-				totalMatches += len(r.Matches)
-			}
-
-			fmt.Printf("Found %d match(es) in %d file(s):\n", totalMatches, len(results))
+			fmt.Printf("Found %d concept(s):\n", len(results))
 			for _, result := range results {
-				fmt.Printf("\n  %s/%s: %s\n", result.Workspace, result.ConceptID, result.FilePath)
-				for _, match := range result.Matches {
-					fmt.Printf("    %d: %s\n", match.LineNumber, match.Text)
+				title := result.Title
+				if title == "" {
+					title = result.ConceptID
+				}
+				fmt.Printf("\n%s/%s — %s (score %.2f)\n", result.Workspace, result.ConceptID, title, result.Score)
+				if result.Description != "" {
+					fmt.Printf("  %s\n", result.Description)
+				}
+				for _, file := range result.Files {
+					if filesOnly {
+						fmt.Printf("  %s\n", file.FilePath)
+						continue
+					}
+					for _, match := range file.Matches {
+						fmt.Printf("  %s:%d: %s\n", file.FilePath, match.LineNumber, match.Text)
+					}
 				}
 			}
 			return nil
@@ -557,7 +546,258 @@ func newConceptSearchCmd(svc **service.Service, workspaceOverride *string) *cobr
 	}
 
 	cmd.Flags().BoolVar(&ecosystem, "ecosystem", false, "Search only within the current ecosystem")
-	cmd.Flags().BoolVar(&filesOnly, "files-only", false, "Output only file paths, one per line")
+	cmd.Flags().BoolVar(&filesOnly, "files-only", false, "Omit line matches; list matched files only")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output result as JSON")
+	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum number of concepts to return (0 = unlimited)")
+	cmd.Flags().StringVar(&searchIn, "in", "all", "Search scope: role (manifest title/description + overview.md), overview (overview.md only), all (every concept file)")
+	return cmd
+}
+
+func newConceptGapCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "gap",
+		Short: "Record and triage concept context gaps",
+		Long: `Track files flagged as essential-but-missing from a concept's derived context.
+
+Gaps are appended to a .gaps.jsonl store in the workspace's concepts directory,
+then triaged (e.g. by grove-concept-maintainer) into preset additions or new
+concepts.`,
+		Example: `  nb concept gap record --file pkg/context/resolve.go --concept concept-knowledge-base --reason "resolver is load-bearing" --source flow-context-tuner
+  nb concept gap record --stdin < gaps.json
+  nb concept gap list --json
+  nb concept gap resolve 1a2b3c4d5e6f --as added-to-preset`,
+	}
+
+	cmd.AddCommand(newConceptGapRecordCmd(svc, workspaceOverride))
+	cmd.AddCommand(newConceptGapListCmd(svc, workspaceOverride))
+	cmd.AddCommand(newConceptGapResolveCmd(svc, workspaceOverride))
+
+	return cmd
+}
+
+func newConceptGapRecordCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	var file, conceptID, reason, source string
+	var fromStdin, jsonOutput bool
+
+	cmd := &cobra.Command{
+		Use:   "record",
+		Short: "Record a concept context gap",
+		Long: `Record a file as essential-but-missing from a concept's derived context.
+
+The gap kind is derived automatically: "preset" when --concept names the owning
+concept (its preset is missing the file), "concept" when no concept covers the
+file. With --stdin, a JSON array of gaps is read from standard input so raters
+can batch: [{"file":"...","concept_id":"...","reason":"..."}].`,
+		Example: `  nb concept gap record --file pkg/context/resolve.go --concept concept-knowledge-base --reason "resolver is load-bearing"
+  nb concept gap record --file pkg/orphan/thing.go --reason "nothing covers this" --json
+  echo '[{"file":"a.go","concept_id":"auth","reason":"core"}]' | nb concept gap record --stdin`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, err := (*svc).GetWorkspaceContext(*workspaceOverride)
+			if err != nil {
+				return fmt.Errorf("get workspace context: %w", err)
+			}
+
+			var pending []service.ConceptGap
+			if fromStdin {
+				data, err := io.ReadAll(cmd.InOrStdin())
+				if err != nil {
+					return fmt.Errorf("read stdin: %w", err)
+				}
+				if err := json.Unmarshal(data, &pending); err != nil {
+					return fmt.Errorf("parse stdin gap batch: %w", err)
+				}
+				for i := range pending {
+					if pending[i].Source == "" {
+						pending[i].Source = source
+					}
+				}
+			} else {
+				if file == "" {
+					return fmt.Errorf("either --file or --stdin is required")
+				}
+				pending = []service.ConceptGap{{
+					File:      file,
+					ConceptID: conceptID,
+					Reason:    reason,
+					Source:    source,
+				}}
+			}
+
+			recorded := make([]service.ConceptGap, 0, len(pending))
+			for _, gap := range pending {
+				rec, err := (*svc).RecordConceptGap(ctx, gap)
+				if err != nil {
+					return err
+				}
+				recorded = append(recorded, rec)
+			}
+
+			if jsonOutput {
+				var payload interface{} = recorded
+				if !fromStdin {
+					payload = recorded[0]
+				}
+				data, err := json.Marshal(payload)
+				if err != nil {
+					return fmt.Errorf("marshal json: %w", err)
+				}
+				fmt.Println(string(data))
+				return nil
+			}
+
+			for _, rec := range recorded {
+				target := rec.ConceptID
+				if target == "" {
+					target = "(unowned)"
+				}
+				fmt.Printf("Recorded gap %s (%s) for %s: %s\n", rec.ID, rec.Kind, target, rec.File)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&file, "file", "", "The essential-but-missing file (abs or workspace-rel)")
+	cmd.Flags().StringVar(&conceptID, "concept", "", "Owning concept id, if known (omit when nothing covers the file)")
+	cmd.Flags().StringVar(&reason, "reason", "", "Why the file is essential")
+	cmd.Flags().StringVar(&source, "source", "manual", "Who flagged the gap (e.g. flow-context-tuner, a job id)")
+	cmd.Flags().BoolVar(&fromStdin, "stdin", false, "Read a JSON array of gaps from stdin")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output result as JSON")
+	return cmd
+}
+
+func newConceptGapListCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	var all, resolved, jsonOutput bool
+	var conceptID string
+
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List recorded concept gaps",
+		Long:  `List concept gaps from the workspace's gap store. By default only unresolved gaps are shown.`,
+		Example: `  nb concept gap list
+  nb concept gap list --concept concept-knowledge-base --json
+  nb concept gap list --all
+  nb concept gap list --resolved`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, err := (*svc).GetWorkspaceContext(*workspaceOverride)
+			if err != nil {
+				return fmt.Errorf("get workspace context: %w", err)
+			}
+
+			gaps, err := (*svc).ListConceptGaps(ctx, service.ConceptGapListFilter{
+				IncludeResolved: all,
+				OnlyResolved:    resolved,
+				ConceptID:       conceptID,
+			})
+			if err != nil {
+				return err
+			}
+
+			if jsonOutput {
+				if gaps == nil {
+					gaps = []service.ConceptGap{}
+				}
+				data, err := json.Marshal(gaps)
+				if err != nil {
+					return fmt.Errorf("marshal json: %w", err)
+				}
+				fmt.Println(string(data))
+				return nil
+			}
+
+			if len(gaps) == 0 {
+				fmt.Println("No gaps found.")
+				return nil
+			}
+
+			// Group by concept, "(unowned)" last.
+			grouped := make(map[string][]service.ConceptGap)
+			var order []string
+			for _, gap := range gaps {
+				key := gap.ConceptID
+				if _, seen := grouped[key]; !seen && key != "" {
+					order = append(order, key)
+				}
+				grouped[key] = append(grouped[key], gap)
+			}
+			sort.Strings(order)
+			if _, hasUnowned := grouped[""]; hasUnowned {
+				order = append(order, "")
+			}
+
+			fmt.Printf("Gaps (%d):\n", len(gaps))
+			for _, key := range order {
+				label := key
+				if label == "" {
+					label = "(unowned)"
+				}
+				fmt.Printf("\n%s:\n", label)
+				for _, gap := range grouped[key] {
+					status := ""
+					if gap.Resolved {
+						status = fmt.Sprintf(" [resolved: %s]", gap.ResolvedBy)
+					}
+					fmt.Printf("  %s  %s%s\n", gap.ID, gap.File, status)
+					if gap.Reason != "" {
+						fmt.Printf("      %s\n", gap.Reason)
+					}
+					fmt.Printf("      %s · %s\n", gap.Source, gap.CreatedAt.Format("2006-01-02"))
+				}
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&all, "all", false, "Include resolved gaps")
+	cmd.Flags().BoolVar(&resolved, "resolved", false, "Show resolved gaps only")
+	cmd.Flags().StringVar(&conceptID, "concept", "", "Restrict to one concept")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output result as JSON")
+	return cmd
+}
+
+func newConceptGapResolveCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	var resolvedBy string
+	var jsonOutput bool
+
+	cmd := &cobra.Command{
+		Use:   "resolve <id>",
+		Short: "Mark a concept gap as resolved",
+		Long:  `Mark a gap as resolved by its id (a unique id prefix is accepted).`,
+		Example: `  nb concept gap resolve 1a2b3c4d5e6f --as added-to-preset
+  nb concept gap resolve 1a2b --as new-concept:context-resolution
+  nb concept gap resolve 1a2b --as rejected --json`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, err := (*svc).GetWorkspaceContext(*workspaceOverride)
+			if err != nil {
+				return fmt.Errorf("get workspace context: %w", err)
+			}
+
+			gap, err := (*svc).ResolveConceptGap(ctx, args[0], resolvedBy)
+			if err != nil {
+				return err
+			}
+
+			if jsonOutput {
+				data, err := json.Marshal(gap)
+				if err != nil {
+					return fmt.Errorf("marshal json: %w", err)
+				}
+				fmt.Println(string(data))
+				return nil
+			}
+
+			fmt.Printf("Resolved gap %s: %s", gap.ID, gap.File)
+			if gap.ResolvedBy != "" {
+				fmt.Printf(" (%s)", gap.ResolvedBy)
+			}
+			fmt.Println()
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&resolvedBy, "as", "", "How the gap was resolved: added-to-preset, new-concept:<id>, or rejected")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output result as JSON")
 	return cmd
 }
