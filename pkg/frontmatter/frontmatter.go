@@ -38,6 +38,7 @@ type Frontmatter struct {
 	Started    string   `yaml:"started,omitempty"`  // For LLM notes
 	PlanRef    string   `yaml:"plan_ref,omitempty"` // Reference to associated plan
 	Priority   string   `yaml:"priority,omitempty"` // p0 (most critical) .. p3, empty = none
+	Name       string   `yaml:"name,omitempty"`     // Canonical name when the filename is generic (e.g. skills/<name>/SKILL.md)
 
 	// Remote sync metadata
 	Remote *RemoteMetadata `yaml:"remote,omitempty"`
