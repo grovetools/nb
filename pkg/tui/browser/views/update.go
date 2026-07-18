@@ -1899,6 +1899,7 @@ func (m *Model) renderSyntheticGroups(
 	notesInGroup []*models.Note,
 	ws *workspace.WorkspaceNode,
 	groupPath string,
+	groupName string,
 	groupPrefix string,
 	depth int,
 	workspacePathMap map[string]string,
@@ -1940,6 +1941,10 @@ func (m *Model) renderSyntheticGroups(
 			Metadata: map[string]interface{}{
 				"Workspace": ws.Name,
 				"Icon":      bucket.icon,
+				// The enclosing on-disk group, so actions targeting the bucket
+				// (e.g. note creation) resolve to a real directory instead of
+				// the bucket label ("Today", "P0", ...).
+				"Group": groupName,
 			},
 		}
 		bucketNode := &DisplayNode{
@@ -2290,7 +2295,7 @@ func (m *Model) renderTree(
 
 				if hasNotes {
 					if m.groupBy != "" && m.groupBy != "none" {
-						m.renderSyntheticGroups(nodes, child.notes, ws, groupPath, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings, hasSearchFilter)
+						m.renderSyntheticGroups(nodes, child.notes, ws, groupPath, config.groupMetadataPrefix+child.fullName, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings, hasSearchFilter)
 					} else {
 						// Pass the artifact subgroups so owning job rows nest their
 						// artifacts directly; consumed jobIDs are removed in place.
