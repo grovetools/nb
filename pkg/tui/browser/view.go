@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 )
 
@@ -316,6 +317,20 @@ func (m Model) View() string {
 		status = fmt.Sprintf("%d notes shown%s", noteCount, selectionInfo)
 	}
 
+	// Immediate flat-chord footer hint (gg/dd/yy) so single-key arming is not
+	// invisible. Only shown when NO namespace prefix is armed — a t…/g… prefix
+	// renders the which-key popup (below) instead, so the two never double up.
+	if !m.whichKey.Armed() {
+		hintBindings := append(keymap.CommonSequenceBindings(m.keys.Base), m.keys.Copy)
+		if hint := m.whichKey.FooterHint(hintBindings...); hint != "" {
+			if status == "" {
+				status = hint
+			} else {
+				status = status + "  " + hint
+			}
+		}
+	}
+
 	// Search bar (if active). Mirror nav's manual cursor rendering
 	// (nav/pkg/tui/sessionizer/view.go) instead of bubbletea's
 	// m.filterInput.View(): show the search icon, the value, and a thin "▏"
@@ -358,7 +373,12 @@ func (m Model) View() string {
 
 	// Apply global left padding, top margin, and width clamping
 	styledView := lipgloss.NewStyle().PaddingLeft(2).MaxWidth(m.width).Render(fullView)
-	return "\n" + styledView
+	frame := "\n" + styledView
+	// Composite the bottom-anchored which-key popup onto the final frame while a
+	// t…/g… namespace prefix is armed (past the show-delay). Returns frame
+	// unchanged otherwise; the delayed keymap.WhichKeyShowMsg tick forces the
+	// re-render that reveals it.
+	return m.whichKey.RenderOverlay(frame, lipgloss.Width(frame), *theme.DefaultTheme)
 }
 
 // FooterView returns the help text for use as the pager footer.

@@ -797,7 +797,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		// Handle column selection mode
 		if m.columnSelectMode {
 			switch msg.String() {
-			case "enter", "esc", "V":
+			case "enter", "esc":
+				// (toggle-columns is now the `tc` chord; the old flat "V" close key
+				// is gone with it.)
 				m.columnSelectMode = false
 				return m, nil
 			case " ":
@@ -816,36 +818,64 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			}
 		}
 
-		// Process sequence state for browser-level sequences (dd for delete)
-		sequenceBindings := keymap.CommonSequenceBindings(m.keys.Base)
-		seqResult, _ := m.sequence.Process(msg, sequenceBindings...)
-		buffer := m.sequence.Buffer()
+		// Chord seam via the reusable which-key host. `extra` carries the flat
+		// sequence chords — the gg motion, dd (delete), the z* folds — plus yy
+		// (Copy). The disabled Base.Yank is deliberately OMITTED: Matches ignores
+		// Enabled(), so leaving it in would race Copy for "yy". The host also arms
+		// the t…/g… namespaces from Namespaces(). Top-level-only arming (E3) comes
+		// free — every modal early-return above runs first, so a chord can never
+		// arm in search/create/rename/commit/tagPicker/promote/columnSelect/help.
+		extra := []key.Binding{
+			m.keys.Top, m.keys.Delete,
+			m.keys.FoldOpen, m.keys.FoldClose, m.keys.FoldToggle,
+			m.keys.FoldOpenAll, m.keys.FoldCloseAll,
+			m.keys.Copy,
+		}
+		res, matched, chordCmd := m.whichKey.ProcessChord(msg, extra...)
+		switch res {
+		case keymap.ChordPending:
+			// A namespace prefix (t/g) returns the delayed popup tick; a flat
+			// prefix (z/d/y/g-for-gg) returns nil. Either way, wait for the
+			// next key — the buffer stays armed inside the shared host.
+			return m, chordCmd
+		case keymap.ChordConsumed:
+			// esc dismissed the popup, or a stray key closed an armed namespace
+			// menu — swallow it (so "t" then "x" doesn't fire a flat action).
+			return m, nil
+		case keymap.ChordMatched:
+			// Re-synthesize the completed chord's canonical key so the dispatch
+			// below resolves it via key.Matches.
+			if len(matched.Keys()) > 0 {
+				msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(matched.Keys()[0])}
+			}
+			// gg (top) and the z* folds are executed by the views sub-model,
+			// which runs its OWN sequence engine. Hand it the combined chord key
+			// so that engine resolves it in one shot; the browser-level dispatch
+			// below only handles the flat + namespace actions (dd, ta…tp, ga/gv, yy).
+			if _, isViews := keymap.MatchesAny(msg.String(),
+				m.keys.Top, m.keys.FoldOpen, m.keys.FoldClose,
+				m.keys.FoldToggle, m.keys.FoldOpenAll, m.keys.FoldCloseAll); isViews {
+				m.views, cmd = m.views.Update(msg)
+				if err := m.saveState(); err != nil {
+					m.statusMessage = "Failed to save fold state: " + err.Error()
+				}
+				return m, tea.Batch(cmd, m.updatePreviewContent())
+			}
+			// Otherwise fall through to the flat/namespace switch below.
+		case keymap.ChordNone:
+			// Not a chord — fall through to single-key nav delegation + the switch.
+		}
 
-		// Try delegating to views for navigation, folding, and selection
-		// Views.Update handles: Up, Down, Left, Right, PageUp, PageDown, Top, Bottom,
-		// FoldOpen (zo), FoldClose (zc), FoldToggle (za), FoldOpenAll (zR), FoldCloseAll (zM),
-		// Select (space), SelectNone (N)
-		isFoldPrefix := keymap.IsPrefixOfAny(buffer, m.keys.FoldOpen, m.keys.FoldClose, m.keys.FoldToggle, m.keys.FoldOpenAll, m.keys.FoldCloseAll)
-		isFoldMatch := keymap.Matches(buffer, m.keys.FoldOpen) || keymap.Matches(buffer, m.keys.FoldClose) ||
-			keymap.Matches(buffer, m.keys.FoldToggle) || keymap.Matches(buffer, m.keys.FoldOpenAll) ||
-			keymap.Matches(buffer, m.keys.FoldCloseAll)
-		isTopSequence := keymap.IsPrefixOfAny(buffer, m.keys.Top) || keymap.Matches(buffer, m.keys.Top)
-
+		// Single-key navigation and selection is delegated to the views sub-model.
+		// (Multi-key fold/top/dd/yy chords are handled by the host seam above.)
 		if key.Matches(msg, m.keys.Up) || key.Matches(msg, m.keys.Down) ||
 			key.Matches(msg, m.keys.Left) || key.Matches(msg, m.keys.Right) ||
 			key.Matches(msg, m.keys.PageUp) || key.Matches(msg, m.keys.PageDown) ||
 			key.Matches(msg, m.keys.Bottom) ||
-			isFoldPrefix || isFoldMatch || isTopSequence ||
 			key.Matches(msg, m.keys.Select) ||
 			key.Matches(msg, m.keys.SelectNone) {
-			// Clear browser sequence only when we've completed a sequence or it's a non-sequence key
-			// Don't clear when we're in the middle of a fold/top sequence (prefix match)
-			if !isFoldPrefix && !keymap.IsPrefixOfAny(buffer, m.keys.Top) && !key.Matches(msg, m.keys.Delete) {
-				m.sequence.Clear()
-			}
-			// Detect fold-changing operations (single-key Left/Right or a completed
-			// z* sequence) so we can persist the updated collapse state afterward.
-			isFoldChange := key.Matches(msg, m.keys.Left) || key.Matches(msg, m.keys.Right) || isFoldMatch
+			// Single-key Left/Right change folds; persist the collapse state after.
+			isFoldChange := key.Matches(msg, m.keys.Left) || key.Matches(msg, m.keys.Right)
 			m.views, cmd = m.views.Update(msg)
 			if isFoldChange {
 				// Persist collapse state so folds survive a restart.
@@ -1066,16 +1096,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		case key.Matches(msg, m.keys.ToggleGlobal):
 			m.hideGlobal = !m.hideGlobal
 			m.updateViewsState()
-		case seqResult == keymap.SequenceMatch && keymap.Matches(buffer, m.keys.Delete):
-			// dd - delete selected notes
+		case key.Matches(msg, m.keys.Delete):
+			// dd — the chord seam re-synthesizes the completed "dd" here (the first
+			// "d" press was consumed as ChordPending above).
 			pathsToDelete := m.views.GetTargetedNotePaths()
 			if len(pathsToDelete) > 0 {
 				prompt := fmt.Sprintf("Permanently delete %d note(s)? This cannot be undone.", len(pathsToDelete))
 				m.confirmDialog.Activate(prompt)
 			}
-			m.sequence.Clear()
-		case key.Matches(msg, m.keys.Delete):
-			// First 'd' press - sequence state is tracking it, just wait
 		case key.Matches(msg, m.keys.Cut):
 			paths := m.views.GetTargetedNotePaths()
 			if len(paths) > 0 {
@@ -1349,11 +1377,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				return m, nil
 			}
 		default:
-			// Clear sequence buffer for keys that aren't part of sequences
-			// unless we're in the middle of a potential sequence
-			if seqResult != keymap.SequencePending {
-				m.sequence.Clear()
-			}
+			// Non-chord, non-action key: nothing to do. The shared host owns the
+			// sequence buffer (cleared inside ProcessChord), so there is no
+			// browser-level sequence state to reset here.
 		}
 
 	default:

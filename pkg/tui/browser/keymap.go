@@ -61,9 +61,28 @@ func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{k.Help, k.Quit}
 }
 
+// Namespaces returns the which-key chord namespaces for the browser TUI, built
+// from the named KeyMap fields (so any user override applied by ApplyTUIOverrides
+// is reflected — Phase-1 §4 ConfigKey-stability rule). The "t" Toggle namespace
+// groups ta/tb/tg/th/tc/tp; the "g" Goto namespace groups gg (Base.Top), ga, gv.
+// The update loop arms them through the shared WhichKeyHost sequence engine and
+// View() renders the popup. Order here is the wire order ProcessChord relies on.
+func (k KeyMap) Namespaces() []keymap.Namespace {
+	return []keymap.Namespace{
+		{Prefix: "t", Label: "Toggle", Bindings: []key.Binding{
+			k.ToggleArchives, k.ToggleArtifacts, k.ToggleGlobal,
+			k.ToggleHold, k.ToggleColumns, k.Base.TogglePreview,
+		}},
+		{Prefix: "g", Label: "Goto", Bindings: []key.Binding{
+			k.Base.Top, k.JumpToArtifacts, k.FocusArchive,
+		}},
+	}
+}
+
 // Sections returns all keybinding sections for the browser TUI.
 // Only includes sections that the browser actually implements.
 func (k KeyMap) Sections() []keymap.Section {
+	ns := k.Namespaces()
 	return []keymap.Section{
 		k.Base.NavigationSection(),
 		// Actions (Base): confirm/back/edit/delete(dd)/yank(yy)/rename/refresh/copy-path.
@@ -72,22 +91,25 @@ func (k KeyMap) Sections() []keymap.Section {
 		k.Base.SelectionSection(),
 		// Search plus the TUI-specific "i" re-enter-search binding.
 		k.Base.SearchSection().With(k.ReEnterSearch),
-		// Scoped View section: nb only implements switch-view (tab) and preview (v).
-		keymap.ViewSection(k.SwitchView, k.TogglePreview),
+		// Scoped View section: nb only implements switch-view (tab). Preview moved
+		// into the Toggle (t…) namespace as `tp`.
+		keymap.ViewSection(k.SwitchView),
 		k.Base.FoldSection(),
 		// Common sections use standard constants (icons auto-resolved)
 		keymap.NewSection(keymap.SectionFocus,
 			k.FocusEcosystem, k.ClearFocus,
-			k.FocusSelected, k.FocusRecent, k.FocusArchive,
-			k.JumpToArtifacts,
+			k.FocusSelected, k.FocusRecent,
 		),
+		// Goto (g…) namespace: only ga/gv are exported here — gg (Base.Top) stays
+		// in the Navigation section, so exporting it again would mint a duplicate
+		// `top` ConfigKey and trip ValidateRegistry's duplicate-ConfigKey error.
+		keymap.NewSection("Goto (g…)", k.JumpToArtifacts, k.FocusArchive),
 		keymap.NewSection(keymap.SectionFilter,
 			k.FilterByTag, k.ToggleGitChanges, k.Sort, k.CycleGrouping,
 		),
-		keymap.NewSection(keymap.SectionToggle,
-			k.ToggleArchives, k.ToggleArtifacts, k.ToggleGlobal,
-			k.ToggleHold, k.ToggleColumns,
-		),
+		// Toggle (t…) namespace section (ta/tb/tg/th/tc/tp), rendered as
+		// "Toggle (t…)" via Namespace.Section().
+		ns[0].Section(),
 		// TUI-specific sections use explicit icons
 		keymap.NewSectionWithIcon("Notes", theme.IconNote,
 			k.CreateNote, k.CreateNoteInbox, k.CreateNoteGlobal,
@@ -132,13 +154,17 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("f"),
 			key.WithHelp("f", "focus recent"),
 		),
+		// Goto (g…) namespace member. Chord-only — the legacy flat "," alias was
+		// dropped (sign-off E4). gg (Base.Top) shares the same prefix and fires
+		// first on exact match, so ga/gv just join the pending buffer.
 		FocusArchive: key.NewBinding(
-			key.WithKeys(","),
-			key.WithHelp(",", "archive view (.archive/.closed)"),
+			key.WithKeys("gv"),
+			key.WithHelp("gv", "goto archive view"),
 		),
+		// Goto (g…) namespace member. Chord-only — the legacy flat ";" is gone.
 		JumpToArtifacts: key.NewBinding(
-			key.WithKeys(";"),
-			key.WithHelp(";", "jump to job artifacts"),
+			key.WithKeys("ga"),
+			key.WithHelp("ga", "goto job artifacts"),
 		),
 		// Search operations
 		ReEnterSearch: key.NewBinding(
@@ -169,26 +195,28 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("o"),
 			key.WithHelp("o", "cycle group-by (none/date/status/tag/priority)"),
 		),
-		// Toggle operations
+		// Toggle (t…) namespace members. Chord-only — the legacy flat aliases
+		// (A/b/~/H/V) were dropped (sign-off E4, no deprecation window). nb has no
+		// flat "t" to vacate, so these migrate cleanly.
 		ToggleArchives: key.NewBinding(
-			key.WithKeys("A"),
-			key.WithHelp("A", "toggle archives"),
+			key.WithKeys("ta"),
+			key.WithHelp("ta", "toggle archives"),
 		),
 		ToggleArtifacts: key.NewBinding(
-			key.WithKeys("b"),
-			key.WithHelp("b", "toggle artifacts"),
+			key.WithKeys("tb"),
+			key.WithHelp("tb", "toggle artifacts"),
 		),
 		ToggleGlobal: key.NewBinding(
-			key.WithKeys("~"),
-			key.WithHelp("~", "toggle global"),
+			key.WithKeys("tg"),
+			key.WithHelp("tg", "toggle global"),
 		),
 		ToggleHold: key.NewBinding(
-			key.WithKeys("H"),
-			key.WithHelp("H", "toggle on-hold"),
+			key.WithKeys("th"),
+			key.WithHelp("th", "toggle on-hold"),
 		),
 		ToggleColumns: key.NewBinding(
-			key.WithKeys("V"),
-			key.WithHelp("V", "toggle columns"),
+			key.WithKeys("tc"),
+			key.WithHelp("tc", "toggle columns"),
 		),
 		// Note operations
 		CreateNote: key.NewBinding(
@@ -228,9 +256,13 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("x"),
 			key.WithHelp("x", "cut selected"),
 		),
+		// Copy is now the vim yank chord `yy` (verb unification: yank IS copy).
+		// This vacates flat `c` (the reserved change prefix) and flat `y` (the
+		// shadowed Copy half). Path-copy stays on canonical ctrl+y (Base.CopyPath);
+		// Base.Yank is disabled below so `yy` routes here, not to path-copy.
 		Copy: key.NewBinding(
-			key.WithKeys("y", "c"),
-			key.WithHelp("y/c", "copy selected"),
+			key.WithKeys("yy"),
+			key.WithHelp("yy", "copy selected"),
 		),
 		Paste: key.NewBinding(
 			key.WithKeys("p"),
@@ -288,6 +320,24 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 	// of a duplicate from Base.ActionsSection.
 	km.Base.Rename.SetEnabled(false)
 	km.Base.Refresh.SetEnabled(false)
+
+	// Hotkey-review Phase 4 chord migration (all BEFORE ApplyTUIOverrides so user
+	// config still wins):
+	//   - TogglePreview: flat `v` (reserved view prefix) → `tp`, joining the
+	//     Toggle namespace. ConfigKey stays `toggle_preview` (field unchanged).
+	//   - Confirm: drop the `y` half (`enter,y` → `enter`). With Copy on `yy`, a
+	//     flat `y` would shadow the `yy` chord; enter covers every confirm path.
+	//   - Yank: disabled. Its `yy` now belongs to Copy (copy selected); path-copy
+	//     stays on Base.CopyPath (ctrl+y). Disabling keeps `yy` from racing Copy.
+	km.Base.TogglePreview = key.NewBinding(
+		key.WithKeys("tp"),
+		key.WithHelp("tp", "toggle preview"),
+	)
+	km.Base.Confirm = key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "confirm"),
+	)
+	km.Base.Yank.SetEnabled(false)
 
 	km.NextTab.SetEnabled(false)
 	km.PrevTab.SetEnabled(false)
