@@ -94,6 +94,9 @@ func main() {
 	rootCmd.AddCommand(cmd.NewConceptCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewSyncthingCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewPromoteCmd(&svc))
+	rootCmd.AddCommand(cmd.NewBacklinksCmd(&svc, &workspaceOverride))
+	rootCmd.AddCommand(cmd.NewLinksCmd(&svc, &workspaceOverride))
+	rootCmd.AddCommand(cmd.NewTagsCmd(&svc, &workspaceOverride))
 
 	if err := cli.Execute(rootCmd); err != nil {
 		os.Exit(1)
