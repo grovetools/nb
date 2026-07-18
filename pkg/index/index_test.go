@@ -169,6 +169,16 @@ modified: 2026-01-01 00:00:00
 ---
 x
 `)
+	// skills/<name>/SKILL.md pattern: generic stem + id, canonical frontmatter name.
+	byName := writeNote(t, root, "skills/my-skill/SKILL.md", `---
+id: SKILL
+title: ""
+name: my-skill
+created: 2026-01-01 00:00:00
+modified: 2026-01-01 00:00:00
+---
+x
+`)
 
 	ix := buildVault(t, []Root{{Dir: root, Workspace: "ws"}})
 
@@ -182,6 +192,7 @@ x
 		{"special-id", byID},
 		{"NICKNAME", byAlias},
 		{"exact title here", byTitle},
+		{"my-skill", byName}, // frontmatter name: acts as an alias
 	}
 	for _, c := range cases {
 		got := ix.Resolve(c.target)
