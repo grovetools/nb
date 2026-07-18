@@ -241,7 +241,7 @@ func (m *Model) renderTableView() string {
 			if noteType, ok := node.Item.Metadata["Type"].(string); ok {
 				typeCol = noteType
 			}
-			statusCol = getNoteStatus(ItemToNote(node.Item))
+			statusCol = styleNoteStatus(info.note, getNoteStatus(info.note))
 			if priority, ok := node.Item.Metadata["Priority"].(string); ok {
 				priorityCol = priority
 			}
@@ -821,8 +821,8 @@ func (m *Model) calculateTableColumnWidths() [9]int {
 			}
 			note := ItemToNote(node.Item)
 			status := getNoteStatus(note)
-			if len(status) > maxStatus {
-				maxStatus = len(status)
+			if w := lipgloss.Width(status); w > maxStatus {
+				maxStatus = w
 			}
 			tagsLen := len(strings.Join(note.Tags, ", "))
 			if tagsLen > maxTags {
@@ -957,16 +957,43 @@ func (m *Model) calculateTableColumnWidths() [9]int {
 	return result
 }
 
-// getNoteStatus determines the status of a note (e.g., pending if it has todos)
+// getNoteStatus determines the STATUS cell for a note. Remote sync state wins;
+// otherwise notes with todos get a compact progress cell: "☐ done/total" while
+// open items remain, "✓ total/total" when everything is done. Cancelled items
+// count toward neither and are appended as "(n ✕)" only when present.
 func getNoteStatus(note *models.Note) string {
 	if note.Remote != nil && note.Remote.State != "" {
 		return note.Remote.State
 	}
-	if note.HasTodos {
-		// A more sophisticated check could see if all are checked off
-		return "pending"
+	total := note.TodoOpen + note.TodoDone
+	if total == 0 {
+		return ""
 	}
-	return ""
+	glyph := "☐"
+	if note.TodoOpen == 0 {
+		glyph = "✓"
+	}
+	cell := fmt.Sprintf("%s %d/%d", glyph, note.TodoDone, total)
+	if note.TodoCancelled > 0 {
+		cell += fmt.Sprintf(" (%d ✕)", note.TodoCancelled)
+	}
+	return cell
+}
+
+// styleNoteStatus wraps the plain STATUS cell for a note: once every todo is
+// done the cell (and only the cell, never the whole row) is rendered in the
+// success color, faint. Open-remaining and remote states stay unstyled.
+func styleNoteStatus(note *models.Note, cell string) string {
+	if note == nil || cell == "" {
+		return cell
+	}
+	if note.Remote != nil && note.Remote.State != "" {
+		return cell
+	}
+	if note.TodoOpen == 0 && note.TodoDone > 0 {
+		return lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Green).Faint(true).Render(cell)
+	}
+	return cell
 }
 
 // padOrTruncate ensures a string fits a specific width, handling ANSI codes properly

@@ -31,6 +31,9 @@ type Note struct {
 	ModifiedAt       time.Time `json:"modified_at"`
 	WordCount        int       `json:"word_count"`
 	HasTodos         bool      `json:"has_todos"`
+	TodoOpen         int       `json:"todo_open,omitempty"`
+	TodoDone         int       `json:"todo_done,omitempty"`
+	TodoCancelled    int       `json:"todo_cancelled,omitempty"`
 	IsArchived       bool      `json:"is_archived"`
 	IsArtifact       bool      `json:"is_artifact,omitempty"`
 	PlanRef          string    `json:"plan_ref,omitempty"`

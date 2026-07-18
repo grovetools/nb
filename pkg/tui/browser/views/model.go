@@ -347,6 +347,21 @@ func (m *Model) JumpToArtifactsForNote() bool {
 	return false
 }
 
+// CursorToFirstNote moves the cursor to the first NOTE node (not a group or
+// workspace ancestor) in the display tree and scrolls it into view. Used to
+// reveal the first match when a search/filter is accepted. Returns false when
+// the tree holds no note nodes, leaving the cursor untouched.
+func (m *Model) CursorToFirstNote() bool {
+	for i, node := range m.displayNodes {
+		if node.IsNote() {
+			m.cursor = i
+			m.adjustScroll()
+			return true
+		}
+	}
+	return false
+}
+
 // ToggleViewMode switches between tree and table views.
 func (m *Model) ToggleViewMode() {
 	if m.viewMode == TreeView {

@@ -1,7 +1,9 @@
 package views
 
 import (
+	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -2367,6 +2369,36 @@ func calculateRelativePath(note *models.Note, workspacePathMap map[string]string
 	return shortenPath(note.Path)
 }
 
+// noteMatchesFilter reports whether a note item matches the (already
+// lowercased) substring filter against any of: filename, title metadata,
+// frontmatter title, aliases, or tags.
+func noteMatchesFilter(item *tree.Item, filter string) bool {
+	if strings.Contains(strings.ToLower(item.Name), filter) {
+		return true
+	}
+	if title, _ := item.Metadata["Title"].(string); strings.Contains(strings.ToLower(title), filter) {
+		return true
+	}
+	if fmTitle, _ := item.Metadata["FrontmatterTitle"].(string); strings.Contains(strings.ToLower(fmTitle), filter) {
+		return true
+	}
+	if aliases, ok := item.Metadata["Aliases"].([]string); ok {
+		for _, alias := range aliases {
+			if strings.Contains(strings.ToLower(alias), filter) {
+				return true
+			}
+		}
+	}
+	if tags, ok := item.Metadata["Tags"].([]string); ok {
+		for _, tag := range tags {
+			if strings.Contains(strings.ToLower(tag), filter) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // FilterDisplayTree filters the tree view to show only matches, preserving parent nodes.
 func (m *Model) FilterDisplayTree() {
 	filter := strings.ToLower(m.filterValue)
@@ -2395,9 +2427,7 @@ func (m *Model) FilterDisplayTree() {
 		match := false
 
 		if node.IsNote() {
-			// Search only in note title
-			title, _ := node.Item.Metadata["Title"].(string)
-			match = strings.Contains(strings.ToLower(title), filter)
+			match = noteMatchesFilter(node.Item, filter)
 		} else if node.IsGroup() {
 			// Search in group/plan names (strip "plans/" prefix for matching)
 			displayName := node.Item.Name
@@ -2622,6 +2652,45 @@ func (m *Model) AddDeletedFilesToTree() {
 	}
 }
 
+// grepSearcher runs the content search over the given directories and returns
+// the matching file paths. Package-level var so tests can inject a fake result
+// set without exec'ing rg/grep.
+var grepSearcher = runContentSearch
+
+// runContentSearch shells out to ripgrep (fallback: grep -ril) for a
+// case-insensitive files-with-matches search over the given directories.
+// A "no matches" exit (code 1 for both tools) yields an empty, nil-error
+// result.
+func runContentSearch(query string, dirs []string) ([]string, error) {
+	var cmd *exec.Cmd
+	if _, err := exec.LookPath("rg"); err == nil {
+		args := []string{"--files-with-matches", "--ignore-case", "--type", "md", "--", query}
+		args = append(args, dirs...)
+		cmd = exec.Command("rg", args...)
+	} else {
+		args := []string{"-r", "-i", "-l", "--include=*.md", "--", query}
+		args = append(args, dirs...)
+		cmd = exec.Command("grep", args...)
+	}
+
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var paths []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			paths = append(paths, line)
+		}
+	}
+	return paths, nil
+}
+
 // ApplyGrepFilter performs a content search using ripgrep and filters the tree.
 func (m *Model) ApplyGrepFilter() (string, error) {
 	query := m.filterValue
@@ -2629,14 +2698,6 @@ func (m *Model) ApplyGrepFilter() (string, error) {
 		// Restore the full tree with original collapsed state
 		m.BuildDisplayTree()
 		return "", nil
-	}
-
-	// Build a map of all note paths for quick lookup
-	notePathsMap := make(map[string]bool)
-	for _, item := range m.allItems {
-		if !item.IsDir {
-			notePathsMap[item.Path] = true
-		}
 	}
 
 	// Build a map of workspace name -> workspace node for quick lookup
@@ -2679,23 +2740,21 @@ func (m *Model) ApplyGrepFilter() (string, error) {
 
 	resultPaths := make(map[string]bool)
 
-	// Run ripgrep once with all directories
+	// Run the content search once with all directories
 	if len(searchDirs) > 0 {
-		// Build args: rg -l --type md -i query dir1 dir2 dir3...
-		args := []string{
-			"-l",           // files-with-matches
-			"--type", "md", // markdown only
-			"-i", // case-insensitive
-			query,
-		}
+		dirs := make([]string, 0, len(searchDirs))
 		for dir := range searchDirs {
-			args = append(args, dir)
+			dirs = append(dirs, dir)
 		}
+		sort.Strings(dirs)
 
-		cmd := fmt.Sprintf("rg %s", strings.Join(args, " "))
-		// Execute ripgrep (simplified - in real code use exec.Command)
-		// For now, just return a message that grep would be executed
-		_ = cmd
+		paths, err := grepSearcher(query, dirs)
+		if err != nil {
+			return "", fmt.Errorf("content search failed: %w", err)
+		}
+		for _, p := range paths {
+			resultPaths[p] = true
+		}
 	}
 
 	statusMsg := fmt.Sprintf("Found %d matching notes", len(resultPaths))
@@ -3071,6 +3130,12 @@ func ItemToNote(item *tree.Item) *models.Note {
 	if title, ok := item.Metadata["Title"].(string); ok {
 		note.Title = title
 	}
+	if fmTitle, ok := item.Metadata["FrontmatterTitle"].(string); ok {
+		note.FrontmatterTitle = fmTitle
+	}
+	if aliases, ok := item.Metadata["Aliases"].([]string); ok {
+		note.Aliases = aliases
+	}
 	if noteType, ok := item.Metadata["Type"].(string); ok {
 		note.Type = models.NoteType(noteType)
 	}
@@ -3098,6 +3163,16 @@ func ItemToNote(item *tree.Item) *models.Note {
 		note.CreatedAt = item.ModTime
 	}
 	note.ModifiedAt = item.ModTime
+	if open, ok := item.Metadata["TodoOpen"].(int); ok {
+		note.TodoOpen = open
+	}
+	if done, ok := item.Metadata["TodoDone"].(int); ok {
+		note.TodoDone = done
+	}
+	if cancelled, ok := item.Metadata["TodoCancelled"].(int); ok {
+		note.TodoCancelled = cancelled
+	}
+	note.HasTodos = note.TodoOpen+note.TodoDone+note.TodoCancelled > 0
 
 	// Set note type from item type
 	switch item.Type {
@@ -3129,6 +3204,8 @@ func noteToItem(note *models.Note) *tree.Item {
 
 	// Populate metadata
 	item.Metadata["Title"] = note.Title
+	item.Metadata["FrontmatterTitle"] = note.FrontmatterTitle
+	item.Metadata["Aliases"] = note.Aliases
 	item.Metadata["Type"] = string(note.Type)
 	item.Metadata["Workspace"] = note.Workspace
 	item.Metadata["Group"] = note.Group
@@ -3137,6 +3214,9 @@ func noteToItem(note *models.Note) *tree.Item {
 	item.Metadata["PlanRef"] = note.PlanRef
 	item.Metadata["Priority"] = note.Priority
 	item.Metadata["Created"] = note.CreatedAt
+	item.Metadata["TodoOpen"] = note.TodoOpen
+	item.Metadata["TodoDone"] = note.TodoDone
+	item.Metadata["TodoCancelled"] = note.TodoCancelled
 
 	if note.IsArtifact {
 		item.Type = tree.TypeArtifact

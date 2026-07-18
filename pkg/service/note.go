@@ -78,18 +78,23 @@ func ParseNote(path string) (*models.Note, error) {
 	// Extract metadata from path
 	workspace, branch, noteType := GetNoteMetadata(path)
 
+	todoOpen, todoDone, todoCancelled := CountTodos(contentStr)
+
 	note := &models.Note{
-		Path:       path,
-		Title:      filepath.Base(path), // Title is now the filename
-		Type:       models.NoteType(noteType),
-		Workspace:  workspace,
-		Branch:     branch,
-		CreatedAt:  info.ModTime(), // Could use birthtime if available
-		ModifiedAt: info.ModTime(),
-		Content:    contentStr,
-		WordCount:  countWords(contentStr),
-		HasTodos:   containsTodos(contentStr),
-		IsArchived: strings.Contains(path, "/archive/") || strings.Contains(path, "/.archive/"),
+		Path:          path,
+		Title:         filepath.Base(path), // Title is now the filename
+		Type:          models.NoteType(noteType),
+		Workspace:     workspace,
+		Branch:        branch,
+		CreatedAt:     info.ModTime(), // Could use birthtime if available
+		ModifiedAt:    info.ModTime(),
+		Content:       contentStr,
+		WordCount:     countWords(contentStr),
+		HasTodos:      todoOpen+todoDone+todoCancelled > 0,
+		TodoOpen:      todoOpen,
+		TodoDone:      todoDone,
+		TodoCancelled: todoCancelled,
+		IsArchived:    strings.Contains(path, "/archive/") || strings.Contains(path, "/.archive/"),
 	}
 
 	// If frontmatter was successfully parsed, use its data
@@ -230,9 +235,38 @@ func countWords(content string) int {
 	return len(strings.Fields(content))
 }
 
-// containsTodos checks if content has todo items
-func containsTodos(content string) bool {
-	return strings.Contains(content, "- [ ]") || strings.Contains(content, "- [x]")
+// CountTodos counts markdown checkbox items per line: open "- [ ]", done
+// "- [x]"/"- [X]", cancelled "- [-]" (the "* " bullet variants are accepted
+// too). Lines inside ``` code fences are skipped so fenced example checkboxes
+// don't inflate the counts.
+func CountTodos(content string) (open, done, cancelled int) {
+	inFence := false
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		rest, ok := strings.CutPrefix(trimmed, "- ")
+		if !ok {
+			rest, ok = strings.CutPrefix(trimmed, "* ")
+		}
+		if !ok {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(rest, "[ ]"):
+			open++
+		case strings.HasPrefix(rest, "[x]"), strings.HasPrefix(rest, "[X]"):
+			done++
+		case strings.HasPrefix(rest, "[-]"):
+			cancelled++
+		}
+	}
+	return open, done, cancelled
 }
 
 // NoteContentGenerator defines the function signature for note content generators
