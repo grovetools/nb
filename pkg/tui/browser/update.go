@@ -1539,7 +1539,16 @@ func (m *Model) createNoteCmd() tea.Cmd {
 						wsPath = ws.Path
 					}
 				}
-				noteType = models.NoteType(node.Item.Name)
+				// Prefer the full on-disk group path over the display name: for
+				// synthetic group-by buckets ("Today", "P0", "#tag") the name is
+				// just a label, and for nested groups the name is only the leaf.
+				if group, ok := node.Item.Metadata["Group"].(string); ok && group != "" {
+					noteType = models.NoteType(group)
+				} else if strings.Contains(node.Item.Path, ".synthetic-") {
+					noteType = "inbox"
+				} else {
+					noteType = models.NoteType(node.Item.Name)
+				}
 			} else if node.IsNote() {
 				// Find workspace by name to get its path
 				if wsName, ok := node.Item.Metadata["Workspace"].(string); ok {
