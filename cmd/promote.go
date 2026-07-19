@@ -26,6 +26,8 @@ func NewPromoteCmd(svc **service.Service) *cobra.Command {
 	var dependsOn []string
 	var dryRun bool
 	var jsonOut bool
+	var force bool
+	var strict bool
 
 	cmd := &cobra.Command{
 		Use:   "promote <note-path> [<note-path>...]",
@@ -84,6 +86,8 @@ Examples:
 				Effort:      effort,
 				Skill:       skill,
 				DependsOn:   dependsOn,
+				Force:       force,
+				Strict:      strict,
 			}
 
 			if dryRun {
@@ -136,6 +140,12 @@ Examples:
 					PrettyOnly().
 					Emit()
 
+				// Surface a worktree-resolution miss so it isn't silent: the job
+				// was created without a repository/branch.
+				if r.WorktreeMissing {
+					fmt.Fprintf(os.Stderr, "warning: worktree %q not found under any worktree base; %s created without repository/branch\n", r.Worktree, r.JobFilename)
+				}
+
 				// Print job filename to stdout for scripting
 				fmt.Println(r.JobFilename)
 			}
@@ -154,6 +164,8 @@ Examples:
 	cmd.Flags().StringArrayVarP(&dependsOn, "depends-on", "d", nil, "Job filename(s) in the target plan the promoted job(s) depend on (repeatable)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview what would be promoted without moving notes or creating jobs")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit machine-readable JSON output")
+	cmd.Flags().BoolVar(&force, "force", false, "Promote even when a note's plan_ref already points at a live plan")
+	cmd.Flags().BoolVar(&strict, "strict", false, "Fail hard if the plan's worktree can't be resolved (instead of creating a repo/branch-less job)")
 
 	return cmd
 }

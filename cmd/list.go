@@ -37,6 +37,7 @@ func NewListCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 		listCounts        bool
 		listPriority      string
 		listCriticalOnly  bool
+		listPlanRef       string
 	)
 
 	cmd := &cobra.Command{
@@ -99,6 +100,7 @@ Examples:
 				}
 
 				repoNotes = filterNotesByPriority(repoNotes, priorityFilter)
+				repoNotes = filterNotesByPlanRef(repoNotes, listPlanRef)
 
 				if len(repoNotes) == 0 {
 					if !listJSON {
@@ -170,6 +172,7 @@ Examples:
 				}
 
 				allNotes = filterNotesByPriority(allNotes, priorityFilter)
+				allNotes = filterNotesByPlanRef(allNotes, listPlanRef)
 
 				if len(allNotes) == 0 {
 					if !listJSON {
@@ -234,6 +237,7 @@ Examples:
 				}
 
 				allNotes = filterNotesByPriority(allNotes, priorityFilter)
+				allNotes = filterNotesByPlanRef(allNotes, listPlanRef)
 
 				if len(allNotes) == 0 {
 					if !listJSON {
@@ -291,6 +295,7 @@ Examples:
 			}
 
 			notes = filterNotesByPriority(notes, priorityFilter)
+			notes = filterNotesByPlanRef(notes, listPlanRef)
 
 			if len(notes) == 0 {
 				if listJSON {
@@ -330,6 +335,7 @@ Examples:
 	cmd.Flags().BoolVar(&listCounts, "counts", false, "Show aggregate counts per workspace (fast, uses daemon cache with --workspaces)")
 	cmd.Flags().StringVar(&listPriority, "priority", "", "Filter notes by priority level: p0 (most critical) .. p3")
 	cmd.Flags().BoolVar(&listCriticalOnly, "critical-only", false, "Show only p0 (critical) notes; shorthand for --priority p0")
+	cmd.Flags().StringVar(&listPlanRef, "plan-ref", "", "Filter to notes whose plan_ref frontmatter exactly matches this value (e.g. plans/my-feature)")
 
 	return cmd
 }
@@ -430,6 +436,40 @@ func filterNotesByPriority(notes []*models.Note, priority string) []*models.Note
 			}
 		}
 		if p == priority {
+			filtered = append(filtered, note)
+		}
+	}
+	return filtered
+}
+
+// filterNotesByPlanRef returns only the notes whose PlanRef exactly matches the
+// requested value. An empty filter is a no-op (returns the input unchanged).
+//
+// This is flow's seam for "give me this plan's notes": it works across every
+// lifecycle group `nb list` surfaces and with `--json`. Like the priority
+// filter, daemon-index notes normally carry plan_ref, but when a note's PlanRef
+// is empty we re-parse it from disk before comparing so a stale/omitted index
+// entry can't hide a match. The re-parse only happens when a filter is active.
+func filterNotesByPlanRef(notes []*models.Note, planRef string) []*models.Note {
+	if planRef == "" {
+		return notes
+	}
+	filtered := make([]*models.Note, 0, len(notes))
+	for _, note := range notes {
+		ref := note.PlanRef
+		if ref == "" || note.PlanJob == "" {
+			// Daemon-index entries carry no plan_job, so a matched note must
+			// also backfill it from disk — consumers key on it per-job.
+			if parsed, err := service.ParseNote(note.Path); err == nil {
+				if ref == "" {
+					ref = parsed.PlanRef
+				}
+				if note.PlanJob == "" {
+					note.PlanJob = parsed.PlanJob
+				}
+			}
+		}
+		if ref == planRef {
 			filtered = append(filtered, note)
 		}
 	}

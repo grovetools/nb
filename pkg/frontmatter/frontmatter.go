@@ -36,7 +36,8 @@ type Frontmatter struct {
 	Created    string   `yaml:"created"`
 	Modified   string   `yaml:"modified"`
 	Started    string   `yaml:"started,omitempty"`  // For LLM notes
-	PlanRef    string   `yaml:"plan_ref,omitempty"` // Reference to associated plan
+	PlanRef    string   `yaml:"plan_ref,omitempty"` // Reference to associated plan (slug form: plans/<planName>)
+	PlanJob    string   `yaml:"plan_job,omitempty"` // Per-job linkage: the promoted job's filename (e.g. 01-foo.md)
 	Priority   string   `yaml:"priority,omitempty"` // p0 (most critical) .. p3, empty = none
 	Name       string   `yaml:"name,omitempty"`     // Canonical name when the filename is generic (e.g. skills/<name>/SKILL.md)
 
@@ -78,6 +79,43 @@ func Parse(content string) (*Frontmatter, string, error) {
 	return &fm, bodyContent, nil
 }
 
+// UpdateField sets a single named frontmatter field to value, used by the
+// `nb internal update-frontmatter` command. An empty value CLEARS the link
+// fields (plan_ref, plan_job) — flow's demote path relies on this — while every
+// other supported field rejects an empty value so it can't be blanked by
+// accident. Unsupported field names return an error.
+func UpdateField(fm *Frontmatter, field, value string) error {
+	switch field {
+	case "plan_ref":
+		fm.PlanRef = value // empty clears
+	case "plan_job":
+		fm.PlanJob = value // empty clears
+	case "title":
+		if value == "" {
+			return fmt.Errorf("--value is required for field %q", field)
+		}
+		fm.Title = value
+	case "repository":
+		if value == "" {
+			return fmt.Errorf("--value is required for field %q", field)
+		}
+		fm.Repository = value
+	case "branch":
+		if value == "" {
+			return fmt.Errorf("--value is required for field %q", field)
+		}
+		fm.Branch = value
+	case "worktree":
+		if value == "" {
+			return fmt.Errorf("--value is required for field %q", field)
+		}
+		fm.Worktree = value
+	default:
+		return fmt.Errorf("unsupported field: %s", field)
+	}
+	return nil
+}
+
 // Build creates the YAML frontmatter string from a Frontmatter struct
 func Build(fm *Frontmatter) string {
 	var sb strings.Builder
@@ -114,6 +152,9 @@ func Build(fm *Frontmatter) string {
 	}
 	if fm.PlanRef != "" {
 		sb.WriteString(fmt.Sprintf("plan_ref: %s\n", formatYAMLValue(fm.PlanRef)))
+	}
+	if fm.PlanJob != "" {
+		sb.WriteString(fmt.Sprintf("plan_job: %s\n", formatYAMLValue(fm.PlanJob)))
 	}
 	if fm.Priority != "" {
 		sb.WriteString(fmt.Sprintf("priority: %s\n", formatYAMLValue(fm.Priority)))

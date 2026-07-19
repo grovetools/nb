@@ -57,6 +57,7 @@ type Doc struct {
 	Headings  []Heading `json:"headings,omitempty"`
 	Links     []Link    `json:"links,omitempty"`
 	PlanRef   string    `json:"plan_ref,omitempty"`
+	PlanJob   string    `json:"plan_job,omitempty"`
 	Archived  bool      `json:"archived,omitempty"`
 	ModTime   time.Time `json:"mod_time"`
 

@@ -265,11 +265,11 @@ func (m *Model) promoteToJobCmd() tea.Cmd {
 	planName := pi.name
 
 	return func() tea.Msg {
-		jobFilename, err := m.service.PromoteNoteToJob(note.Path, planPath, service.PromoteOptions{})
+		res, err := m.service.PromoteNoteToJob(note.Path, planPath, service.PromoteOptions{})
 		if err != nil {
 			return notePromotedToJobMsg{err: err}
 		}
-		return notePromotedToJobMsg{planName: planName, jobFile: jobFilename}
+		return notePromotedToJobMsg{planName: planName, jobFile: res.JobFilename}
 	}
 }
 

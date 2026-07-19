@@ -102,9 +102,9 @@ func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 			if fieldName == "" {
 				return fmt.Errorf("--field is required")
 			}
-			if fieldValue == "" {
-				return fmt.Errorf("--value is required")
-			}
+			// An empty --value is a valid CLEAR for the link fields (plan_ref,
+			// plan_job) — flow's demote path relies on it. Per-field validation
+			// below rejects an empty value for fields where it makes no sense.
 
 			// Read the note file
 			content, err := os.ReadFile(notePath)
@@ -121,20 +121,11 @@ func newUpdateFrontmatterCmd(svc **service.Service) *cobra.Command {
 				return fmt.Errorf("note has no frontmatter")
 			}
 
-			// Update the specified field
-			switch fieldName {
-			case "plan_ref":
-				fm.PlanRef = fieldValue
-			case "title":
-				fm.Title = fieldValue
-			case "repository":
-				fm.Repository = fieldValue
-			case "branch":
-				fm.Branch = fieldValue
-			case "worktree":
-				fm.Worktree = fieldValue
-			default:
-				return fmt.Errorf("unsupported field: %s", fieldName)
+			// Update the specified field. An empty --value clears plan_ref and
+			// plan_job (the link fields); every other field rejects an empty
+			// value so it can't be blanked by accident.
+			if err := frontmatter.UpdateField(fm, fieldName, fieldValue); err != nil {
+				return err
 			}
 
 			// Rebuild content with updated frontmatter

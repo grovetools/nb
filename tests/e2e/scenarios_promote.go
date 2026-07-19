@@ -221,9 +221,12 @@ Another bug to fix.
 					return fmt.Errorf("parsing in_progress note frontmatter: %w", err)
 				}
 
-				expectedPlanRef := fmt.Sprintf("active-plan/%s", jobFilename)
 				return ctx.Verify(func(v *verify.Collector) {
-					v.Equal("in_progress note plan_ref", expectedPlanRef, fm.PlanRef)
+					// plan_ref is the human-legible plan slug (plans/<planName>),
+					// the form the TUI note↔plan join matches on; plan_job carries
+					// the per-job filename.
+					v.Equal("in_progress note plan_ref", "plans/active-plan", fm.PlanRef)
+					v.Equal("in_progress note plan_job", jobFilename, fm.PlanJob)
 				})
 			}),
 
