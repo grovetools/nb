@@ -682,7 +682,8 @@ func GetNoteMetadata(path string) (workspaceIdentifier, branch, noteType string)
 	return "", "", ""
 }
 
-// RenameNote renames a note by updating its filename, ID, title, and first heading
+// RenameNote renames a note by updating its filename, title, and first heading.
+// The frontmatter ID is preserved so the note's identity is stable across retitles.
 func (s *Service) RenameNote(oldPath, newTitle string) (string, error) {
 	// Read the note content
 	content, err := os.ReadFile(oldPath)
@@ -698,11 +699,8 @@ func (s *Service) RenameNote(oldPath, newTitle string) (string, error) {
 		return "", fmt.Errorf("parse frontmatter: %w", err)
 	}
 
-	// Generate new ID from new title
-	newID := GenerateNoteID(newTitle)
-
-	// Update frontmatter fields
-	fm.ID = newID
+	// Update frontmatter fields. The ID is intentionally preserved: it is the
+	// stable identity used for note↔plan linkage and must survive a retitle.
 	fm.Title = newTitle
 	fm.Modified = frontmatter.FormatTimestamp(time.Now())
 
