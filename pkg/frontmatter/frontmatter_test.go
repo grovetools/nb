@@ -2,6 +2,7 @@ package frontmatter
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -494,5 +495,81 @@ func TestRoundTripWithColonInTitle(t *testing.T) {
 	expectedBody := "\n" + body
 	if parsedBody != expectedBody {
 		t.Errorf("Round trip body mismatch\noriginal: %q\nparsed: %q", expectedBody, parsedBody)
+	}
+}
+
+// TestPlanJobRoundTrip verifies the new plan_job field parses and re-emits
+// deterministically alongside plan_ref.
+func TestPlanJobRoundTrip(t *testing.T) {
+	content := "---\nid: n1\ntitle: T\naliases: []\ntags: []\nplan_ref: plans/my-feature\nplan_job: 01-foo.md\ncreated: 2026-01-01T00:00:00Z\nmodified: 2026-01-01T00:00:00Z\n---\n\nBody.\n"
+	fm, body, err := Parse(content)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if fm.PlanRef != "plans/my-feature" {
+		t.Errorf("PlanRef = %q, want plans/my-feature", fm.PlanRef)
+	}
+	if fm.PlanJob != "01-foo.md" {
+		t.Errorf("PlanJob = %q, want 01-foo.md", fm.PlanJob)
+	}
+	rebuilt := BuildContent(fm, body)
+	if !strings.Contains(rebuilt, "plan_ref: plans/my-feature") {
+		t.Errorf("rebuilt missing plan_ref; got:\n%s", rebuilt)
+	}
+	if !strings.Contains(rebuilt, "plan_job: 01-foo.md") {
+		t.Errorf("rebuilt missing plan_job; got:\n%s", rebuilt)
+	}
+	// Re-parse must be stable.
+	fm2, _, err := Parse(rebuilt)
+	if err != nil {
+		t.Fatalf("re-Parse: %v", err)
+	}
+	if fm2.PlanRef != fm.PlanRef || fm2.PlanJob != fm.PlanJob {
+		t.Errorf("round-trip changed link fields: %q/%q -> %q/%q", fm.PlanRef, fm.PlanJob, fm2.PlanRef, fm2.PlanJob)
+	}
+}
+
+// TestUpdateField pins the `nb internal update-frontmatter` field-update
+// contract: an empty value CLEARS the link fields (plan_ref, plan_job) — flow's
+// demote path depends on it — while other fields reject an empty value.
+func TestUpdateField(t *testing.T) {
+	// Empty value clears plan_ref and plan_job.
+	fm := &Frontmatter{PlanRef: "plans/foo", PlanJob: "01-foo.md"}
+	if err := UpdateField(fm, "plan_ref", ""); err != nil {
+		t.Fatalf("clear plan_ref: %v", err)
+	}
+	if fm.PlanRef != "" {
+		t.Errorf("plan_ref not cleared: %q", fm.PlanRef)
+	}
+	if err := UpdateField(fm, "plan_job", ""); err != nil {
+		t.Fatalf("clear plan_job: %v", err)
+	}
+	if fm.PlanJob != "" {
+		t.Errorf("plan_job not cleared: %q", fm.PlanJob)
+	}
+	// Cleared fields must be omitted from Build (omitempty).
+	built := Build(fm)
+	if strings.Contains(built, "plan_ref:") || strings.Contains(built, "plan_job:") {
+		t.Errorf("cleared link fields still emitted:\n%s", built)
+	}
+
+	// Setting new values works.
+	if err := UpdateField(fm, "plan_ref", "plans/bar"); err != nil {
+		t.Fatalf("set plan_ref: %v", err)
+	}
+	if err := UpdateField(fm, "plan_job", "02-bar.md"); err != nil {
+		t.Fatalf("set plan_job: %v", err)
+	}
+	if fm.PlanRef != "plans/bar" || fm.PlanJob != "02-bar.md" {
+		t.Errorf("set failed: %q / %q", fm.PlanRef, fm.PlanJob)
+	}
+
+	// Non-link fields reject an empty value.
+	if err := UpdateField(fm, "title", ""); err == nil {
+		t.Error("expected empty title to be rejected")
+	}
+	// Unsupported field name errors.
+	if err := UpdateField(fm, "bogus", "x"); err == nil {
+		t.Error("expected unsupported field to be rejected")
 	}
 }

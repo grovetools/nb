@@ -68,6 +68,7 @@ func parseFile(path, root, workspace string) (*Doc, []string, error) {
 		doc.Title = fm.Title
 		doc.Aliases = fm.Aliases
 		doc.PlanRef = fm.PlanRef
+		doc.PlanJob = fm.PlanJob
 		// A canonical frontmatter name resolves links to notes with generic
 		// filenames (skills/<name>/SKILL.md is wikilinked as [[<name>]]).
 		if fm.Name != "" {

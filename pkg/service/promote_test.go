@@ -60,12 +60,21 @@ func TestPromoteNoteToJob_WarnsWhenWorktreeMissing(t *testing.T) {
 	logger, hook := logtest.NewNullLogger()
 	svc := &Service{Logger: logrus.NewEntry(logger)}
 
-	jobFilename, err := svc.PromoteNoteToJob(notePath, planDir, PromoteOptions{})
+	res, err := svc.PromoteNoteToJob(notePath, planDir, PromoteOptions{})
 	if err != nil {
 		t.Fatalf("PromoteNoteToJob: %v", err)
 	}
-	if jobFilename == "" {
+	if res.JobFilename == "" {
 		t.Fatal("expected a job filename, got empty")
+	}
+
+	// The miss must also surface on the result so cmd can print it to stdout
+	// and include it in --json output — not just in the log.
+	if !res.WorktreeMissing {
+		t.Error("expected result.WorktreeMissing = true")
+	}
+	if res.Worktree != "ghost-worktree" {
+		t.Errorf("result.Worktree = %q, want ghost-worktree", res.Worktree)
 	}
 
 	// The miss must surface as a warning carrying the worktree + ecosystem
@@ -84,6 +93,55 @@ func TestPromoteNoteToJob_WarnsWhenWorktreeMissing(t *testing.T) {
 	}
 	if !warned {
 		t.Fatalf("expected a 'Worktree not found' warning; got entries: %v", hook.AllEntries())
+	}
+}
+
+// TestPromoteNoteToJob_StrictFailsWhenWorktreeMissing is the --strict
+// counterpart: an unresolvable worktree is a hard failure, and the note is NOT
+// moved to in_progress (no orphaned repo/branch-less job is left behind).
+func TestPromoteNoteToJob_StrictFailsWhenWorktreeMissing(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("GROVE_HOME", "")
+
+	ecoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ecoRoot, "grove.yml"),
+		[]byte("version: '1.0'\nname: my-eco\n"), 0o644); err != nil {
+		t.Fatalf("write grove.yml: %v", err)
+	}
+	t.Chdir(ecoRoot)
+
+	planDir := filepath.Join(t.TempDir(), "my-plan")
+	if err := os.MkdirAll(planDir, 0o755); err != nil {
+		t.Fatalf("mkdir plan: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(planDir, ".grove-plan.yml"),
+		[]byte("worktree: ghost-worktree\n"), 0o644); err != nil {
+		t.Fatalf("write plan config: %v", err)
+	}
+
+	noteDir := filepath.Join(t.TempDir(), "nb", "current")
+	if err := os.MkdirAll(noteDir, 0o755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	notePath := filepath.Join(noteDir, "20250101-test-note.md")
+	noteContent := "---\nid: 20250101-test-note\ntitle: Test Note\n---\n\nNote body content.\n"
+	if err := os.WriteFile(notePath, []byte(noteContent), 0o644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+
+	logger, _ := logtest.NewNullLogger()
+	svc := &Service{Logger: logrus.NewEntry(logger)}
+
+	if _, err := svc.PromoteNoteToJob(notePath, planDir, PromoteOptions{Strict: true}); err == nil {
+		t.Fatal("expected --strict promotion to fail on worktree miss")
+	}
+	// The note must be untouched — no orphan in in_progress.
+	if _, statErr := os.Stat(notePath); statErr != nil {
+		t.Errorf("note was moved despite strict failure: %v", statErr)
+	}
+	inProgress := filepath.Join(filepath.Dir(noteDir), "in_progress", filepath.Base(notePath))
+	if _, statErr := os.Stat(inProgress); !os.IsNotExist(statErr) {
+		t.Errorf("in_progress twin created despite strict failure")
 	}
 }
 
@@ -120,7 +178,7 @@ func TestPromoteNoteToJob_WritesSkillFrontmatter(t *testing.T) {
 	logger, _ := logtest.NewNullLogger()
 	svc := &Service{Logger: logrus.NewEntry(logger)}
 
-	jobFilename, err := svc.PromoteNoteToJob(notePath, planDir, PromoteOptions{
+	res, err := svc.PromoteNoteToJob(notePath, planDir, PromoteOptions{
 		JobType: "interactive_agent",
 		Skill:   "grove-feature-subcoordinator",
 	})
@@ -128,7 +186,7 @@ func TestPromoteNoteToJob_WritesSkillFrontmatter(t *testing.T) {
 		t.Fatalf("PromoteNoteToJob: %v", err)
 	}
 
-	jobBytes, err := os.ReadFile(filepath.Join(planDir, jobFilename))
+	jobBytes, err := os.ReadFile(filepath.Join(planDir, res.JobFilename))
 	if err != nil {
 		t.Fatalf("read job file: %v", err)
 	}
@@ -250,10 +308,11 @@ func TestPromoteNoteToJob_DependsOn(t *testing.T) {
 
 	// Seed the plan with a first job to depend on.
 	contract := writeTestNote(t, noteDir, "20250101-contract.md", "Contract")
-	contractJob, err := svc.PromoteNoteToJob(contract, planDir, PromoteOptions{})
+	contractRes, err := svc.PromoteNoteToJob(contract, planDir, PromoteOptions{})
 	if err != nil {
 		t.Fatalf("seeding contract job: %v", err)
 	}
+	contractJob := contractRes.JobFilename
 
 	// Unknown dependency: rejected pre-move.
 	child := writeTestNote(t, noteDir, "20250102-child.md", "Child")
@@ -267,12 +326,13 @@ func TestPromoteNoteToJob_DependsOn(t *testing.T) {
 	}
 
 	// Valid dependency: written to frontmatter.
-	childJob, err := svc.PromoteNoteToJob(child, planDir, PromoteOptions{
+	childRes, err := svc.PromoteNoteToJob(child, planDir, PromoteOptions{
 		DependsOn: []string{contractJob},
 	})
 	if err != nil {
 		t.Fatalf("PromoteNoteToJob with valid dep: %v", err)
 	}
+	childJob := childRes.JobFilename
 	jobBytes, err := os.ReadFile(filepath.Join(planDir, childJob))
 	if err != nil {
 		t.Fatalf("read child job: %v", err)
@@ -322,6 +382,165 @@ func TestPreviewPromoteNotes(t *testing.T) {
 		if strings.HasSuffix(e.Name(), ".md") {
 			t.Errorf("dry run created job file %s", e.Name())
 		}
+	}
+}
+
+// TestPromoteNoteToJob_WritesPlanRefAndPlanJob pins the re-founded link format:
+// the note's frontmatter becomes plan_ref: plans/<planName> (the slug the TUI
+// join matches on) plus plan_job: <jobFilename>. The job's note_ref and the
+// promoted-from trailer both reference the note's stable frontmatter id.
+func TestPromoteNoteToJob_WritesPlanRefAndPlanJob(t *testing.T) {
+	planDir, noteDir := promoteTestEnv(t)
+	logger, _ := logtest.NewNullLogger()
+	svc := &Service{Logger: logrus.NewEntry(logger)}
+
+	notePath := writeTestNote(t, noteDir, "20250101-linkme.md", "Link Me")
+	res, err := svc.PromoteNoteToJob(notePath, planDir, PromoteOptions{})
+	if err != nil {
+		t.Fatalf("PromoteNoteToJob: %v", err)
+	}
+
+	// planDir base is "my-plan" (see promoteTestEnv).
+	inProgress := filepath.Join(filepath.Dir(noteDir), "in_progress", "20250101-linkme.md")
+	noteBytes, err := os.ReadFile(inProgress)
+	if err != nil {
+		t.Fatalf("read in_progress note: %v", err)
+	}
+	noteStr := string(noteBytes)
+	if !strings.Contains(noteStr, "plan_ref: plans/my-plan") {
+		t.Errorf("note missing 'plan_ref: plans/my-plan'; got:\n%s", noteStr)
+	}
+	if !strings.Contains(noteStr, "plan_job: "+res.JobFilename) {
+		t.Errorf("note missing 'plan_job: %s'; got:\n%s", res.JobFilename, noteStr)
+	}
+
+	jobBytes, err := os.ReadFile(filepath.Join(planDir, res.JobFilename))
+	if err != nil {
+		t.Fatalf("read job file: %v", err)
+	}
+	jobStr := string(jobBytes)
+	// note_ref and the trailer reference the note's stable id, not the path.
+	if !strings.Contains(jobStr, "note_ref: 20250101-linkme") {
+		t.Errorf("job missing 'note_ref: 20250101-linkme'; got:\n%s", jobStr)
+	}
+	if !strings.Contains(jobStr, "_Promoted from note: 20250101-linkme_") {
+		t.Errorf("job missing id-based promoted-from trailer; got:\n%s", jobStr)
+	}
+}
+
+// TestPromoteNoteToJob_TrailerFallsBackToPath verifies the path fallback: a note
+// with NO frontmatter id gets the legacy path-based note_ref and trailer.
+func TestPromoteNoteToJob_TrailerFallsBackToPath(t *testing.T) {
+	planDir, noteDir := promoteTestEnv(t)
+	logger, _ := logtest.NewNullLogger()
+	svc := &Service{Logger: logrus.NewEntry(logger)}
+
+	notePath := filepath.Join(noteDir, "20250101-noid.md")
+	if err := os.WriteFile(notePath, []byte("---\ntitle: No ID\n---\n\nBody.\n"), 0o644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+	res, err := svc.PromoteNoteToJob(notePath, planDir, PromoteOptions{})
+	if err != nil {
+		t.Fatalf("PromoteNoteToJob: %v", err)
+	}
+	inProgress := filepath.Join(filepath.Dir(noteDir), "in_progress", "20250101-noid.md")
+	jobBytes, err := os.ReadFile(filepath.Join(planDir, res.JobFilename))
+	if err != nil {
+		t.Fatalf("read job file: %v", err)
+	}
+	if !strings.Contains(string(jobBytes), "_Promoted from: "+inProgress+"_") {
+		t.Errorf("expected path-based trailer; got:\n%s", jobBytes)
+	}
+}
+
+// TestPromoteNotesToJobs_IdempotencyGuard verifies the re-promotion guard: a
+// note whose plan_ref already points at a live plan directory is refused unless
+// --force (Force).
+func TestPromoteNotesToJobs_IdempotencyGuard(t *testing.T) {
+	planDir, noteDir := promoteTestEnv(t)
+	logger, _ := logtest.NewNullLogger()
+	svc := &Service{Logger: logrus.NewEntry(logger)}
+
+	// A live plan under the note's content root (parent of current/).
+	contentRoot := filepath.Dir(noteDir)
+	livePlan := filepath.Join(contentRoot, "plans", "already-linked")
+	if err := os.MkdirAll(livePlan, 0o755); err != nil {
+		t.Fatalf("mkdir live plan: %v", err)
+	}
+
+	// A note already linked to that live plan via plan_ref.
+	notePath := filepath.Join(noteDir, "20250101-linked.md")
+	noteContent := "---\nid: 20250101-linked\ntitle: Linked\nplan_ref: plans/already-linked\n---\n\nBody.\n"
+	if err := os.WriteFile(notePath, []byte(noteContent), 0o644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+
+	// Without Force: refused, note untouched.
+	if _, err := svc.PromoteNotesToJobs([]string{notePath}, planDir, PromoteOptions{}); err == nil {
+		t.Fatal("expected idempotency guard to refuse re-promotion")
+	}
+	if _, statErr := os.Stat(notePath); statErr != nil {
+		t.Errorf("note moved despite guard: %v", statErr)
+	}
+
+	// With Force: proceeds.
+	results, err := svc.PromoteNotesToJobs([]string{notePath}, planDir, PromoteOptions{Force: true})
+	if err != nil {
+		t.Fatalf("PromoteNotesToJobs --force: %v", err)
+	}
+	if len(results) != 1 || results[0].JobFilename == "" {
+		t.Fatalf("expected one forced promotion, got %+v", results)
+	}
+}
+
+// TestPromoteNoteToJob_PreservesEmbeddedFence is the double-frontmatter
+// regression: a note with valid-LOOKING but unparseable frontmatter (so the
+// textual fallback runs) plus an embedded ---fenced block in its body must not
+// have the embedded block eaten — only the leading frontmatter is stripped.
+func TestPromoteNoteToJob_PreservesEmbeddedFence(t *testing.T) {
+	planDir, noteDir := promoteTestEnv(t)
+	logger, _ := logtest.NewNullLogger()
+	svc := &Service{Logger: logrus.NewEntry(logger)}
+
+	// title has an unquoted colon and tags is an unclosed flow-array: the top
+	// block looks like frontmatter and parses as YAML-failure, forcing the
+	// stripFrontmatterBlock fallback.
+	notePath := filepath.Join(noteDir, "20250101-fence.md")
+	noteContent := "---\n" +
+		"title: Bug: colon in title breaks yaml\n" +
+		"tags: [a, b, c\n" +
+		"---\n\n" +
+		"# Body Heading\n\n" +
+		"An embedded fenced block follows:\n\n" +
+		"```yaml\n" +
+		"---\n" +
+		"embedded_key: embedded_value\n" +
+		"---\n" +
+		"```\n\n" +
+		"SENTINEL_END_OF_BODY\n"
+	if err := os.WriteFile(notePath, []byte(noteContent), 0o644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+
+	res, err := svc.PromoteNoteToJob(notePath, planDir, PromoteOptions{})
+	if err != nil {
+		t.Fatalf("PromoteNoteToJob: %v", err)
+	}
+
+	jobBytes, err := os.ReadFile(filepath.Join(planDir, res.JobFilename))
+	if err != nil {
+		t.Fatalf("read job file: %v", err)
+	}
+	jobStr := string(jobBytes)
+	// The embedded fenced block and the trailing sentinel must survive.
+	if !strings.Contains(jobStr, "embedded_key: embedded_value") {
+		t.Errorf("embedded fenced block was eaten; job body:\n%s", jobStr)
+	}
+	if !strings.Contains(jobStr, "SENTINEL_END_OF_BODY") {
+		t.Errorf("body after embedded fence was eaten; job body:\n%s", jobStr)
+	}
+	if !strings.Contains(jobStr, "# Body Heading") {
+		t.Errorf("body heading missing; job body:\n%s", jobStr)
 	}
 }
 

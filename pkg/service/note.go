@@ -126,6 +126,9 @@ func ParseNote(path string) (*models.Note, error) {
 		if fm.PlanRef != "" {
 			note.PlanRef = fm.PlanRef
 		}
+		if fm.PlanJob != "" {
+			note.PlanJob = fm.PlanJob
+		}
 		if fm.Priority != "" {
 			note.Priority = fm.Priority
 		}

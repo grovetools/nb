@@ -37,6 +37,7 @@ type Note struct {
 	IsArchived       bool      `json:"is_archived"`
 	IsArtifact       bool      `json:"is_artifact,omitempty"`
 	PlanRef          string    `json:"plan_ref,omitempty"`
+	PlanJob          string    `json:"plan_job,omitempty"` // Promoted job's filename (per-job linkage)
 	Priority         string    `json:"priority,omitempty"` // p0 (most critical) .. p3, empty = none
 
 	// Remote sync metadata

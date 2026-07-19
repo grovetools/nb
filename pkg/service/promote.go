@@ -24,12 +24,19 @@ type PromoteOptions struct {
 	Effort      string   // Effort level for claude agent jobs (optional)
 	Skill       string   // Skill name to inject into the agent context, written to job frontmatter (optional)
 	DependsOn   []string // Job filenames in the target plan the promoted job depends on (optional)
+	Force       bool     // Promote even when the note's plan_ref already points at a live plan
+	Strict      bool     // Treat a worktree-resolution miss as a hard failure instead of a warning
 }
 
 // PromoteResult records one note→job promotion within a batch.
 type PromoteResult struct {
 	NotePath    string `json:"note"`
 	JobFilename string `json:"job_file"`
+	// WorktreeMissing is true when the plan declared a worktree that could not
+	// be resolved under any worktree base, so the job was created without a
+	// repository/branch. Surfaced to stdout and JSON so the miss isn't silent.
+	WorktreeMissing bool   `json:"worktree_missing,omitempty"`
+	Worktree        string `json:"worktree,omitempty"`
 }
 
 // PromotePreview describes what promoting a note WOULD create, without writing.
@@ -46,43 +53,93 @@ type PromotePreview struct {
 
 // PromoteNoteToJob promotes a note to a job in an existing flow plan.
 // Both notePath and planDir are absolute paths and may be in different workspaces.
-// Returns the job filename on success.
-func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts PromoteOptions) (string, error) {
+// Returns a PromoteResult describing the created job on success.
+func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts PromoteOptions) (PromoteResult, error) {
 	// Load the target plan
 	plan, err := orchestration.LoadPlan(planDir)
 	if err != nil {
-		return "", fmt.Errorf("loading plan %s: %w", planDir, err)
+		return PromoteResult{NotePath: notePath}, fmt.Errorf("loading plan %s: %w", planDir, err)
 	}
 
 	// Validate declared dependencies against the plan before any mutation,
 	// matching flow plan add semantics (deps are job filenames).
 	if err := validateJobDependencies(plan, opts.DependsOn); err != nil {
-		return "", err
+		return PromoteResult{NotePath: notePath}, err
 	}
 
 	fm, body, noteTitle, err := s.parseNoteForPromotion(notePath)
 	if err != nil {
-		return "", err
+		return PromoteResult{NotePath: notePath}, err
+	}
+
+	// The note's stable frontmatter id is the provenance anchor: it survives
+	// path moves, so both note_ref and the promoted-from trailer prefer it and
+	// fall back to the (mutable) in_progress path only when the note has no id.
+	noteID := ""
+	if fm != nil {
+		noteID = fm.ID
 	}
 
 	// Generate a unique job ID
 	jobID := fmt.Sprintf("%s-%s", time.Now().Format("20060102-150405"), sanitizeForJobID(noteTitle))
 
-	// Move the note to in_progress/ before creating the job so note_ref
-	// points to the in_progress path.
+	// Resolve the plan's worktree to a repository/branch BEFORE moving the note,
+	// so a --strict miss can hard-fail without orphaning the note in in_progress.
+	worktree := ""
+	if plan.Config != nil {
+		worktree = plan.Config.Worktree
+	}
+	var repository, branch string
+	worktreeMissing := false
+	if worktree != "" {
+		// Find the ecosystem root and look up the worktree path
+		if node, err := workspace.GetProjectByPath("."); err == nil && node != nil {
+			var ecoRoot string
+			if node.RootEcosystemPath != "" {
+				ecoRoot = node.RootEcosystemPath
+			} else {
+				ecoRoot = node.Path
+			}
+			if wtPath, ok := workspace.ResolveWorktreePathByName(ecoRoot, worktree, nil); ok {
+				if repo, br, _ := git.GetRepoInfo(wtPath); repo != "" {
+					repository = repo
+					branch = br
+				}
+			} else {
+				worktreeMissing = true
+				if opts.Strict {
+					return PromoteResult{NotePath: notePath, WorktreeMissing: true, Worktree: worktree},
+						fmt.Errorf("worktree %q not found under any worktree base for ecosystem %s; refusing to promote a repo/branch-less job (--strict)", worktree, ecoRoot)
+				}
+				s.Logger.WithFields(logrus.Fields{
+					"worktree":  worktree,
+					"ecosystem": ecoRoot,
+				}).Warn("Worktree not found under any worktree base; promoted job will lack repository/branch")
+			}
+		}
+	}
+
+	// Move the note to in_progress/ before creating the job so the in_progress
+	// path (the note_ref/trailer fallback) is stable.
 	noteDir := filepath.Dir(notePath)
 	inProgressDir := filepath.Join(filepath.Dir(noteDir), "in_progress")
 	if err := os.MkdirAll(inProgressDir, 0o755); err != nil {
-		return "", fmt.Errorf("creating in_progress directory: %w", err)
+		return PromoteResult{NotePath: notePath}, fmt.Errorf("creating in_progress directory: %w", err)
 	}
 	inProgressPath := filepath.Join(inProgressDir, filepath.Base(notePath))
 	if err := os.Rename(notePath, inProgressPath); err != nil {
-		return "", fmt.Errorf("moving note to in_progress: %w", err)
+		return PromoteResult{NotePath: notePath}, fmt.Errorf("moving note to in_progress: %w", err)
 	}
 
-	// Create the job with note_ref pointing to the in_progress location.
-	// Inherit repository/branch/worktree from plan config so the job
-	// doesn't fall back to CWD-based resolution in AddJob.
+	// note_ref is a provenance hint only (flow no longer resolves it): prefer the
+	// note's stable frontmatter id, falling back to the in_progress path.
+	noteRef := inProgressPath
+	if noteID != "" {
+		noteRef = noteID
+	}
+
+	// Create the job. Inherit repository/branch/worktree resolved above so the
+	// job doesn't fall back to CWD-based resolution in AddJob.
 	jobType := orchestration.JobTypeChat
 	if opts.JobType != "" {
 		jobType = orchestration.JobType(opts.JobType)
@@ -92,52 +149,25 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 		jobStatus = orchestration.JobStatusPending
 	}
 	job := &orchestration.Job{
-		ID:        jobID,
-		Title:     noteTitle,
-		Type:      jobType,
-		Status:    jobStatus,
-		Template:  opts.JobTemplate,
-		Model:     opts.Model,
-		Effort:    opts.Effort,
-		Skill:     opts.Skill,
-		DependsOn: opts.DependsOn,
-		NoteRef:   inProgressPath,
-	}
-	if plan.Config != nil {
-		if plan.Config.Worktree != "" {
-			job.Worktree = plan.Config.Worktree
-		}
-	}
-	// Resolve repo/branch from the worktree (a git repo) rather than the
-	// plan directory (which lives in the notebook filesystem, not in git).
-	// This ensures promoted jobs get "grovetools" not "nb".
-	if job.Worktree != "" {
-		// Find the ecosystem root and look up the worktree path
-		if node, err := workspace.GetProjectByPath("."); err == nil && node != nil {
-			var ecoRoot string
-			if node.RootEcosystemPath != "" {
-				ecoRoot = node.RootEcosystemPath
-			} else {
-				ecoRoot = node.Path
-			}
-			if wtPath, ok := workspace.ResolveWorktreePathByName(ecoRoot, job.Worktree, nil); ok {
-				if repo, branch, _ := git.GetRepoInfo(wtPath); repo != "" {
-					job.Repository = repo
-					job.Branch = branch
-				}
-			} else {
-				s.Logger.WithFields(logrus.Fields{
-					"worktree":  job.Worktree,
-					"ecosystem": ecoRoot,
-				}).Warn("Worktree not found under any worktree base; promoted job will lack repository/branch")
-			}
-		}
+		ID:         jobID,
+		Title:      noteTitle,
+		Type:       jobType,
+		Status:     jobStatus,
+		Template:   opts.JobTemplate,
+		Model:      opts.Model,
+		Effort:     opts.Effort,
+		Skill:      opts.Skill,
+		DependsOn:  opts.DependsOn,
+		NoteRef:    noteRef,
+		Worktree:   worktree,
+		Repository: repository,
+		Branch:     branch,
 	}
 
 	// Add the job to the plan (writes the job file to disk)
 	jobFilename, err := orchestration.AddJob(plan, job)
 	if err != nil {
-		return "", fmt.Errorf("adding job to plan: %w", err)
+		return PromoteResult{NotePath: notePath}, fmt.Errorf("adding job to plan: %w", err)
 	}
 
 	// Append the note body to the job file so chat models can read it
@@ -145,23 +175,31 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 	jobFilePath := filepath.Join(planDir, jobFilename)
 	jobContent, err := os.ReadFile(jobFilePath)
 	if err != nil {
-		return "", fmt.Errorf("reading job file: %w", err)
+		return PromoteResult{NotePath: notePath, JobFilename: jobFilename}, fmt.Errorf("reading job file: %w", err)
 	}
 	// The job template already includes a <!-- grove: {"template": "chat"} -->
-	// marker, so we just append the note body and reference below it.
-	updatedContent := string(jobContent) + "\n" + strings.TrimSpace(body) + "\n\n_Promoted from: " + inProgressPath + "_\n"
+	// marker, so we just append the note body and reference below it. Reference
+	// the note's stable id when present; fall back to the path otherwise.
+	trailer := "_Promoted from: " + inProgressPath + "_"
+	if noteID != "" {
+		trailer = "_Promoted from note: " + noteID + "_"
+	}
+	updatedContent := string(jobContent) + "\n" + strings.TrimSpace(body) + "\n\n" + trailer + "\n"
 	if err := os.WriteFile(jobFilePath, []byte(updatedContent), 0o644); err != nil {
-		return "", fmt.Errorf("writing job body: %w", err)
+		return PromoteResult{NotePath: notePath, JobFilename: jobFilename}, fmt.Errorf("writing job body: %w", err)
 	}
 
-	// Update the note's frontmatter with plan_ref at its new in_progress location
+	// Update the note's frontmatter so NOTE frontmatter is the single stored
+	// truth for the note↔plan link: plan_ref is the human-legible plan slug
+	// (plans/<planName>, the form the TUI join matches on) and plan_job is the
+	// promoted job's filename for per-job linkage.
 	planName := filepath.Base(planDir)
-	planRef := fmt.Sprintf("%s/%s", planName, jobFilename)
 	if fm != nil {
-		fm.PlanRef = planRef
+		fm.PlanRef = fmt.Sprintf("plans/%s", planName)
+		fm.PlanJob = jobFilename
 		updatedNote := frontmatter.BuildContent(fm, body)
 		if writeErr := os.WriteFile(inProgressPath, []byte(updatedNote), 0o644); writeErr != nil {
-			s.Logger.WithError(writeErr).Warn("Failed to update note frontmatter with plan_ref")
+			s.Logger.WithError(writeErr).Warn("Failed to update note frontmatter with plan_ref/plan_job")
 		}
 	}
 
@@ -181,7 +219,12 @@ func (s *Service) PromoteNoteToJob(notePath string, planDir string, opts Promote
 		PrevPath:      notePath,
 	})
 
-	return jobFilename, nil
+	return PromoteResult{
+		NotePath:        notePath,
+		JobFilename:     jobFilename,
+		WorktreeMissing: worktreeMissing,
+		Worktree:        worktree,
+	}, nil
 }
 
 // PromoteNotesToJobs promotes a batch of notes into one plan (a triage
@@ -203,7 +246,10 @@ func (s *Service) PromoteNotesToJobs(notePaths []string, planDir string, opts Pr
 		return nil, err
 	}
 
-	// Preflight: every note exists, is a regular file, and appears once
+	// Preflight: every note exists, is a regular file, and appears once. Also
+	// enforce the idempotency guard: a note whose existing plan_ref points at a
+	// live plan directory is refused unless --force, so a re-run doesn't
+	// silently double-promote an already-linked note.
 	seen := make(map[string]struct{}, len(notePaths))
 	for _, p := range notePaths {
 		if _, dup := seen[p]; dup {
@@ -217,17 +263,63 @@ func (s *Service) PromoteNotesToJobs(notePaths []string, planDir string, opts Pr
 		if info.IsDir() {
 			return nil, fmt.Errorf("note is a directory: %s", p)
 		}
+		if !opts.Force {
+			if livePlanDir := s.existingLivePlanForNote(p); livePlanDir != "" {
+				return nil, fmt.Errorf("note %s is already linked to live plan %q (plan_ref); pass --force to re-promote", p, filepath.Base(livePlanDir))
+			}
+		}
 	}
 
 	results := make([]PromoteResult, 0, len(notePaths))
 	for i, p := range notePaths {
-		jobFilename, err := s.PromoteNoteToJob(p, planDir, opts)
+		res, err := s.PromoteNoteToJob(p, planDir, opts)
 		if err != nil {
 			return results, fmt.Errorf("promoted %d of %d notes; %s failed: %w", i, len(notePaths), p, err)
 		}
-		results = append(results, PromoteResult{NotePath: p, JobFilename: jobFilename})
+		results = append(results, res)
 	}
 	return results, nil
+}
+
+// existingLivePlanForNote returns the absolute directory of the plan the note
+// is already linked to via its plan_ref frontmatter, but only when that plan
+// directory actually exists on disk (a "live" plan). It returns "" when the
+// note has no plan_ref, is unreadable/unparseable, or the referenced plan
+// directory is absent — i.e. re-promotion is safe.
+//
+// plan_ref is resolved relative to the notebook content root (the parent of the
+// note's containing type directory, e.g. current/ or inbox/). It tolerates both
+// the current slug form (plans/<name>) and the legacy <name>/<job>.md form.
+func (s *Service) existingLivePlanForNote(notePath string) string {
+	content, err := os.ReadFile(notePath)
+	if err != nil {
+		return ""
+	}
+	fm, _, err := frontmatter.Parse(string(content))
+	if err != nil || fm == nil || fm.PlanRef == "" {
+		return ""
+	}
+
+	ref := fm.PlanRef
+	// Legacy form carried a trailing job filename; strip it to the plan slug.
+	if strings.HasSuffix(ref, ".md") {
+		ref = filepath.Dir(ref)
+	}
+	if ref == "" || ref == "." {
+		return ""
+	}
+
+	contentRoot := filepath.Dir(filepath.Dir(notePath))
+	candidates := []string{filepath.Join(contentRoot, ref)}
+	if !strings.HasPrefix(ref, "plans/") && !strings.HasPrefix(ref, "plans"+string(filepath.Separator)) {
+		candidates = append(candidates, filepath.Join(contentRoot, "plans", ref))
+	}
+	for _, dir := range candidates {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+	}
+	return ""
 }
 
 // PreviewPromoteNotes computes what PromoteNotesToJobs would create, without
@@ -321,10 +413,19 @@ func validateJobDependencies(plan *orchestration.Plan, deps []string) error {
 	return nil
 }
 
-// stripFrontmatterBlock removes the frontmatter block from content, returning only the body.
-// If the file starts with "---", it strips everything up to and including the closing "---".
-// If no frontmatter block is found, returns the original content.
+// stripFrontmatterBlock removes a leading frontmatter block from content,
+// returning only the body. It is the fallback for parseNoteForPromotion when
+// YAML parsing fails, and its one job is to avoid double-frontmatter in the
+// promoted job without ever eating body content.
+//
+// It ONLY strips a block anchored at byte 0 of the file: the content must begin
+// with the "---" fence, and stripping stops at the FIRST closing "---" line
+// (the frontmatter's own closer). A "---" fence that appears later in the body
+// (e.g. an embedded ```-fenced YAML/code block, or a thematic break) is never
+// treated as a frontmatter delimiter. If the content does not start with "---",
+// or no closing fence is found, the original content is returned unchanged.
 func stripFrontmatterBlock(content string) string {
+	// Byte-0 anchor: never strip a "---" fence that starts later in the body.
 	if !strings.HasPrefix(content, "---") {
 		return content
 	}
@@ -335,7 +436,8 @@ func stripFrontmatterBlock(content string) string {
 		return content
 	}
 
-	// Skip the opening "---"
+	// Skip the opening "---" and stop at the first closing fence (the
+	// frontmatter's own closer), leaving all subsequent body fences intact.
 	for i := 1; i < len(lines); i++ {
 		if strings.TrimSpace(lines[i]) == "---" {
 			// Found the closing delimiter; return everything after it
