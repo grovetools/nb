@@ -335,9 +335,19 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 	)
 	km.Base.Confirm = key.NewBinding(
 		key.WithKeys("enter"),
-		key.WithHelp("enter", "confirm"),
+		key.WithHelp("enter", "open in own pane / confirm"),
 	)
 	km.Base.Yank.SetEnabled(false)
+
+	// Open-mode split (hosted in treemux): enter opens the note in its own
+	// pinned per-file pane; e quick-opens it in the host's singleton Editor
+	// pane, replacing the buffer shown there. Override Base.Edit's generic
+	// "edit" help so the help menu reflects the split (ConfigKey `edit`
+	// unchanged — field is the same).
+	km.Base.Edit = key.NewBinding(
+		key.WithKeys("e"),
+		key.WithHelp("e", "quick edit in Editor pane"),
+	)
 
 	km.NextTab.SetEnabled(false)
 	km.PrevTab.SetEnabled(false)
