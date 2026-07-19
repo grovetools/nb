@@ -46,11 +46,19 @@ Read-only by default. With --fix:
   - MALFORMED-LEGACY (live/archived plan) is rewritten to plans/<name> + plan_job
   - ARCHIVED / GONE notes are moved to completed/
   - UNLINKED in_progress notes are moved back to inbox/
-  - UNCLAIMED jobs whose legacy note_ref resolves to a still-unlinked note file
-    have that note's plan_ref/plan_job backfilled
+  - UNCLAIMED jobs are repaired according to their REPAIR column:
+      relink    the note_ref resolved (by path, or by filename/id after the note
+                moved) to exactly one unlinked note: the note's plan_ref/plan_job
+                are pointed at the job and note_ref is rewritten to the note's id
+      clear     the note_ref resolves to nothing (or to a note another job owns):
+                the dead hint is cleared
+      ambiguous several notes match: never guessed, left for manual resolution
+      manual    the note was found but its frontmatter is unparseable (e.g. an
+                unquoted colon in the title): reported, never rewritten
 
 The target workspace defaults to the current one; use the global --workspace/-W
-flag to point at another workspace by path. Exits non-zero when problems remain.`,
+flag to point at another workspace by path. Exits non-zero when problems remain;
+after a --fix run only ambiguous/manual jobs can keep the exit code non-zero.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s := *svc
@@ -131,10 +139,15 @@ func printDoctorReport(r *doctor.Report) {
 	if len(r.UnclaimedJobs) > 0 {
 		fmt.Printf("\nUNCLAIMED jobs (%d)\n", len(r.UnclaimedJobs))
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "  PLAN\tJOB\tNOTE_REF\tACTION")
-		for _, j := range r.UnclaimedJobs {
-			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\n",
-				j.Plan, j.JobFile, j.NoteRef, dash(j.ActionTaken))
+		fmt.Fprintln(w, "  PLAN\tJOB\tNOTE_REF\tREPAIR\tACTION")
+		for i := range r.UnclaimedJobs {
+			j := &r.UnclaimedJobs[i]
+			action := j.ActionTaken
+			if action == "" {
+				action = j.ProposedFix()
+			}
+			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n",
+				j.Plan, j.JobFile, j.NoteRef, string(j.Repair), dash(action))
 		}
 		_ = w.Flush()
 	}

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	coremodels "github.com/grovetools/core/pkg/models"
@@ -62,16 +63,59 @@ type NoteEntry struct {
 	resolved bool
 }
 
-// JobEntry is one UNCLAIMED plan job's diagnosis (and any --fix action).
+// Repair names the forward-direction remedy planned (read-only) or applied
+// (--fix) for an UNCLAIMED job.
+type Repair string
+
+const (
+	// RepairRelink: the note_ref hint resolved to exactly one assignable note.
+	// The job's note_ref is rewritten to that note's stable id and the note's
+	// plan_ref/plan_job are pointed back at this job.
+	RepairRelink Repair = "relink"
+	// RepairClear: the hint resolves to nothing assignable — the referenced note
+	// is gone, or is already owned by another job. The dead hint is cleared.
+	RepairClear Repair = "clear"
+	// RepairAmbiguous: several notes match the hint. Never guessed; left alone
+	// and reported for a human to disambiguate.
+	RepairAmbiguous Repair = "ambiguous"
+	// RepairManual: the hint matched a note whose frontmatter cannot be parsed
+	// (e.g. an unquoted colon in the title). The note plainly exists, so the
+	// hint is not dead and must not be cleared — but it cannot be rewritten
+	// safely either. Reported for a human to repair the note itself.
+	RepairManual Repair = "manual"
+)
+
+// JobEntry is one UNCLAIMED plan job's diagnosis, the repair planned for it,
+// and (under --fix) the action applied.
 type JobEntry struct {
 	Plan           string         `json:"plan"`
 	JobFile        string         `json:"job_file"`
 	NoteRef        string         `json:"note_ref"`
 	Classification Classification `json:"classification"`
+	Repair         Repair         `json:"repair"`
+	ResolvedNote   string         `json:"resolved_note,omitempty"`
+	Candidates     []string       `json:"candidates,omitempty"`
 	ActionTaken    string         `json:"action_taken,omitempty"`
 
 	resolved bool
-	target   string // resolved backfill target note path (empty if none)
+	jobPath  string // absolute path to the job file
+	noteID   string // stable frontmatter id of the resolved note (may be empty)
+}
+
+// ProposedFix is the human-readable repair the reconciler would apply in --fix
+// mode. It is what the report shows in the ACTION column of a read-only run.
+func (j *JobEntry) ProposedFix() string {
+	switch j.Repair {
+	case RepairRelink:
+		return fmt.Sprintf("would relink to %s", filepath.Base(j.ResolvedNote))
+	case RepairClear:
+		return "would clear dead note_ref"
+	case RepairAmbiguous:
+		return fmt.Sprintf("ambiguous: %d candidates (manual)", len(j.Candidates))
+	case RepairManual:
+		return fmt.Sprintf("note %s has unreadable frontmatter (manual)", filepath.Base(j.ResolvedNote))
+	}
+	return ""
 }
 
 // Report is the full result of a reconciler run.
@@ -164,8 +208,9 @@ func Run(workspaceDir, workspaceName string, fix bool) (*Report, error) {
 	// a note backfilled into inbox on a prior --fix run must still count, so the
 	// same job isn't flagged UNCLAIMED forever.
 	claims := scanClaims(workspaceDir)
-	backfillTargets := map[string]struct{}{} // abs note path -> will be healed by a job backfill
-	jobEntries := scanUnclaimedJobs(plansDir, workspaceDir, claims, backfillTargets)
+	noteIdx := buildNoteIndex(workspaceDir)
+	backfillTargets := map[string]struct{}{} // abs note path -> will be healed by a job relink
+	jobEntries := scanUnclaimedJobs(plansDir, workspaceDir, claims, noteIdx, backfillTargets)
 
 	// --- Pass 3: finalize note dispositions and apply fixes ---
 	for _, st := range states {
@@ -232,23 +277,46 @@ func Run(workspaceDir, workspaceName string, fix bool) (*Report, error) {
 		}
 	}
 
-	// Apply forward-direction backfills (targets recorded during the job scan).
-	for i := range jobEntries {
-		j := &jobEntries[i]
-		if j.target == "" || !fix {
-			continue
-		}
-		if err := backfillNoteLink(j.target, "plans/"+j.Plan, j.JobFile); err != nil {
-			return nil, err
-		}
-		j.ActionTaken = fmt.Sprintf("backfilled note %s (plan_ref=plans/%s, plan_job=%s)", j.target, j.Plan, j.JobFile)
-		j.resolved = true
-		// Reflect the heal on the note-side entry when the note was scanned
-		// (an in_progress/review backfill target left in place above).
-		for _, st := range states {
-			if st.entry.Path == j.target {
-				st.entry.ActionTaken = fmt.Sprintf("linked to plans/%s job %s via job note_ref backfill", j.Plan, j.JobFile)
-				st.entry.resolved = true
+	// Apply the forward-direction repairs planned during the job scan.
+	if fix {
+		for i := range jobEntries {
+			j := &jobEntries[i]
+			switch j.Repair {
+			case RepairRelink:
+				if err := backfillNoteLink(j.ResolvedNote, "plans/"+j.Plan, j.JobFile); err != nil {
+					return nil, err
+				}
+				// Point the job's provenance hint at the note's stable id. If
+				// the note has no id there is no stable ref to write, so the
+				// path hint is cleared instead — the note-side link (the source
+				// of truth) is what keeps the job claimed from here on.
+				if err := setJobNoteRef(j.jobPath, j.noteID); err != nil {
+					return nil, err
+				}
+				if j.noteID != "" {
+					j.ActionTaken = fmt.Sprintf("relinked note %s (plan_ref=plans/%s, plan_job=%s); note_ref -> %s",
+						j.ResolvedNote, j.Plan, j.JobFile, j.noteID)
+				} else {
+					j.ActionTaken = fmt.Sprintf("relinked note %s (plan_ref=plans/%s, plan_job=%s); note_ref cleared (note has no id)",
+						j.ResolvedNote, j.Plan, j.JobFile)
+				}
+				j.resolved = true
+				// Reflect the heal on the note-side entry when the note was
+				// scanned (a relink target in in_progress/review left in place).
+				for _, st := range states {
+					if st.entry.Path == j.ResolvedNote {
+						st.entry.ActionTaken = fmt.Sprintf("linked to plans/%s job %s via job note_ref relink", j.Plan, j.JobFile)
+						st.entry.resolved = true
+					}
+				}
+			case RepairClear:
+				if err := setJobNoteRef(j.jobPath, ""); err != nil {
+					return nil, err
+				}
+				j.ActionTaken = "cleared dead note_ref"
+				j.resolved = true
+			case RepairAmbiguous, RepairManual:
+				// Never guessed / never rewritten: reported for a human.
 			}
 		}
 	}
@@ -385,11 +453,129 @@ type jobFrontmatter struct {
 
 var fmBlockRe = regexp.MustCompile(`(?s)^---\n(.*?)\n---`)
 
+// noteIndex is a snapshot of every note in the workspace's lifecycle
+// directories, used to resolve a job's note_ref hint back to a real note.
+type noteIndex struct {
+	byPath map[string]*indexedNote
+	byBase map[string][]*indexedNote // "20260611-foo.md" -> notes
+	byID   map[string][]*indexedNote // stable frontmatter id -> notes
+	order  []*indexedNote
+}
+
+type indexedNote struct {
+	path     string
+	base     string
+	id       string
+	hasLink  bool // plan_ref or plan_job already set
+	readable bool // frontmatter parsed cleanly — required before we rewrite it
+	reserved bool // already claimed as another job's relink target this run
+}
+
+// assignable reports whether this note may be adopted as a job's relink target.
+func (n *indexedNote) assignable() bool {
+	return n.readable && !n.hasLink && !n.reserved
+}
+
+// buildNoteIndex indexes inbox/in_progress/review/completed. Paths are sorted,
+// so candidate selection (and therefore repair) is deterministic.
+func buildNoteIndex(workspaceDir string) *noteIndex {
+	idx := &noteIndex{
+		byPath: map[string]*indexedNote{},
+		byBase: map[string][]*indexedNote{},
+		byID:   map[string][]*indexedNote{},
+	}
+	for _, sub := range lifecycleDirs {
+		files, err := listMarkdown(filepath.Join(workspaceDir, sub))
+		if err != nil {
+			continue
+		}
+		for _, path := range files {
+			n := &indexedNote{path: path, base: filepath.Base(path)}
+			if content, err := os.ReadFile(path); err == nil {
+				if fm, _, err := frontmatter.Parse(string(content)); err == nil && fm != nil {
+					n.id = strings.TrimSpace(fm.ID)
+					n.hasLink = fm.PlanRef != "" || fm.PlanJob != ""
+					n.readable = true
+				}
+			}
+			idx.byPath[path] = n
+			idx.byBase[n.base] = append(idx.byBase[n.base], n)
+			if n.id != "" {
+				idx.byID[n.id] = append(idx.byID[n.id], n)
+			}
+			idx.order = append(idx.order, n)
+		}
+	}
+	return idx
+}
+
+var lifecycleDirs = []string{"inbox", "in_progress", "review", "completed"}
+
+// resolveJobNoteRef maps a job's note_ref hint onto the notes it could mean.
+//
+// Path-shaped hints (the legacy absolute-path form) are resolved first by exact
+// path, then — since notes move through the lifecycle, typically ending up in
+// completed/ — by basename across the lifecycle dirs, preferring candidates
+// whose stable frontmatter id matches the filename stem. Id-shaped hints (the
+// current form) resolve directly through the id index.
+//
+// It returns every note the hint could denote; the caller partitions those into
+// assignable and not (a note already linked to some other job is owned by that
+// job — note frontmatter is the source of truth — and a note reserved by an
+// earlier job this run is spoken for).
+//
+// Only notes inside workspaceDir are ever returned, even for an absolute hint:
+// resolution goes through the index, so doctor can never reach outside the
+// workspace it was pointed at.
+func resolveJobNoteRef(ref, workspaceDir string, idx *noteIndex) []*indexedNote {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil
+	}
+
+	var candidates []*indexedNote
+	if strings.HasSuffix(ref, ".md") {
+		// Exact path hit (absolute, or workspace-relative) wins outright.
+		var exact []string
+		if filepath.IsAbs(ref) {
+			exact = append(exact, ref)
+		} else if strings.Contains(ref, "/") {
+			exact = append(exact, filepath.Join(workspaceDir, ref), ref)
+		}
+		for _, p := range exact {
+			if n, ok := idx.byPath[filepath.Clean(p)]; ok {
+				return []*indexedNote{n}
+			}
+		}
+		// Stale path: fall back to the basename across lifecycle dirs.
+		base := filepath.Base(ref)
+		candidates = idx.byBase[base]
+		stem := strings.TrimSuffix(base, ".md")
+		if len(candidates) == 0 {
+			candidates = idx.byID[stem]
+		} else if len(candidates) > 1 {
+			// Narrow a basename collision using the stable id when it agrees.
+			var confirmed []*indexedNote
+			for _, n := range candidates {
+				if n.id != "" && n.id == stem {
+					confirmed = append(confirmed, n)
+				}
+			}
+			if len(confirmed) > 0 {
+				candidates = confirmed
+			}
+		}
+	} else {
+		candidates = idx.byID[ref]
+	}
+	return candidates
+}
+
 // scanUnclaimedJobs walks each live plan (plans/*, skipping .archive) and
-// reports jobs whose note_ref hint no note claims. It records backfill targets:
-// UNCLAIMED jobs whose path-shaped note_ref resolves to an existing note file
-// that lacks a plan_ref/plan_job (transitional healing for pre-inversion plans).
-func scanUnclaimedJobs(plansDir, workspaceDir string, claims map[string]struct{}, backfillTargets map[string]struct{}) []JobEntry {
+// reports jobs whose note_ref hint no note claims, planning a repair for each.
+// backfillTargets collects notes a relink will heal, so pass 3 leaves them in
+// place instead of treating them as UNLINKED strays.
+func scanUnclaimedJobs(plansDir, workspaceDir string, claims map[string]struct{}, idx *noteIndex, backfillTargets map[string]struct{}) []JobEntry {
 	var out []JobEntry
 	entries, err := os.ReadDir(plansDir)
 	if err != nil {
@@ -422,54 +608,44 @@ func scanUnclaimedJobs(plansDir, workspaceDir string, claims map[string]struct{}
 				JobFile:        jf.Name(),
 				NoteRef:        jfm.NoteRef,
 				Classification: Unclaimed,
+				jobPath:        jobPath,
 			}
-			if target, ok := resolveNoteRef(jfm.NoteRef, workspaceDir); ok {
-				if noteLacksLink(target) {
-					backfillTargets[target] = struct{}{}
-					je.target = target
+			matches := resolveJobNoteRef(jfm.NoteRef, workspaceDir, idx)
+			var open []*indexedNote
+			var unreadable *indexedNote
+			for _, n := range matches {
+				switch {
+				case n.assignable():
+					open = append(open, n)
+				case !n.readable && unreadable == nil:
+					unreadable = n
 				}
+			}
+			switch {
+			case len(open) == 1:
+				n := open[0]
+				n.reserved = true
+				je.Repair = RepairRelink
+				je.ResolvedNote = n.path
+				je.noteID = n.id
+				backfillTargets[n.path] = struct{}{}
+			case len(open) > 1:
+				je.Repair = RepairAmbiguous
+				for _, n := range open {
+					je.Candidates = append(je.Candidates, n.path)
+				}
+			case unreadable != nil:
+				// The note exists, so the hint is not dead — but its
+				// frontmatter can't be parsed, so it can't be rewritten.
+				je.Repair = RepairManual
+				je.ResolvedNote = unreadable.path
+			default:
+				je.Repair = RepairClear
 			}
 			out = append(out, je)
 		}
 	}
 	return out
-}
-
-// resolveNoteRef resolves a path-shaped note_ref to an existing note file.
-// New-style note_refs are opaque note ids (not paths) and never resolve here.
-func resolveNoteRef(ref, workspaceDir string) (string, bool) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" || !strings.HasSuffix(ref, ".md") {
-		return "", false
-	}
-	candidates := []string{}
-	if filepath.IsAbs(ref) {
-		candidates = append(candidates, ref)
-	} else if strings.Contains(ref, "/") {
-		candidates = append(candidates, ref, filepath.Join(workspaceDir, ref))
-	} else {
-		return "", false
-	}
-	for _, c := range candidates {
-		if fileExists(c) {
-			return c, true
-		}
-	}
-	return "", false
-}
-
-// noteLacksLink reports whether the note at path has neither plan_ref nor
-// plan_job set — i.e. it is safe to backfill.
-func noteLacksLink(path string) bool {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	fm, _, err := frontmatter.Parse(string(content))
-	if err != nil || fm == nil {
-		return false
-	}
-	return fm.PlanRef == "" && fm.PlanJob == ""
 }
 
 func parseJobFrontmatter(path string) *jobFrontmatter {
@@ -515,6 +691,52 @@ func backfillNoteLink(path, planRef, planJob string) error {
 	fm.PlanJob = planJob
 	updated := frontmatter.BuildContent(fm, body)
 	return os.WriteFile(path, []byte(updated), 0o644)
+}
+
+// setJobNoteRef rewrites the note_ref line inside a job file's YAML
+// frontmatter, leaving every other line (and any unknown field flow may carry)
+// byte-for-byte intact — a full YAML round-trip would silently drop them. An
+// empty value writes `note_ref: ""`, the form flow itself emits for "no note".
+func setJobNoteRef(jobPath, value string) error {
+	content, err := os.ReadFile(jobPath)
+	if err != nil {
+		return fmt.Errorf("reading job %s: %w", jobPath, err)
+	}
+	loc := fmBlockRe.FindSubmatchIndex(content)
+	if loc == nil {
+		return fmt.Errorf("job %s has no frontmatter block", jobPath)
+	}
+	// loc[2]:loc[3] spans the frontmatter body (capture group 1).
+	body := string(content[loc[2]:loc[3]])
+	lines := strings.Split(body, "\n")
+	replaced := false
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "note_ref:") {
+			continue
+		}
+		lines[i] = "note_ref: " + yamlScalar(value)
+		replaced = true
+		break
+	}
+	if !replaced {
+		return fmt.Errorf("job %s has no note_ref field", jobPath)
+	}
+	var out []byte
+	out = append(out, content[:loc[2]]...)
+	out = append(out, []byte(strings.Join(lines, "\n"))...)
+	out = append(out, content[loc[3]:]...)
+	return os.WriteFile(jobPath, out, 0o644)
+}
+
+var plainScalarRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.\-/]*$`)
+
+// yamlScalar renders a string as a YAML scalar, quoting whenever a bare word
+// would be unsafe (empty, or containing YAML-significant characters).
+func yamlScalar(s string) string {
+	if plainScalarRe.MatchString(s) {
+		return s
+	}
+	return strconv.Quote(s)
 }
 
 // moveNote moves a note into destDir, emitting a typed move event (best-effort).
@@ -581,6 +803,15 @@ func fillSummary(r *Report) {
 	r.Summary["malformed_legacy"] = counts[MalformedLegacy]
 	r.Summary["unlinked"] = counts[Unlinked]
 	r.Summary["unclaimed_jobs"] = len(r.UnclaimedJobs)
+
+	repairs := map[Repair]int{}
+	for _, j := range r.UnclaimedJobs {
+		repairs[j.Repair]++
+	}
+	r.Summary["jobs_relinked"] = repairs[RepairRelink]
+	r.Summary["jobs_cleared"] = repairs[RepairClear]
+	r.Summary["jobs_ambiguous"] = repairs[RepairAmbiguous]
+	r.Summary["jobs_manual"] = repairs[RepairManual]
 
 	problems, actions := 0, 0
 	for _, e := range r.Notes {
