@@ -6,12 +6,45 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/grovetools/core/pkg/models"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/grovetools/nb/pkg/migration"
 	"github.com/grovetools/nb/pkg/service"
 )
+
+// emitNoteEvent routes every relocation performed by this command through the
+// single note-mutation funnel. It is a package-level var (mirroring
+// pkg/doctor's seam) so tests can capture what the move paths emit without
+// standing up a daemon.
+var emitNoteEvent = service.EmitNoteEvent
+
+// emitMoveEvent reports a completed relocation to the note-event funnel so the
+// daemon's index tracks the new location. PrevPath/PrevWorkspace/PrevNoteType
+// are the rename-detection linchpin: without them the daemon sees a delete plus
+// a create instead of a move. A --copy leaves the source in place, so it is a
+// creation rather than a move, matching TransferNotes in pkg/service.
+func emitMoveEvent(sourcePath, destPath string, isCopy bool) {
+	ws, _, noteType := service.GetNoteMetadata(destPath)
+	prevWs, _, prevType := service.GetNoteMetadata(sourcePath)
+
+	eventType := models.NoteEventMoved
+	if isCopy {
+		eventType = models.NoteEventCreated
+	}
+
+	emitNoteEvent(models.NoteEvent{
+		Event:         eventType,
+		Workspace:     ws,
+		NoteType:      noteType,
+		Path:          destPath,
+		PrevWorkspace: prevWs,
+		PrevNoteType:  prevType,
+		PrevPath:      sourcePath,
+	})
+}
 
 func NewMoveCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var (
@@ -178,53 +211,9 @@ func moveNote(svc *service.Service, workspaceOverride, sourcePath, destType, des
 		return nil
 	}
 
-	// Check if destination exists
-	if _, err := os.Stat(destPath); err == nil && !force {
-		return fmt.Errorf("destination file already exists: %s (use --force to overwrite)", destPath)
-	}
-
-	// Create destination directory if needed
-	destDir := filepath.Dir(destPath)
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create destination directory: %w", err)
-	}
-
-	isInNbSystem := strings.Contains(absSource, "/nb/")
-
-	if copy {
-		// Always copy when --copy flag is used
-		if err := copyFile(absSource, destPath); err != nil {
-			return fmt.Errorf("failed to copy file: %w", err)
-		}
-	} else if isInNbSystem && !applyMigrate {
-		// Simple rename for moves within nb system without migration
-		if err := os.Rename(absSource, destPath); err != nil {
-			// If rename fails (e.g., cross-device), fall back to copy and delete
-			return copyAndDelete(absSource, destPath)
-		}
-	} else {
-		// Copy the file first
-		if err := copyFile(absSource, destPath); err != nil {
-			return fmt.Errorf("failed to copy file: %w", err)
-		}
-
-		// Delete source file after successful copy (unless --copy flag is used)
-		if !copy {
-			if err := os.Remove(absSource); err != nil {
-				// Non-fatal - warn but continue
-				fmt.Fprintf(os.Stderr, "Warning: failed to remove source file: %v\n", err)
-			}
-		}
-	}
-
-	// Apply migration if requested
-	finalPath := destPath
-	if applyMigrate {
-		var err error
-		finalPath, err = applyMigration(svc, destPath)
-		if err != nil {
-			return fmt.Errorf("failed to apply migration: %w", err)
-		}
+	finalPath, err := relocateNote(absSource, destPath, applyMigrate, force, copy)
+	if err != nil {
+		return err
 	}
 
 	operation := "move"
@@ -245,6 +234,74 @@ func moveNote(svc *service.Service, workspaceOverride, sourcePath, destType, des
 	}).Info("Move/copy operation completed")
 
 	return nil
+}
+
+// relocateNote performs the filesystem half of `nb move` once the destination
+// path is known, applies migration when asked, and reports the result through
+// the note-event funnel. It returns the note's final path, which differs from
+// destPath when migration renamed the file.
+//
+// Every exit that actually relocated the note emits: this is the path the plan
+// lifecycle hooks drive (flow's orchestration.MoveNote shells out to
+// `nb move <path> <group> --force`), and skipping the emit left the daemon's
+// note index stale on exactly the inbox -> in_progress -> review -> completed
+// transitions the lifecycle is made of.
+func relocateNote(absSource, destPath string, applyMigrate, force, copy bool) (string, error) {
+	// Check if destination exists
+	if _, err := os.Stat(destPath); err == nil && !force {
+		return "", fmt.Errorf("destination file already exists: %s (use --force to overwrite)", destPath)
+	}
+
+	// Create destination directory if needed
+	destDir := filepath.Dir(destPath)
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
+	isInNbSystem := strings.Contains(absSource, "/nb/")
+
+	switch {
+	case copy:
+		// Always copy when --copy flag is used
+		if err := copyFile(absSource, destPath); err != nil {
+			return "", fmt.Errorf("failed to copy file: %w", err)
+		}
+	case isInNbSystem && !applyMigrate:
+		// Simple rename for moves within nb system without migration
+		if err := os.Rename(absSource, destPath); err != nil {
+			// If rename fails (e.g., cross-device), fall back to copy and delete.
+			// This used to return early, silently skipping both the event emit
+			// and the caller's "To:" output that flow parses.
+			if err := copyAndDelete(absSource, destPath); err != nil {
+				return "", err
+			}
+		}
+	default:
+		// Copy the file first
+		if err := copyFile(absSource, destPath); err != nil {
+			return "", fmt.Errorf("failed to copy file: %w", err)
+		}
+
+		// Delete source file after successful copy
+		if err := os.Remove(absSource); err != nil {
+			// Non-fatal - warn but continue
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove source file: %v\n", err)
+		}
+	}
+
+	// Apply migration if requested
+	finalPath := destPath
+	if applyMigrate {
+		migrated, err := applyMigration(destPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to apply migration: %w", err)
+		}
+		finalPath = migrated
+	}
+
+	emitMoveEvent(absSource, finalPath, copy)
+
+	return finalPath, nil
 }
 
 func moveToPath(svc *service.Service, sourcePath, destPath string, dryRun, copy bool) error {
@@ -281,9 +338,16 @@ func moveToPath(svc *service.Service, sourcePath, destPath string, dryRun, copy 
 
 	// Try rename first
 	if err := os.Rename(absSource, absDest); err != nil {
-		// Fall back to copy and delete
-		return copyAndDelete(absSource, absDest)
+		// Fall back to copy and delete (e.g. cross-device)
+		if err := copyAndDelete(absSource, absDest); err != nil {
+			return err
+		}
 	}
+
+	// Same funnel as the note-type path above: an explicit destination path is
+	// still a relocation the daemon's index has to learn about. This path always
+	// relocates (it ignores its copy parameter), so it is always a move.
+	emitMoveEvent(absSource, absDest, false)
 
 	fmt.Printf("Moved successfully: %s -> %s\n", absSource, absDest)
 	return nil
@@ -328,7 +392,7 @@ func copyAndDelete(src, dst string) error {
 	return nil
 }
 
-func applyMigration(svc *service.Service, filePath string) (string, error) {
+func applyMigration(filePath string) (string, error) {
 	// Use the centralized migration package to check if file needs migration
 	basePath := filepath.Join(os.Getenv("HOME"), "Documents", "nb")
 	issues, err := migration.AnalyzeFile(filePath, basePath)
@@ -340,6 +404,26 @@ func applyMigration(svc *service.Service, filePath string) (string, error) {
 		// No migration needed
 		return filePath, nil
 	}
+
+	// Capture the deterministic handles on the file's post-migration identity
+	// BEFORE migrating, so the new location never has to be rediscovered by
+	// guesswork:
+	//   - the standardized filename the analyzer computed (the rename target the
+	//     migrator will use; derived from id date + title slug, so re-analysing
+	//     the same file yields the same answer), and
+	//   - the note's stable frontmatter id, which survives moves and retitles.
+	expectedName := ""
+	for _, issue := range issues {
+		if issue.Type == "non_standard_filename" {
+			if name, ok := issue.Expected.(string); ok {
+				expectedName = name
+			}
+		}
+	}
+	// Only a pre-existing id is a reliable handle. When the note has no valid id
+	// the migrator mints one containing time.Now() to the second, which we cannot
+	// predict, so we fall back to the filename handle alone.
+	stableID := noteIDAt(filePath)
 
 	fmt.Printf("Applying migration to standardize note format...\n")
 
@@ -355,33 +439,73 @@ func applyMigration(svc *service.Service, filePath string) (string, error) {
 		return filePath, fmt.Errorf("migrate file: %w", err)
 	}
 
-	// The file might have been renamed during migration
-	// Check if the original file still exists
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		// File was renamed, find the new path
-		dir := filepath.Dir(filePath)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return filePath, fmt.Errorf("read directory: %w", err)
-		}
+	// The file might have been renamed during migration. If the original path is
+	// still there, nothing moved and there is nothing to resolve.
+	if _, err := os.Stat(filePath); err == nil {
+		return filePath, nil
+	}
 
-		// Find the most recently modified .md file (likely our migrated file)
-		var newestFile string
-		var newestTime int64
-		for _, entry := range entries {
-			if strings.HasSuffix(entry.Name(), ".md") {
-				info, err := entry.Info()
-				if err == nil && info.ModTime().Unix() > newestTime {
-					newestTime = info.ModTime().Unix()
-					newestFile = filepath.Join(dir, entry.Name())
-				}
+	return resolveMigratedPath(filePath, expectedName, stableID), nil
+}
+
+// resolveMigratedPath locates a note after migration renamed it, deterministically.
+//
+// It deliberately does NOT fall back to "the most recently modified .md in the
+// directory": that guess silently returns some other note whenever anything else
+// writes a .md in the same window, and it is not even sound here — the migrator
+// restores the original mtime with os.Chtimes, so the migrated file is usually
+// NOT the newest one.
+//
+// Resolution order, strongest first:
+//  1. The standardized filename the analyzer computed, confirmed by frontmatter
+//     id when we have one (the migrator appends a -N suffix on collision, so a
+//     name match alone can point at the colliding file).
+//  2. The note's stable frontmatter id, scanned for across the directory. This
+//     is authoritative: ids survive both moves and retitles.
+//
+// If neither resolves, the original path is returned unchanged rather than a
+// guess, leaving the caller with the same value it passed in.
+func resolveMigratedPath(origPath, expectedName, stableID string) string {
+	dir := filepath.Dir(origPath)
+
+	if expectedName != "" {
+		candidate := filepath.Join(dir, expectedName)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			if stableID == "" || noteIDAt(candidate) == stableID {
+				return candidate
 			}
-		}
-
-		if newestFile != "" {
-			return newestFile, nil
 		}
 	}
 
-	return filePath, nil
+	if stableID != "" {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return origPath
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+			candidate := filepath.Join(dir, entry.Name())
+			if noteIDAt(candidate) == stableID {
+				return candidate
+			}
+		}
+	}
+
+	return origPath
+}
+
+// noteIDAt returns the stable frontmatter id of the note at path, or "" when the
+// file is unreadable, has no frontmatter, or carries no id.
+func noteIDAt(path string) string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	fm, _, err := frontmatter.Parse(string(content))
+	if err != nil || fm == nil {
+		return ""
+	}
+	return fm.ID
 }
