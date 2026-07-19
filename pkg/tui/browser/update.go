@@ -1262,18 +1262,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				}
 				if noteToOpen != nil {
 					path := noteToOpen.Path
-					// enter/e: full-edit mode — replaces notebook with editor panel
+					// enter: dedicated open — the host pins the note to its
+					// own per-file editor pane (rail identity stays this note).
 					return m, func() tea.Msg {
-						return embed.EditRequestMsg{Path: path}
+						return embed.EditRequestMsg{Path: path, Dedicated: true}
 					}
 				}
 			}
-		case key.Matches(msg, m.keys.Edit): // e - full edit mode
+		case key.Matches(msg, m.keys.Edit): // e - quick edit in the host's singleton Editor
 			node := m.views.GetCurrentNode()
 			if node != nil && node.IsNote() {
 				note := views.ItemToNote(node.Item)
 				if note != nil {
 					path := note.Path
+					// Quick open: the host routes it into the persistent
+					// "Editor" pane, replacing the buffer shown there.
 					return m, func() tea.Msg {
 						return embed.EditRequestMsg{Path: path}
 					}
