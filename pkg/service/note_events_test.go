@@ -60,6 +60,85 @@ func TestArchiveNotesEmitsTypedMoveEvent(t *testing.T) {
 	assert.Equal(t, ev.NoteType, ev.PrevNoteType)
 }
 
+// TestLifecycleMovePreservesID pins that a lifecycle move never mints a new ID.
+// transferNotes only sets isCopyToSameLocation=true when mode=="copy" (see
+// service.go), so a move (nb move between inbox/in_progress/review/completed)
+// always reaches updateNoteFrontmatter with isCopyToSameLocation=false. This
+// exercises that exact code path directly.
+func TestLifecycleMovePreservesID(t *testing.T) {
+	s := newTestService()
+
+	noteDir := filepath.Join(t.TempDir(), "nb", "repos", "test-repo", "main", "in_progress")
+	require.NoError(t, os.MkdirAll(noteDir, 0o755))
+	notePath := filepath.Join(noteDir, "task.md")
+	noteContent := `---
+id: 20250111-100000-task
+title: Task
+aliases: []
+tags: [inbox]
+created: 2025-01-11 10:00:00
+modified: 2025-01-11 11:00:00
+---
+
+# Task
+
+Body.
+`
+	require.NoError(t, os.WriteFile(notePath, []byte(noteContent), 0o644))
+
+	// destWorkspace nil is fine: updateNoteFrontmatter guards those updates and
+	// the ID must be untouched regardless. isCopyToSameLocation=false mirrors a move.
+	require.NoError(t, s.updateNoteFrontmatter(notePath, nil, "in_progress", false))
+
+	content, err := os.ReadFile(notePath)
+	require.NoError(t, err)
+	fm, _, err := frontmatter.Parse(string(content))
+	require.NoError(t, err)
+	require.NotNil(t, fm)
+
+	assert.Equal(t, "20250111-100000-task", fm.ID)
+	assert.Equal(t, "Task", fm.Title)
+}
+
+func TestRenameNotePreservesID(t *testing.T) {
+	captureNoteEvents(t)
+	s := newTestService()
+
+	noteDir := filepath.Join(t.TempDir(), "nb", "repos", "test-repo", "main", "inbox")
+	require.NoError(t, os.MkdirAll(noteDir, 0o755))
+	oldPath := filepath.Join(noteDir, "old-title.md")
+	noteContent := `---
+id: 20250111-100000-old-title
+title: Old Title
+aliases: []
+tags: []
+created: 2025-01-11 10:00:00
+modified: 2025-01-11 11:00:00
+---
+
+# Old Title
+
+Body.
+`
+	require.NoError(t, os.WriteFile(oldPath, []byte(noteContent), 0o644))
+
+	newPath, err := s.RenameNote(oldPath, "New Title")
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(newPath)
+	require.NoError(t, err)
+	fm, body, err := frontmatter.Parse(string(content))
+	require.NoError(t, err)
+	require.NotNil(t, fm)
+
+	// Identity is preserved across a retitle.
+	assert.Equal(t, "20250111-100000-old-title", fm.ID)
+	// Title and heading are updated.
+	assert.Equal(t, "New Title", fm.Title)
+	assert.Contains(t, body, "# New Title")
+	assert.NotContains(t, body, "# Old Title")
+}
+
 func TestRenameNoteEmitsTypedRenameEvent(t *testing.T) {
 	events := captureNoteEvents(t)
 	s := newTestService()
