@@ -446,10 +446,20 @@ func filterNotesByPriority(notes []*models.Note, priority string) []*models.Note
 // requested value. An empty filter is a no-op (returns the input unchanged).
 //
 // This is flow's seam for "give me this plan's notes": it works across every
-// lifecycle group `nb list` surfaces and with `--json`. Like the priority
-// filter, daemon-index notes normally carry plan_ref, but when a note's PlanRef
-// is empty we re-parse it from disk before comparing so a stale/omitted index
-// entry can't hide a match. The re-parse only happens when a filter is active.
+// lifecycle group `nb list` surfaces and with `--json`. Like plan_ref and
+// priority, plan_job is now a NoteIndexEntry column, so daemon-index notes
+// normally arrive with both link fields already populated and the common path
+// does no file I/O at all.
+//
+// Two narrow disk fallbacks remain, both scoped so they can't degrade into a
+// per-note re-parse of the whole listing:
+//   - PlanRef empty: re-parse before comparing, so a stale index entry can't
+//     hide a match.
+//   - matched but PlanJob empty: re-parse only the notes that actually matched,
+//     so an index built by a daemon predating the plan_job column still yields
+//     the per-job linkage consumers key on.
+//
+// Both only run when a filter is active.
 func filterNotesByPlanRef(notes []*models.Note, planRef string) []*models.Note {
 	if planRef == "" {
 		return notes
@@ -457,21 +467,31 @@ func filterNotesByPlanRef(notes []*models.Note, planRef string) []*models.Note {
 	filtered := make([]*models.Note, 0, len(notes))
 	for _, note := range notes {
 		ref := note.PlanRef
-		if ref == "" || note.PlanJob == "" {
-			// Daemon-index entries carry no plan_job, so a matched note must
-			// also backfill it from disk — consumers key on it per-job.
+		if ref == "" {
+			parsed, err := service.ParseNote(note.Path)
+			if err != nil {
+				continue
+			}
+			ref = parsed.PlanRef
+			if ref != planRef {
+				continue
+			}
+			note.PlanRef = parsed.PlanRef
+			note.PlanJob = parsed.PlanJob
+			filtered = append(filtered, note)
+			continue
+		}
+		if ref != planRef {
+			continue
+		}
+		if note.PlanJob == "" {
+			// Pre-plan_job index entry (or a note with no promoted job):
+			// bounded to matched notes only.
 			if parsed, err := service.ParseNote(note.Path); err == nil {
-				if ref == "" {
-					ref = parsed.PlanRef
-				}
-				if note.PlanJob == "" {
-					note.PlanJob = parsed.PlanJob
-				}
+				note.PlanJob = parsed.PlanJob
 			}
 		}
-		if ref == planRef {
-			filtered = append(filtered, note)
-		}
+		filtered = append(filtered, note)
 	}
 	return filtered
 }
@@ -563,6 +583,7 @@ func noteFromIndexEntry(e *coremodels.NoteIndexEntry) *models.Note {
 		ID:               e.ID,
 		Tags:             e.Tags,
 		PlanRef:          e.PlanRef,
+		PlanJob:          e.PlanJob,
 	}
 }
 

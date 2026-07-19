@@ -264,6 +264,7 @@ func convertIndexToItems(entries []*models.NoteIndexEntry) []*tree.Item {
 				"Tags":      e.Tags,
 				"ID":        e.ID,
 				"PlanRef":   e.PlanRef,
+				"PlanJob":   e.PlanJob,
 				"Priority":  e.Priority,
 				"Group":     group,
 				"Workspace": e.Workspace,
