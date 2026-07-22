@@ -455,11 +455,29 @@ func newConceptPathCmd(svc **service.Service, workspaceOverride *string) *cobra.
 	return cmd
 }
 
+type conceptSearchRunner func(query string, opts service.ConceptSearchOptions, ecosystem bool) (service.ConceptSearchPage, error)
+
 func newConceptSearchCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	runSearch := func(query string, opts service.ConceptSearchOptions, ecosystem bool) (service.ConceptSearchPage, error) {
+		if ecosystem {
+			ctx, err := (*svc).GetWorkspaceContext(*workspaceOverride)
+			if err != nil {
+				return service.ConceptSearchPage{}, fmt.Errorf("get workspace context: %w", err)
+			}
+			return (*svc).SearchEcosystemConceptsPage(ctx, query, opts)
+		}
+		return (*svc).SearchConceptsPage(query, opts)
+	}
+	return newConceptSearchCmdWithRunner(runSearch)
+}
+
+func newConceptSearchCmdWithRunner(runSearch conceptSearchRunner) *cobra.Command {
 	var jsonOutput bool
+	var compact bool
 	var filesOnly bool
 	var ecosystem bool
 	var limit int
+	var minCoverage float64
 	var searchIn string
 
 	cmd := &cobra.Command{
@@ -467,34 +485,35 @@ func newConceptSearchCmd(svc **service.Service, workspaceOverride *string) *cobr
 		Short: "Search concepts across all workspaces",
 		Long: `Search for a query within concept files and rank the matching concepts.
 
-Multi-word queries are tokenized on whitespace: concepts matching ANY token are
+Multi-word queries are tokenized on whitespace with common English stopwords
+removed when content words remain. Concepts matching ANY content token are
 returned, ranked by token coverage and where the hits land (manifest title
 beats description beats overview.md beats other files). Tokens are matched as
-literal case-insensitive substrings, never as regexes.`,
+literal case-insensitive substrings, never as regexes.
+
+The role scope searches manifest title/description plus only the ## Role prose
+in overview.md. An overview without ## Role contributes no prose hits.
+--compact emits the versioned bounded machine schema, implies JSON, takes
+precedence over --json, and returns at most 10 concepts.`,
 		Example: `  nb concept search "auth"
   nb concept search "model resolution" --ecosystem --json
-  nb concept search "session" --in role --limit 5
-  nb concept search "workspace" --ecosystem --files-only --json`,
+  nb concept search "session" --in role --limit 5 --min-coverage 0.5
+  nb concept search "workspace" --ecosystem --files-only --json
+  nb concept search "workspace model" --ecosystem --in role --compact`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query := args[0]
-			opts := service.ConceptSearchOptions{In: searchIn, Limit: limit}
-
-			var results []service.ConceptSearchResult
-			var err error
-
-			if ecosystem {
-				ctx, ctxErr := (*svc).GetWorkspaceContext(*workspaceOverride)
-				if ctxErr != nil {
-					return fmt.Errorf("get workspace context: %w", ctxErr)
-				}
-				results, err = (*svc).SearchEcosystemConcepts(ctx, query, opts)
-			} else {
-				results, err = (*svc).SearchConcepts(query, opts)
+			effectiveLimit := limit
+			if compact && (effectiveLimit <= 0 || effectiveLimit > service.ConceptCompactMaxResults) {
+				effectiveLimit = service.ConceptCompactMaxResults
 			}
+			opts := service.ConceptSearchOptions{In: searchIn, Limit: effectiveLimit, MinCoverage: minCoverage}
+
+			page, err := runSearch(query, opts, ecosystem)
 			if err != nil {
 				return err
 			}
+			results := page.Results
 
 			if filesOnly {
 				for i := range results {
@@ -502,6 +521,15 @@ literal case-insensitive substrings, never as regexes.`,
 						results[i].Files[j].Matches = nil
 					}
 				}
+			}
+
+			if compact {
+				data, err := json.Marshal(service.CompactConceptSearch(page))
+				if err != nil {
+					return fmt.Errorf("marshal compact json: %w", err)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), string(data))
+				return nil
 			}
 
 			if jsonOutput {
@@ -512,32 +540,32 @@ literal case-insensitive substrings, never as regexes.`,
 				if err != nil {
 					return fmt.Errorf("marshal json: %w", err)
 				}
-				fmt.Println(string(data))
+				fmt.Fprintln(cmd.OutOrStdout(), string(data))
 				return nil
 			}
 
 			if len(results) == 0 {
-				fmt.Println("No matches found.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No matches found.")
 				return nil
 			}
 
-			fmt.Printf("Found %d concept(s):\n", len(results))
+			fmt.Fprintf(cmd.OutOrStdout(), "Found %d concept(s):\n", len(results))
 			for _, result := range results {
 				title := result.Title
 				if title == "" {
 					title = result.ConceptID
 				}
-				fmt.Printf("\n%s/%s — %s (score %.2f)\n", result.Workspace, result.ConceptID, title, result.Score)
+				fmt.Fprintf(cmd.OutOrStdout(), "\n%s/%s — %s (score %.2f)\n", result.Workspace, result.ConceptID, title, result.Score)
 				if result.Description != "" {
-					fmt.Printf("  %s\n", result.Description)
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", result.Description)
 				}
 				for _, file := range result.Files {
 					if filesOnly {
-						fmt.Printf("  %s\n", file.FilePath)
+						fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", file.FilePath)
 						continue
 					}
 					for _, match := range file.Matches {
-						fmt.Printf("  %s:%d: %s\n", file.FilePath, match.LineNumber, match.Text)
+						fmt.Fprintf(cmd.OutOrStdout(), "  %s:%d: %s\n", file.FilePath, match.LineNumber, match.Text)
 					}
 				}
 			}
@@ -546,10 +574,12 @@ literal case-insensitive substrings, never as regexes.`,
 	}
 
 	cmd.Flags().BoolVar(&ecosystem, "ecosystem", false, "Search only within the current ecosystem")
-	cmd.Flags().BoolVar(&filesOnly, "files-only", false, "Omit line matches; list matched files only")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output result as JSON")
-	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum number of concepts to return (0 = unlimited)")
-	cmd.Flags().StringVar(&searchIn, "in", "all", "Search scope: role (manifest title/description + overview.md), overview (overview.md only), all (every concept file)")
+	cmd.Flags().BoolVar(&filesOnly, "files-only", false, "Omit line matches; list matched files only (ignored by --compact)")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output the legacy JSON array (--compact takes precedence)")
+	cmd.Flags().BoolVar(&compact, "compact", false, "Output versioned bounded JSON (implies JSON; maximum 10 results)")
+	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum number of concepts to return (0 = unlimited; compact defaults to 10)")
+	cmd.Flags().Float64Var(&minCoverage, "min-coverage", 0, "Minimum fraction of content query tokens a result must match (0..1)")
+	cmd.Flags().StringVar(&searchIn, "in", "all", "Search scope: role (manifest title/description + ## Role prose only), overview (all overview.md), all (every concept file)")
 	return cmd
 }
 

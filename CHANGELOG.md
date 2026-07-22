@@ -1,3 +1,12 @@
+## Unreleased
+
+### Features
+- Add a versioned, bounded `nb concept search --compact` schema with truthful omitted totals and lexical coverage controls.
+
+### Bug Fixes
+- Make `--in role` search only `## Role` prose plus manifest title/description; overviews without a Role section no longer fall back to whole-file matching.
+- Include an explicit `## Role` section in newly created concept overviews.
+
 ## v0.6.0 (2026-02-02)
 
 This release enhances the concept management system with ecosystem-wide discovery, search capabilities, and skill linking support (407a497, 8d6be38). It also includes fixes for path resolution when pasting into plan directories (af5831e) and updates internal utilities for format-preserving frontmatter modifications (7f6c18c). Infrastructure changes include migrating configuration to `grove.toml` (a2d48d9) and adopting XDG-compliant paths (a01e8cb).
