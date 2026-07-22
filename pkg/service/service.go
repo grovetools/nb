@@ -668,7 +668,7 @@ related_skills: []
 		}
 	}
 
-	overviewBody := fmt.Sprintf("# Overview: %s\n\n## Summary\n\nA high-level summary of what this concept is about.\n", title)
+	overviewBody := conceptOverviewBody(title)
 	overviewContent := frontmatter.BuildContent(fm, overviewBody)
 
 	if err := os.WriteFile(filepath.Join(conceptPath, "overview.md"), []byte(overviewContent), 0o644); err != nil {
@@ -688,6 +688,10 @@ related_skills: []
 		Title: title,
 		Type:  "concepts",
 	}, nil
+}
+
+func conceptOverviewBody(title string) string {
+	return fmt.Sprintf("# Overview: %s\n\n## Role\n\nDescribe the ownership, responsibilities, and boundaries of this concept.\n\n## Summary\n\nA high-level summary of what this concept is about.\n", title)
 }
 
 // ConceptInfo represents metadata about a concept

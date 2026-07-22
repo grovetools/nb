@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	coreworkspace "github.com/grovetools/core/pkg/workspace"
 	"gopkg.in/yaml.v3"
@@ -25,22 +24,28 @@ const (
 // other files. Constants are deliberately coarse — ordering guarantees matter,
 // exact values do not.
 const (
-	conceptWeightTitle       = 5.0
-	conceptWeightDescription = 3.0
-	conceptWeightOverview    = 2.0
-	conceptWeightOther       = 1.0
-	conceptPhraseBonus       = 10.0
-	conceptSnippetMaxLen     = 200
+	conceptWeightTitle          = 5.0
+	conceptWeightDescription    = 3.0
+	conceptWeightOverview       = 2.0
+	conceptWeightOther          = 1.0
+	conceptPhraseBonus          = 10.0
+	conceptSnippetMaxRunes      = 200
+	ConceptCompactMaxResults    = 10
+	ConceptCompactSchemaVersion = 1
 )
 
 // ConceptSearchOptions controls scope and result count for concept search.
 type ConceptSearchOptions struct {
-	// In is the search scope: "role" (manifest title/description + overview.md),
-	// "overview" (overview.md files only), or "all" (every file in concept
-	// dirs). Empty means "all".
+	// In is the search scope: "role" (manifest title/description + only the
+	// ## Role section of overview.md), "overview" (all of overview.md), or
+	// "all" (every file in concept dirs). Empty means "all". An overview with
+	// no Role section contributes no prose hits to the role scope.
 	In string
 	// Limit caps the number of ranked concepts returned; 0 = unlimited.
 	Limit int
+	// MinCoverage excludes results matching less than this fraction of the
+	// content query tokens. It must be between 0 and 1; 0 disables the gate.
+	MinCoverage float64
 }
 
 // ConceptSearchMatch represents a single line match within a file.
@@ -66,6 +71,51 @@ type ConceptSearchResult struct {
 	Files       []ConceptFileMatch `json:"files"`
 }
 
+// ConceptSearchPage preserves the eligible result total before presentation
+// limiting. Legacy search methods return Results only.
+type ConceptSearchPage struct {
+	Results       []ConceptSearchResult
+	EligibleTotal int
+}
+
+// CompactConceptSearchResult is the bounded machine-facing concept shape.
+type CompactConceptSearchResult struct {
+	Concept string  `json:"concept"`
+	Title   string  `json:"title"`
+	Snippet string  `json:"snippet"`
+	Score   float64 `json:"score"`
+}
+
+// CompactConceptSearchEnvelope is emitted by `nb concept search --compact`.
+type CompactConceptSearchEnvelope struct {
+	SchemaVersion int                          `json:"schema_version"`
+	Results       []CompactConceptSearchResult `json:"results"`
+	Omitted       int                          `json:"omitted"`
+}
+
+// CompactConceptSearch converts a search page to the versioned, bounded CLI
+// schema. It intentionally contains no filesystem paths.
+func CompactConceptSearch(page ConceptSearchPage) CompactConceptSearchEnvelope {
+	results := make([]CompactConceptSearchResult, 0, len(page.Results))
+	for _, result := range page.Results {
+		results = append(results, CompactConceptSearchResult{
+			Concept: result.Workspace + ":" + result.ConceptID,
+			Title:   truncateRunes(result.Title, conceptSnippetMaxRunes),
+			Snippet: truncateRunes(result.Description, conceptSnippetMaxRunes),
+			Score:   result.Score,
+		})
+	}
+	omitted := page.EligibleTotal - len(page.Results)
+	if omitted < 0 {
+		omitted = 0
+	}
+	return CompactConceptSearchEnvelope{
+		SchemaVersion: ConceptCompactSchemaVersion,
+		Results:       results,
+		Omitted:       omitted,
+	}
+}
+
 // conceptManifestMeta is the shared minimal parse of concept-manifest.yml.
 type conceptManifestMeta struct {
 	ID          string `yaml:"id"`
@@ -82,14 +132,28 @@ type conceptSearchDir struct {
 
 // SearchConcepts searches concept files across all known workspaces.
 func (s *Service) SearchConcepts(query string, opts ConceptSearchOptions) ([]ConceptSearchResult, error) {
-	return searchConceptDirs(s.conceptDirsForWorkspaces(s.workspaceProvider.All()), query, opts)
+	page, err := s.SearchConceptsPage(query, opts)
+	return page.Results, err
+}
+
+// SearchConceptsPage searches all known workspaces and preserves the eligible
+// total before Limit is applied.
+func (s *Service) SearchConceptsPage(query string, opts ConceptSearchOptions) (ConceptSearchPage, error) {
+	return searchConceptDirsPage(s.conceptDirsForWorkspaces(s.workspaceProvider.All()), query, opts)
 }
 
 // SearchEcosystemConcepts searches concepts within the current ecosystem only.
 func (s *Service) SearchEcosystemConcepts(ctx *WorkspaceContext, query string, opts ConceptSearchOptions) ([]ConceptSearchResult, error) {
+	page, err := s.SearchEcosystemConceptsPage(ctx, query, opts)
+	return page.Results, err
+}
+
+// SearchEcosystemConceptsPage searches the current ecosystem and preserves the
+// eligible total before Limit is applied.
+func (s *Service) SearchEcosystemConceptsPage(ctx *WorkspaceContext, query string, opts ConceptSearchOptions) (ConceptSearchPage, error) {
 	currentWs := ctx.CurrentWorkspace
 	if currentWs == nil {
-		return nil, fmt.Errorf("no current workspace context")
+		return ConceptSearchPage{}, fmt.Errorf("no current workspace context")
 	}
 
 	var ecosystemRootPath string
@@ -112,7 +176,7 @@ func (s *Service) SearchEcosystemConcepts(ctx *WorkspaceContext, query string, o
 
 	if ecosystemRootPath == "" {
 		dirs := s.conceptDirsForWorkspaces([]*coreworkspace.WorkspaceNode{currentWs})
-		return searchConceptDirs(dirs, query, opts)
+		return searchConceptDirsPage(dirs, query, opts)
 	}
 
 	// Normalize for case-insensitive comparison (macOS)
@@ -129,7 +193,7 @@ func (s *Service) SearchEcosystemConcepts(ctx *WorkspaceContext, query string, o
 		}
 	}
 
-	return searchConceptDirs(s.conceptDirsForWorkspaces(ecosystemWorkspaces), query, opts)
+	return searchConceptDirsPage(s.conceptDirsForWorkspaces(ecosystemWorkspaces), query, opts)
 }
 
 // conceptDirsForWorkspaces collects the concept directories (with owning
@@ -189,9 +253,15 @@ type conceptLineHit struct {
 	text string
 }
 
-// searchConceptDirs runs an OR-token, fixed-string, case-insensitive search
-// over the given concept directories and returns ranked per-concept results.
+// searchConceptDirs is the legacy slice-returning search helper.
 func searchConceptDirs(dirs []conceptSearchDir, query string, opts ConceptSearchOptions) ([]ConceptSearchResult, error) {
+	page, err := searchConceptDirsPage(dirs, query, opts)
+	return page.Results, err
+}
+
+// searchConceptDirsPage runs an OR-token, fixed-string, case-insensitive
+// search and preserves the eligible total before presentation limiting.
+func searchConceptDirsPage(dirs []conceptSearchDir, query string, opts ConceptSearchOptions) (ConceptSearchPage, error) {
 	scope := opts.In
 	if scope == "" {
 		scope = ConceptSearchInAll
@@ -199,12 +269,15 @@ func searchConceptDirs(dirs []conceptSearchDir, query string, opts ConceptSearch
 	switch scope {
 	case ConceptSearchInRole, ConceptSearchInOverview, ConceptSearchInAll:
 	default:
-		return nil, fmt.Errorf("invalid search scope %q (want role, overview, or all)", opts.In)
+		return ConceptSearchPage{}, fmt.Errorf("invalid search scope %q (want role, overview, or all)", opts.In)
+	}
+	if opts.MinCoverage < 0 || opts.MinCoverage > 1 {
+		return ConceptSearchPage{}, fmt.Errorf("min coverage must be between 0 and 1")
 	}
 
 	tokens := tokenizeConceptQuery(query)
 	if len(tokens) == 0 || len(dirs) == 0 {
-		return []ConceptSearchResult{}, nil
+		return ConceptSearchPage{Results: []ConceptSearchResult{}}, nil
 	}
 	phrase := strings.ToLower(strings.TrimSpace(query))
 	multiToken := len(tokens) > 1
@@ -243,51 +316,89 @@ func searchConceptDirs(dirs []conceptSearchDir, query string, opts ConceptSearch
 		}
 	}
 
-	overviewOnly := scope != ConceptSearchInAll
-	for _, token := range tokens {
-		lines, err := runConceptTokenSearch(token, searchPaths, overviewOnly)
-		if err != nil {
-			return nil, err
-		}
-		for _, line := range lines {
-			filePath, lineNum, text, ok := parseGrepLine(line)
-			if !ok {
+	if scope == ConceptSearchInRole {
+		// Role scope is intentionally in-memory: grep cannot constrain matches
+		// to one Markdown section. Missing Role headings contribute no prose.
+		for _, a := range accums {
+			overviewPath := filepath.Join(a.dir.Path, "overview.md")
+			content, err := os.ReadFile(overviewPath)
+			if err != nil {
 				continue
 			}
-
-			// Title/description lines of the manifest are scored in-process
-			// above; skip them here to avoid double counting.
-			if filepath.Base(filePath) == "concept-manifest.yml" {
-				lower := strings.ToLower(strings.TrimSpace(text))
-				if strings.HasPrefix(lower, "title:") || strings.HasPrefix(lower, "description:") {
+			role, startLine := extractRoleSection(string(content))
+			if role == "" {
+				continue
+			}
+			for offset, line := range strings.Split(role, "\n") {
+				trimmed := strings.TrimSpace(line)
+				lower := strings.ToLower(trimmed)
+				for _, token := range tokens {
+					if !strings.Contains(lower, token) {
+						continue
+					}
+					fileHits := a.files[overviewPath]
+					if fileHits == nil {
+						fileHits = make(map[int]*conceptLineHit)
+						a.files[overviewPath] = fileHits
+					}
+					lineNum := startLine + offset
+					if fileHits[lineNum] == nil {
+						fileHits[lineNum] = &conceptLineHit{text: truncateSnippet(trimmed)}
+					}
+					a.tokens[token] = true
+				}
+				if multiToken && strings.Contains(lower, phrase) {
+					a.phrase = true
+				}
+			}
+		}
+	} else {
+		overviewOnly := scope == ConceptSearchInOverview
+		for _, token := range tokens {
+			lines, err := runConceptTokenSearch(token, searchPaths, overviewOnly)
+			if err != nil {
+				return ConceptSearchPage{}, err
+			}
+			for _, line := range lines {
+				filePath, lineNum, text, ok := parseGrepLine(line)
+				if !ok {
 					continue
 				}
-			}
 
-			var a *conceptAccum
-			for dirPath, cand := range accums {
-				if strings.HasPrefix(filePath, dirPath+string(os.PathSeparator)) {
-					a = cand
-					break
+				// Title/description lines of the manifest are scored in-process
+				// above; skip them here to avoid double counting.
+				if filepath.Base(filePath) == "concept-manifest.yml" {
+					lower := strings.ToLower(strings.TrimSpace(text))
+					if strings.HasPrefix(lower, "title:") || strings.HasPrefix(lower, "description:") {
+						continue
+					}
 				}
-			}
-			if a == nil {
-				continue
-			}
 
-			trimmed := strings.TrimSpace(text)
-			if multiToken && strings.Contains(strings.ToLower(trimmed), phrase) {
-				a.phrase = true
+				var a *conceptAccum
+				for dirPath, cand := range accums {
+					if strings.HasPrefix(filePath, dirPath+string(os.PathSeparator)) {
+						a = cand
+						break
+					}
+				}
+				if a == nil {
+					continue
+				}
+
+				trimmed := strings.TrimSpace(text)
+				if multiToken && strings.Contains(strings.ToLower(trimmed), phrase) {
+					a.phrase = true
+				}
+				fileHits := a.files[filePath]
+				if fileHits == nil {
+					fileHits = make(map[int]*conceptLineHit)
+					a.files[filePath] = fileHits
+				}
+				if fileHits[lineNum] == nil {
+					fileHits[lineNum] = &conceptLineHit{text: truncateSnippet(trimmed)}
+				}
+				a.tokens[token] = true
 			}
-			fileHits := a.files[filePath]
-			if fileHits == nil {
-				fileHits = make(map[int]*conceptLineHit)
-				a.files[filePath] = fileHits
-			}
-			if fileHits[lineNum] == nil {
-				fileHits[lineNum] = &conceptLineHit{text: truncateSnippet(trimmed)}
-			}
-			a.tokens[token] = true
 		}
 	}
 
@@ -300,6 +411,9 @@ func searchConceptDirs(dirs []conceptSearchDir, query string, opts ConceptSearch
 		}
 
 		coverage := float64(len(a.tokens)) / totalTokens
+		if coverage < opts.MinCoverage {
+			continue
+		}
 		sum := 0.0
 		if a.titleTokens > 0 {
 			sum += conceptWeightTitle * (1 + math.Log(1+float64(a.titleTokens)))
@@ -368,10 +482,11 @@ func searchConceptDirs(dirs []conceptSearchDir, query string, opts ConceptSearch
 		return results[i].ConceptID < results[j].ConceptID
 	})
 
+	eligibleTotal := len(results)
 	if opts.Limit > 0 && len(results) > opts.Limit {
 		results = results[:opts.Limit]
 	}
-	return results, nil
+	return ConceptSearchPage{Results: results, EligibleTotal: eligibleTotal}, nil
 }
 
 // runConceptTokenSearch runs one fixed-string, case-insensitive token search
@@ -433,19 +548,63 @@ func parseGrepLine(line string) (filePath string, lineNum int, text string, ok b
 	return line[:firstColon], lineNum, rest[secondColon+1:], true
 }
 
+// extractRoleSection returns only the prose beneath a level-two Role heading,
+// plus the 1-based line number of the first returned line. It stops at the next
+// level-one or level-two heading. Missing Role headings return no prose.
+func extractRoleSection(content string) (string, int) {
+	lines := strings.Split(content, "\n")
+	start := -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if start < 0 {
+			if strings.HasPrefix(trimmed, "## ") && !strings.HasPrefix(trimmed, "### ") {
+				heading := strings.TrimSpace(strings.TrimRight(strings.TrimSpace(strings.TrimPrefix(trimmed, "##")), "#"))
+				if strings.EqualFold(heading, "role") {
+					start = i + 1
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "# ") || (strings.HasPrefix(trimmed, "## ") && !strings.HasPrefix(trimmed, "### ")) {
+			return strings.Join(lines[start:i], "\n"), start + 1
+		}
+	}
+	if start >= 0 {
+		return strings.Join(lines[start:], "\n"), start + 1
+	}
+	return "", 0
+}
+
+var conceptStopwords = map[string]struct{}{
+	"a": {}, "an": {}, "and": {}, "are": {}, "as": {}, "at": {}, "be": {},
+	"by": {}, "do": {}, "does": {}, "for": {}, "from": {}, "how": {}, "in": {},
+	"is": {}, "it": {}, "of": {}, "on": {}, "or": {}, "that": {}, "the": {},
+	"this": {}, "to": {}, "what": {}, "when": {}, "where": {}, "which": {},
+	"who": {}, "why": {}, "with": {},
+}
+
 // tokenizeConceptQuery lowercases and splits a query on whitespace,
-// deduplicating tokens while preserving order.
+// deduplicating tokens while preserving order. Stopwords are removed only if
+// at least one content token remains, so an all-stopword query still searches.
 func tokenizeConceptQuery(query string) []string {
 	fields := strings.Fields(strings.ToLower(query))
 	seen := make(map[string]bool, len(fields))
-	tokens := make([]string, 0, len(fields))
+	all := make([]string, 0, len(fields))
+	content := make([]string, 0, len(fields))
 	for _, f := range fields {
-		if !seen[f] {
-			seen[f] = true
-			tokens = append(tokens, f)
+		if seen[f] {
+			continue
+		}
+		seen[f] = true
+		all = append(all, f)
+		if _, stop := conceptStopwords[f]; !stop {
+			content = append(content, f)
 		}
 	}
-	return tokens
+	if len(content) > 0 {
+		return content
+	}
+	return all
 }
 
 // readConceptManifestMeta parses a concept-manifest.yml, tolerating absence
@@ -461,14 +620,15 @@ func readConceptManifestMeta(path string) conceptManifestMeta {
 }
 
 func truncateSnippet(s string) string {
-	if len(s) <= conceptSnippetMaxLen {
+	return truncateRunes(s, conceptSnippetMaxRunes)
+}
+
+func truncateRunes(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	cut := s[:conceptSnippetMaxLen]
-	for len(cut) > 0 && !utf8.ValidString(cut) {
-		cut = cut[:len(cut)-1]
-	}
-	return cut + "…"
+	return string(runes[:max]) + "…"
 }
 
 func roundScore(f float64) float64 {

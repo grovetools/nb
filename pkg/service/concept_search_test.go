@@ -35,7 +35,7 @@ func conceptSearchFixture(t *testing.T) []conceptSearchDir {
 
 	rateLimiter := write("rate-limiter", map[string]string{
 		"concept-manifest.yml": "id: rate-limiter\ntitle: Rate Limiter\ndescription: Token bucket throttling for the API gateway\n",
-		"overview.md":          "## Role\nThe rate limiter protects downstream services.\nBuckets refill every second.\n",
+		"overview.md":          "## Role\nThe rate limiter protects downstream services.\nBuckets refill every second.\n\n## Details\noutside-role-marker appears only outside Role.\n",
 		"notes.md":             "Implementation notes about widget grease.\nliteral chars: price (usd) and a.b*c here\n",
 	})
 	auth := write("auth", map[string]string{
@@ -43,8 +43,12 @@ func conceptSearchFixture(t *testing.T) []conceptSearchDir {
 		"overview.md":          "## Role\nHandles sessions.\n",
 		"extra.md":             "deep file mentions gateway too\nzebra appears only here\naxbyc regex trap\n",
 	})
+	legacy := write("legacy", map[string]string{
+		"concept-manifest.yml": "id: legacy\ntitle: Legacy Bridge\ndescription: compatibility shim\n",
+		"overview.md":          "## Summary\nlegacy-prose exists without a Role heading.\n",
+	})
 
-	return []conceptSearchDir{rateLimiter, auth}
+	return []conceptSearchDir{rateLimiter, auth, legacy}
 }
 
 func searchFixture(t *testing.T, dirs []conceptSearchDir, query string, opts ConceptSearchOptions) []ConceptSearchResult {
@@ -129,10 +133,17 @@ func TestConceptSearchInScoping(t *testing.T) {
 		{"throttling", ConceptSearchInAll, []string{"rate-limiter"}},
 		{"throttling", ConceptSearchInOverview, nil},
 		{"throttling", ConceptSearchInRole, []string{"rate-limiter"}},
-		// only in rate-limiter/overview.md
+		// in rate-limiter's Role prose
 		{"downstream", ConceptSearchInAll, []string{"rate-limiter"}},
 		{"downstream", ConceptSearchInOverview, []string{"rate-limiter"}},
 		{"downstream", ConceptSearchInRole, []string{"rate-limiter"}},
+		// outside Role, and in a legacy overview with no Role heading
+		{"outside-role-marker", ConceptSearchInOverview, []string{"rate-limiter"}},
+		{"outside-role-marker", ConceptSearchInRole, nil},
+		{"legacy-prose", ConceptSearchInOverview, []string{"legacy"}},
+		{"legacy-prose", ConceptSearchInRole, nil},
+		// no-Role concepts can still match manifest metadata in role scope
+		{"compatibility", ConceptSearchInRole, []string{"legacy"}},
 	}
 	for _, tc := range cases {
 		results := searchFixture(t, dirs, tc.query, ConceptSearchOptions{In: tc.in})
@@ -153,6 +164,29 @@ func TestConceptSearchInScoping(t *testing.T) {
 	}
 }
 
+func TestConceptSearchStopwordsAndCoverage(t *testing.T) {
+	dirs := conceptSearchFixture(t)
+
+	if got := tokenizeConceptQuery("how does the rate limiter refill buckets"); strings.Join(got, " ") != "rate limiter refill buckets" {
+		t.Fatalf("content tokens = %v", got)
+	}
+	if got := tokenizeConceptQuery("how does the"); strings.Join(got, " ") != "how does the" {
+		t.Fatalf("all-stopword query must degrade to raw tokens, got %v", got)
+	}
+
+	results := searchFixture(t, dirs, "buckets zebra missing", ConceptSearchOptions{MinCoverage: 0.5})
+	if got := resultIDs(results); len(got) != 0 {
+		t.Fatalf("coverage gate should reject one-of-three matches, got %v", got)
+	}
+	results = searchFixture(t, dirs, "buckets zebra", ConceptSearchOptions{MinCoverage: 0.5})
+	if got := resultIDs(results); len(got) != 2 {
+		t.Fatalf("coverage 0.5 should retain one-of-two matches, got %v", got)
+	}
+	if _, err := searchConceptDirs(dirs, "x", ConceptSearchOptions{MinCoverage: 1.1}); err == nil {
+		t.Fatal("expected invalid coverage error")
+	}
+}
+
 func TestConceptSearchLimit(t *testing.T) {
 	dirs := conceptSearchFixture(t)
 
@@ -165,6 +199,35 @@ func TestConceptSearchLimit(t *testing.T) {
 	limited := searchFixture(t, dirs, "gateway", ConceptSearchOptions{Limit: 1})
 	if len(limited) != 1 || limited[0].ConceptID != "rate-limiter" {
 		t.Errorf("limit should keep the top-ranked concept, got %v", resultIDs(limited))
+	}
+	page, err := searchConceptDirsPage(dirs, "gateway", ConceptSearchOptions{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Results) != 1 || page.EligibleTotal != 2 {
+		t.Fatalf("page = %+v, want one result of two eligible", page)
+	}
+}
+
+func TestCompactConceptSearchBoundedUTF8(t *testing.T) {
+	long := strings.Repeat("界", 220)
+	envelope := CompactConceptSearch(ConceptSearchPage{
+		Results:       []ConceptSearchResult{{ConceptID: "thing", Workspace: "ws", Title: long, Description: long, Score: 1}},
+		EligibleTotal: 3,
+	})
+	if envelope.SchemaVersion != 1 || envelope.Omitted != 2 || len(envelope.Results) != 1 {
+		t.Fatalf("unexpected envelope: %+v", envelope)
+	}
+	result := envelope.Results[0]
+	if result.Concept != "ws:thing" || len([]rune(result.Title)) != 201 || len([]rune(result.Snippet)) != 201 {
+		t.Fatalf("compact bounds/identity wrong: %+v", result)
+	}
+	data, err := json.Marshal(envelope)
+	if err != nil || !json.Valid(data) {
+		t.Fatalf("compact JSON invalid: %v %q", err, data)
+	}
+	if strings.Contains(string(data), string(filepath.Separator)+"tmp"+string(filepath.Separator)) {
+		t.Fatalf("compact JSON contains an absolute path: %s", data)
 	}
 }
 
