@@ -413,26 +413,37 @@ func newConceptDirCmd(svc **service.Service, workspaceOverride *string) *cobra.C
 	return cmd
 }
 
+type conceptPathResolver func(ref string) (string, error)
+
 func newConceptPathCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	resolve := func(ref string) (string, error) {
+		ctx, err := (*svc).GetWorkspaceContext(*workspaceOverride)
+		if err != nil {
+			return "", fmt.Errorf("get workspace context: %w", err)
+		}
+		return (*svc).ResolveConceptPath(ctx, ref)
+	}
+	return newConceptPathCmdWithResolver(resolve)
+}
+
+func newConceptPathCmdWithResolver(resolve conceptPathResolver) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "path <concept-id>",
+		Use:   "path <concept-id|workspace:concept-id>",
 		Short: "Get the path to a concept directory",
-		Long:  `Returns the absolute path to a concept's directory.`,
+		Long: `Returns the absolute path to a concept's directory.
+
+An unqualified ID resolves in the current workspace as before. A qualified
+workspace:concept-id resolves the exact workspace identity emitted by concept
+search, independently of the caller's current directory.`,
 		Example: `  nb concept path authentication
+  nb concept path core:workspace-model
   cat $(nb concept path authentication)/overview.md
-  nb concept path auth --json | jq -r .path`,
+  nb concept path core:workspace-model --json | jq -r .path`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			conceptID := args[0]
-
-			ctx, err := (*svc).GetWorkspaceContext(*workspaceOverride)
-			if err != nil {
-				return fmt.Errorf("get workspace context: %w", err)
-			}
-
-			path, err := (*svc).GetConceptPath(ctx, conceptID)
+			path, err := resolve(args[0])
 			if err != nil {
 				return err
 			}
@@ -443,9 +454,9 @@ func newConceptPathCmd(svc **service.Service, workspaceOverride *string) *cobra.
 				if err != nil {
 					return fmt.Errorf("marshal json: %w", err)
 				}
-				fmt.Println(string(data))
+				fmt.Fprintln(cmd.OutOrStdout(), string(data))
 			} else {
-				fmt.Println(path)
+				fmt.Fprintln(cmd.OutOrStdout(), path)
 			}
 			return nil
 		},

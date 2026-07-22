@@ -68,6 +68,32 @@ func resultIDs(results []ConceptSearchResult) []string {
 	return ids
 }
 
+func TestResolveQualifiedConceptPathExactWorkspaceIdentity(t *testing.T) {
+	dirs := []conceptSearchDir{
+		{Path: "/vault/current/concepts/local-id", ID: "local-id", Workspace: "eco.root"},
+		{Path: "/vault/sibling/concepts/shared-id", ID: "shared-id", Workspace: "sibling-repo+tools"},
+	}
+	for _, tc := range []struct {
+		workspace string
+		concept   string
+		want      string
+	}{
+		{"eco.root", "local-id", "/vault/current/concepts/local-id"},
+		{"sibling-repo+tools", "shared-id", "/vault/sibling/concepts/shared-id"},
+	} {
+		got, err := resolveQualifiedConceptPath(dirs, tc.workspace, tc.concept)
+		if err != nil || got != tc.want {
+			t.Fatalf("resolve %s:%s = %q, %v; want %q", tc.workspace, tc.concept, got, err, tc.want)
+		}
+	}
+	if _, err := resolveQualifiedConceptPath(dirs, "unknown.repo", "local-id"); err == nil || !strings.Contains(err.Error(), "workspace 'unknown.repo' not found") {
+		t.Fatalf("unknown workspace error = %v", err)
+	}
+	if _, err := resolveQualifiedConceptPath(dirs, "eco.root", "missing-id"); err == nil || !strings.Contains(err.Error(), "concept 'missing-id' not found in workspace 'eco.root'") {
+		t.Fatalf("unknown concept error = %v", err)
+	}
+}
+
 func TestConceptSearchMultiTokenOR(t *testing.T) {
 	dirs := conceptSearchFixture(t)
 

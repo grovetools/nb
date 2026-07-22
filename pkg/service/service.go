@@ -956,7 +956,8 @@ func (s *Service) GetConceptsDir(ctx *WorkspaceContext) (string, error) {
 	return conceptsDir, nil
 }
 
-// GetConceptPath returns the absolute path to a concept's directory
+// GetConceptPath returns the absolute path to a concept's directory in ctx.
+// It preserves the original, cwd-relative concept path contract.
 func (s *Service) GetConceptPath(ctx *WorkspaceContext, conceptID string) (string, error) {
 	conceptsDir, err := s.GetConceptsDir(ctx)
 	if err != nil {
@@ -974,6 +975,51 @@ func (s *Service) GetConceptPath(ctx *WorkspaceContext, conceptID string) (strin
 	}
 
 	return conceptPath, nil
+}
+
+// ResolveConceptPath resolves either an unqualified concept ID in ctx or an
+// exact workspace:concept-id emitted by concept search. Qualified references
+// are resolved through nb's discovered notebook workspaces; workspace names
+// are never interpreted as filesystem paths relative to the caller's cwd.
+func (s *Service) ResolveConceptPath(ctx *WorkspaceContext, ref string) (string, error) {
+	workspaceName, conceptID, qualified := strings.Cut(ref, ":")
+	if !qualified {
+		return s.GetConceptPath(ctx, ref)
+	}
+	if workspaceName == "" || conceptID == "" {
+		return "", fmt.Errorf("invalid qualified concept reference %q (want workspace:concept-id)", ref)
+	}
+
+	if workspaceName == "global" {
+		globalCtx, err := s.GetWorkspaceContext("global")
+		if err != nil {
+			return "", err
+		}
+		path, err := s.GetConceptPath(globalCtx, conceptID)
+		if err != nil {
+			return "", fmt.Errorf("concept '%s' not found in workspace '%s'", conceptID, workspaceName)
+		}
+		return path, nil
+	}
+
+	return resolveQualifiedConceptPath(s.conceptDirsForWorkspaces(s.workspaceProvider.All()), workspaceName, conceptID)
+}
+
+func resolveQualifiedConceptPath(dirs []conceptSearchDir, workspaceName, conceptID string) (string, error) {
+	workspaceFound := false
+	for _, dir := range dirs {
+		if dir.Workspace != workspaceName {
+			continue
+		}
+		workspaceFound = true
+		if dir.ID == conceptID {
+			return dir.Path, nil
+		}
+	}
+	if !workspaceFound {
+		return "", fmt.Errorf("workspace '%s' not found", workspaceName)
+	}
+	return "", fmt.Errorf("concept '%s' not found in workspace '%s'", conceptID, workspaceName)
 }
 
 // LinkPlanToConcept adds a plan reference to a concept's manifest
