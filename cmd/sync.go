@@ -97,6 +97,7 @@ func NewSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 	cmd.AddCommand(NewSyncHistoryCmd(svc, workspaceOverride))
 	cmd.AddCommand(NewSyncRestoreCmd(svc, workspaceOverride))
 	cmd.AddCommand(NewSyncAdoptCmd(svc, workspaceOverride))
+	cmd.AddCommand(NewSyncIncomingCmd())
 	cmd.AddCommand(NewSyncConflictsCmd(svc, workspaceOverride))
 
 	return cmd
@@ -247,6 +248,112 @@ write that resolves the divergence.`,
 			return nil
 		},
 	}
+}
+
+// NewSyncIncomingCmd reviews server-vs-laptop heads without writing notebook
+// files. --escrow asks groved to re-check the reviewed generation and durably
+// save hash-verified server content for later adoption after a VM is deleted.
+func NewSyncIncomingCmd() *cobra.Command {
+	var workspaces []string
+	var satellite string
+	var escrow, jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "incoming",
+		Short: "Review incoming record changes without writing the notebook",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(workspaces) == 0 {
+				return fmt.Errorf("at least one explicit --workspace is required")
+			}
+			q := url.Values{}
+			q.Set("workspaces", strings.Join(workspaces, ","))
+			if satellite != "" {
+				q.Set("satellite", satellite)
+			}
+			body, err := daemonSyncGet(cmd.Context(), "/api/sync/incoming?"+q.Encode())
+			if err != nil {
+				return err
+			}
+			var incoming struct {
+				Manifest       json.RawMessage `json:"manifest"`
+				Clean          bool            `json:"clean"`
+				EscrowPath     string          `json:"escrow_path"`
+				EscrowVerified bool            `json:"escrow_verified"`
+			}
+			if err = json.Unmarshal(body, &incoming); err != nil {
+				return fmt.Errorf("decode incoming manifest: %w", err)
+			}
+			if escrow {
+				if satellite == "" {
+					return fmt.Errorf("--satellite is required with --escrow")
+				}
+				req, err := json.Marshal(map[string]any{"satellite": satellite, "manifest": incoming.Manifest})
+				if err != nil {
+					return err
+				}
+				resp, err := daemonSyncRequest(cmd.Context(), http.MethodPost, "/api/sync/escrow", bytes.NewReader(req))
+				if err != nil {
+					return err
+				}
+				defer resp.Body.Close()
+				result, err := io.ReadAll(resp.Body)
+				if err != nil {
+					return err
+				}
+				if resp.StatusCode != http.StatusOK {
+					return fmt.Errorf("daemon returned %d: %s", resp.StatusCode, strings.TrimSpace(string(result)))
+				}
+				if jsonOutput {
+					fmt.Print(string(result))
+					return nil
+				}
+				var saved struct {
+					Path       string `json:"path"`
+					Generation string `json:"generation"`
+				}
+				_ = json.Unmarshal(result, &saved)
+				fmt.Printf("Verified record-return escrow: %s (generation %s)\n", saved.Path, saved.Generation)
+				return nil
+			}
+			if jsonOutput {
+				fmt.Print(string(body))
+				return nil
+			}
+			var display struct {
+				Manifest struct {
+					Generation string                                                                     `json:"generation"`
+					Operations []struct{ Type, Workspace, Path, PreviousPath, BaseHash, HeadHash string } `json:"operations"`
+				} `json:"manifest"`
+				Clean          bool   `json:"clean"`
+				EscrowPath     string `json:"escrow_path"`
+				EscrowVerified bool   `json:"escrow_verified"`
+			}
+			if err = json.Unmarshal(body, &display); err != nil {
+				return err
+			}
+			fmt.Printf("Generation: %s\n", display.Manifest.Generation)
+			if display.Clean {
+				fmt.Println("No incoming record changes.")
+			} else {
+				for _, op := range display.Manifest.Operations {
+					if op.Type == "move" {
+						fmt.Printf("  move    %s/%s <- %s\n", op.Workspace, op.Path, op.PreviousPath)
+					} else {
+						fmt.Printf("  %-7s %s/%s\n", op.Type, op.Workspace, op.Path)
+					}
+				}
+			}
+			if display.EscrowVerified {
+				fmt.Printf("Verified escrow: %s\n", display.EscrowPath)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringSliceVar(&workspaces, "workspace", nil, "Workspace to compare (repeatable; at least one required)")
+	cmd.Flags().StringVar(&satellite, "satellite", "", "Satellite name used to locate/write its laptop escrow")
+	cmd.Flags().BoolVar(&escrow, "escrow", false, "Durably save this reviewed generation and hash-verified server heads")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit the versioned manifest as JSON")
+	return cmd
 }
 
 // NewSyncConflictsCmd creates the `sync conflicts` subcommand.
