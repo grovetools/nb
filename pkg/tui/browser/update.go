@@ -294,7 +294,22 @@ func (m *Model) syncWorkspaceCmd() tea.Cmd {
 	}
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
+// Update handles the message and then re-syncs the list viewport to the
+// chrome the view will actually emit. The sync cannot live in the
+// WindowSizeMsg branch alone: the search bar occupies two rows only while a
+// filter is active, and a dozen keybindings toggle that without any resize
+// message following, so the viewport has to be recomputed after every message
+// or it drifts two rows out of step with the render.
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	updated, cmd := m.update(msg)
+	if bm, ok := updated.(Model); ok {
+		bm.syncViewsSize()
+		return bm, cmd
+	}
+	return updated, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
@@ -346,16 +361,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		// BSP split editor closed — refresh to pick up edits.
 		return m, func() tea.Msg { return refreshMsg{} }
 	case tea.WindowSizeMsg:
+		// Just record the pane; the list is sized from it by
+		// syncViewsSize, which Update runs after every message. Preview
+		// is handled by the terminal host VDrawer, so nb always gets the
+		// full width.
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetSize(msg.Width, msg.Height)
-
-		// Calculate pane sizes — preview is handled by the terminal host
-		// VDrawer, so nb always uses full width.
-		// header(1) + search(1) + blank(1) + view + blank(1) + status(1) + footer(1) + top_margin(1)
-		const mainContentHeight = 7
-		availableHeight := m.height - mainContentHeight
-		m.views.SetSize(m.width-4, availableHeight)
-
 		m.columnList.SetSize(40, 8)
 		return m, nil
 

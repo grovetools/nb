@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/embed"
@@ -45,9 +47,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // delegates rendering to the pager. The browserPage adapter strips
 // the browser's leading newline so the pager's blank-row separator
 // (bar → blank → body) isn't doubled up.
+//
+// The help text is one long unwrapped line, so it is truncated to the
+// pager's width: pager.Config.FooterHeight reserves exactly one row for
+// it, and a footer that wrapped to two would take the extra row out of
+// the body — which in a half-width treemux panel is where it hurts.
 func (m Model) View() string {
 	if p, ok := m.pager.Active().(*browserPage); ok {
-		m.pager.SetFooter(p.inner.FooterView())
+		footer := p.inner.FooterView()
+		if w, _ := m.pager.Size(); w > 0 && lipgloss.Width(footer) > w {
+			footer = ansi.Truncate(footer, w, "…")
+		}
+		m.pager.SetFooter(footer)
 	}
 	return m.pager.View()
 }
@@ -86,9 +97,11 @@ func (p *browserPage) Name() string  { return "Browser" }
 func (p *browserPage) Init() tea.Cmd { return p.inner.Init() }
 func (p *browserPage) View() string {
 	// The inner browser prefixes its own layout with a leading "\n"
-	// to leave a gap above the cursor row; the pager already emits a
+	// to leave a gap above its title; the pager already emits a
 	// blank row between the tab bar and the body, so strip the
-	// leading newline here to avoid double-spacing.
+	// leading newline here to avoid double-spacing. The browser
+	// drops that row from its own height accounting whenever
+	// Config.Hosted is set, which is what makes this strip free.
 	return strings.TrimPrefix(p.inner.View(), "\n")
 }
 
