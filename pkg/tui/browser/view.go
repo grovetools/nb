@@ -69,8 +69,8 @@ func (m Model) searchBarVisible() bool {
 // The help footer is deliberately absent: standalone renders none at all, and
 // when hosted the pager reserves it (pager.Config.FooterHeight in
 // tui/view) before handing this model its height. The top margin is likewise
-// hosted-only in reverse — the pager's page adapter strips the leading "\n"
-// and renders its own tab-bar spacer out of its own budget.
+// hosted-only in reverse — the pager's page adapter strips the leading "\n",
+// and with HideTabBar the pager spends no rows of its own above the body.
 func (m Model) chromeRows() int {
 	rows := 2 // header + its bottom spacer
 	if !m.hosted {
@@ -341,10 +341,11 @@ func (m Model) View() string {
 	}
 
 	// Join all parts and apply theme styling. The theme's Header carries a
-	// MarginTop(1), which would land directly under a blank row the frame
-	// already has above it — the leading "\n" standalone, the pager's tab-bar
-	// spacer when hosted. Drop it so exactly one blank row sits above the
-	// title in both layouts.
+	// MarginTop(1) worth a row we have better uses for: standalone it would
+	// land directly under the frame's own leading "\n", double-spacing the
+	// title, and hosted there is nothing above the body to separate from
+	// (the page adapter strips that "\n" and the tab bar is hidden), so the
+	// title belongs flush against the top of the pane.
 	headerText := lipgloss.JoinHorizontal(lipgloss.Left, headerParts...)
 	header := theme.DefaultTheme.Header.MarginTop(0).Render(headerText)
 

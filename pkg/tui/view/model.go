@@ -32,6 +32,11 @@ func New(cfg browser.Config) Model {
 	return Model{pager: pager.NewWith([]pager.Page{page}, pager.KeyMapFromBase(keymap.NewBase()), pager.Config{
 		OuterPadding: [4]int{0, 0, 0, 0},
 		FooterHeight: 1, // help line pinned via SetFooter
+		// One page, so the tab bar renders a single "① Browser" chip that
+		// names what the pane already obviously is, and its spacer row below
+		// it — two rows of the browser's height spent on nothing. The pager's
+		// tab-jump and cycle keys are inert with one page either way.
+		HideTabBar: true,
 	})}
 }
 
@@ -96,12 +101,12 @@ type browserPage struct {
 func (p *browserPage) Name() string  { return "Browser" }
 func (p *browserPage) Init() tea.Cmd { return p.inner.Init() }
 func (p *browserPage) View() string {
-	// The inner browser prefixes its own layout with a leading "\n"
-	// to leave a gap above its title; the pager already emits a
-	// blank row between the tab bar and the body, so strip the
-	// leading newline here to avoid double-spacing. The browser
-	// drops that row from its own height accounting whenever
-	// Config.Hosted is set, which is what makes this strip free.
+	// The inner browser prefixes its own layout with a leading "\n" to leave
+	// a gap above its title when it runs standalone. Hosted there is nothing
+	// to leave a gap from — with HideTabBar the body starts at the top of the
+	// pane — so strip it and let the title sit flush. The browser drops that
+	// row from its own height accounting whenever Config.Hosted is set, which
+	// is what makes this strip free rather than a clipped row.
 	return strings.TrimPrefix(p.inner.View(), "\n")
 }
 
