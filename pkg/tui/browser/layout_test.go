@@ -47,12 +47,13 @@ func newLayoutTestModel(t *testing.T, n int) *Model {
 // catch. With more notes than fit, the rendered height must equal the height
 // the model was handed, exactly, in every layout state.
 //
-// The hosted cases deduct the pager's own chrome the way tui/view does
-// (2 rows of tab bar + spacer, 1 reserved footer row) and strip the leading
-// "\n" the way its page adapter does.
+// The hosted cases deduct the pager's own chrome the way tui/view does (one
+// reserved footer row; the tab bar is hidden) and strip the leading "\n" the
+// way its page adapter does.
 func TestViewFillsItsHeightBudget(t *testing.T) {
 	const paneH, paneW = 30, 80
-	const pagerChrome = 3 // tab bar + spacer + reserved footer row
+	// HideTabBar leaves only the reserved footer row (see tui/view).
+	const pagerChrome = 1
 
 	cases := []struct {
 		name   string

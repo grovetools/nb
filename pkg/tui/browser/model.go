@@ -508,10 +508,11 @@ func (m *Model) updatePreviewContent() tea.Cmd {
 		if m.previewFile == node.Item.Path {
 			return nil
 		}
-		// Otherwise, load the new file.
-		if m.previewVisible {
-			m.statusMessage = fmt.Sprintf("Loading %s...", filepath.Base(node.Item.Path))
-		}
+		// Otherwise, load the new file. No "Loading …" status: the host
+		// retargets the open split over its editor's RPC socket, so the swap
+		// lands faster than the message can be read — all it did was sit in
+		// the status row permanently, since the next thing to overwrite it
+		// was the next note's Loading message.
 		path := node.Item.Path
 		cmds := []tea.Cmd{loadFileContentCmd(path)}
 		// Emit preview request for the terminal host.

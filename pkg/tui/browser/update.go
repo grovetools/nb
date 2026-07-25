@@ -1307,9 +1307,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			if !m.previewVisible {
 				m.previewFocused = false
 				m.previewFile = ""
-				if strings.Contains(m.statusMessage, "Previewing") || strings.Contains(m.statusMessage, "Loading") {
-					m.statusMessage = ""
-				}
 				if m.hosted {
 					return m, func() tea.Msg {
 						return embed.SplitEditorCloseRequestMsg{}
@@ -1353,9 +1350,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				m.previewVisible = false
 				m.previewFocused = false
 				m.previewFile = ""
-				if strings.Contains(m.statusMessage, "Previewing") || strings.Contains(m.statusMessage, "Loading") {
-					m.statusMessage = ""
-				}
 				if m.hosted {
 					return m, func() tea.Msg {
 						return embed.SplitEditorCloseRequestMsg{}
