@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
@@ -45,6 +46,61 @@ func (m Model) getNoteCreationContext() string {
 	}
 
 	return "global/inbox"
+}
+
+// searchBarVisible reports whether View() will render the search bar. Kept
+// next to chromeRows so the row reservation and the render can never disagree
+// about it.
+func (m Model) searchBarVisible() bool {
+	return m.filterInput.Focused() || m.filterInput.Value() != ""
+}
+
+// chromeRows is the number of rows View() spends on everything that is not
+// the list, derived term by term from what it emits:
+//
+//	top margin        1  the leading "\n" — standalone only (see below)
+//	header            1
+//	header spacer     1  theme Header's MarginBottom(1)
+//	search bar        1  only while searchBarVisible()
+//	search spacer     1  the explicit "" joined under the search bar
+//	status spacer     1  the explicit "" joined above the status row
+//	status            1  now also carries the scroll indicator, flush right
+//
+// The help footer is deliberately absent: standalone renders none at all, and
+// when hosted the pager reserves it (pager.Config.FooterHeight in
+// tui/view) before handing this model its height. The top margin is likewise
+// hosted-only in reverse — the pager's page adapter strips the leading "\n"
+// and renders its own tab-bar spacer out of its own budget.
+func (m Model) chromeRows() int {
+	rows := 2 // header + its bottom spacer
+	if !m.hosted {
+		rows++ // leading "\n"
+	}
+	if m.searchBarVisible() {
+		rows += 2 // search bar + spacer
+	}
+	rows += 2 // status spacer + status row
+	return rows
+}
+
+// chromeCols is the horizontal space View() spends on its own frame: the
+// PaddingLeft(2) applied to the whole layout. The list renders flush inside
+// that inset, so nothing else is deducted.
+func (m Model) chromeCols() int { return 2 }
+
+// syncViewsSize hands the list component the space View() will actually leave
+// it. Bounds are clamped to >= 1 so a pane too short for the chrome still
+// renders a usable single row instead of a negative viewport.
+func (m *Model) syncViewsSize() {
+	w := m.width - m.chromeCols()
+	h := m.height - m.chromeRows()
+	if w < 1 {
+		w = 1
+	}
+	if h < 1 {
+		h = 1
+	}
+	m.views.SetSize(w, h)
 }
 
 func (m Model) View() string {
@@ -217,9 +273,12 @@ func (m Model) View() string {
 	}
 
 	// --- Single-pane layout (preview is handled by the terminal host VDrawer) ---
-	browserContent := m.views.View()
-	browserPaneStyle := lipgloss.NewStyle().Padding(0, 1)
-	viewContent := browserPaneStyle.Render(browserContent)
+	// The list is rendered flush against the frame's own PaddingLeft(2) rather
+	// than inside a second pane inset: an extra Padding(0, 1) here pushed the
+	// rows one column right of the header directly above them and clipped a
+	// column off the right edge, which costs real table columns in a
+	// half-width treemux panel.
+	viewContent := m.views.View()
 
 	// Header - breadcrumb style
 	// Get notebook title from config
@@ -281,9 +340,13 @@ func (m Model) View() string {
 		headerParts = append(headerParts, " [Select Ecosystem]")
 	}
 
-	// Join all parts and apply theme styling
+	// Join all parts and apply theme styling. The theme's Header carries a
+	// MarginTop(1), which would land directly under a blank row the frame
+	// already has above it — the leading "\n" standalone, the pager's tab-bar
+	// spacer when hosted. Drop it so exactly one blank row sits above the
+	// title in both layouts.
 	headerText := lipgloss.JoinHorizontal(lipgloss.Left, headerParts...)
-	header := theme.DefaultTheme.Header.Render(headerText)
+	header := theme.DefaultTheme.Header.MarginTop(0).Render(headerText)
 
 	// Build status bar
 	var status string
@@ -341,7 +404,7 @@ func (m Model) View() string {
 	// "#tag"); the raw value (including the prefix) is shown verbatim so the
 	// caret position stays truthful, while the label reflects the parsed mode.
 	var searchBar string
-	if m.filterInput.Focused() || m.filterInput.Value() != "" {
+	if m.searchBarVisible() {
 		label := "Search: "
 		if m.isGrepping {
 			label = "Grep: "
@@ -368,7 +431,7 @@ func (m Model) View() string {
 		mainContent,
 		viewContent,
 		"", // Another blank line for spacing
-		theme.DefaultTheme.Muted.Render(status),
+		m.alignScrollIndicator(theme.DefaultTheme.Muted.Render(status)),
 	)
 
 	// Apply global left padding, top margin, and width clamping
@@ -379,6 +442,38 @@ func (m Model) View() string {
 	// unchanged otherwise; the delayed keymap.WhichKeyShowMsg tick forces the
 	// re-render that reveals it.
 	return m.whichKey.RenderOverlay(frame, lipgloss.Width(frame), *theme.DefaultTheme)
+}
+
+// alignScrollIndicator pins the list's "(1-17 of 40)" position token to the
+// right edge of the status row. The status row is mostly empty space and the
+// indicator is one short token, so sharing the row hands the list back the two
+// rows the indicator used to occupy under it (its own row plus the blank
+// separating it from the last node).
+//
+// The row must never wrap — a wrapped status line would immediately cost back
+// a reclaimed row — so when the pane is too narrow to hold both, the status
+// text is truncated to make room, and if even that leaves nothing the
+// indicator is dropped (the cursor row still conveys position).
+func (m Model) alignScrollIndicator(status string) string {
+	indicator := m.views.ScrollIndicator()
+	// contentWidth mirrors the frame's PaddingLeft(2) below: the status row
+	// is laid out inside that inset, not against the raw pane width.
+	contentWidth := m.width - 2
+	if indicator == "" || contentWidth <= 0 {
+		return status
+	}
+	// One column of separation between the status text and the indicator.
+	statusWidth := contentWidth - lipgloss.Width(indicator) - 1
+	if statusWidth < 1 {
+		return status
+	}
+	if lipgloss.Width(status) > statusWidth {
+		status = ansi.Truncate(status, statusWidth, "…")
+	}
+	// Width() pads the (now guaranteed short enough) status text out so the
+	// indicator lands flush right without a manual space run.
+	return lipgloss.NewStyle().Width(statusWidth).Render(status) + " " +
+		theme.DefaultTheme.Muted.Render(indicator)
 }
 
 // FooterView returns the help text for use as the pager footer.

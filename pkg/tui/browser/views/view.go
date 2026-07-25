@@ -114,8 +114,6 @@ func (m *Model) recomputePrefixes(nodes []*DisplayNode) {
 
 // renderTreeView renders the hierarchical tree view.
 func (m *Model) renderTreeView() string {
-	var b strings.Builder
-
 	// Recompute prefixes for the current view
 	m.recomputePrefixes(m.displayNodes)
 
@@ -128,6 +126,7 @@ func (m *Model) renderTreeView() string {
 	}
 
 	// Render visible nodes
+	lines := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
 		node := m.displayNodes[i]
 		isSelected := i == m.cursor
@@ -149,17 +148,31 @@ func (m *Model) renderTreeView() string {
 			line = cursor + prefix + content + count
 		}
 
-		b.WriteString(line)
-		b.WriteString("\n")
+		lines = append(lines, line)
 	}
 
-	// Scroll indicator
-	if len(m.displayNodes) > viewportHeight {
-		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf(" (%d-%d of %d)", start+1, end, len(m.displayNodes))))
-	}
+	// No trailing newline and no scroll indicator: this component emits
+	// exactly one row per visible node so getViewportHeight() needs no
+	// fudge, and the host pins the indicator (ScrollIndicator) to the
+	// right of its status row instead of spending two rows on it here.
+	return strings.Join(lines, "\n")
+}
 
-	return b.String()
+// ScrollIndicator returns the "(first-last of total)" position token when the
+// node list overflows the viewport, or "" when everything fits. The host
+// renders it on a row it already spends (the status line) rather than giving
+// it a row of its own — see browser.View().
+func (m *Model) ScrollIndicator() string {
+	viewportHeight := m.getViewportHeight()
+	if len(m.displayNodes) <= viewportHeight {
+		return ""
+	}
+	start := m.scrollOffset
+	end := start + viewportHeight
+	if end > len(m.displayNodes) {
+		end = len(m.displayNodes)
+	}
+	return fmt.Sprintf("(%d-%d of %d)", start+1, end, len(m.displayNodes))
 }
 
 // renderTableView renders the table view with columns.
@@ -212,7 +225,6 @@ func (m *Model) renderTableView() string {
 	header := strings.Join(headerParts, "")
 
 	b.WriteString(theme.DefaultTheme.TableHeader.Render(header))
-	b.WriteString("\n")
 
 	// Viewport calculation
 	viewportHeight := m.getViewportHeight()
@@ -223,6 +235,7 @@ func (m *Model) renderTableView() string {
 	}
 
 	// Render visible nodes
+	rows := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
 		node := m.displayNodes[i]
 		isSelected := i == m.cursor
@@ -304,18 +317,18 @@ func (m *Model) renderTableView() string {
 		if m.columnVisibility["PATH"] {
 			rowParts = append(rowParts, separator, theme.DefaultTheme.Muted.Render(padOrTruncate(pathCol, pathWidth)))
 		}
-		row := strings.Join(rowParts, "")
-
-		b.WriteString(row)
-		b.WriteString("\n")
+		rows = append(rows, strings.Join(rowParts, ""))
 	}
 
-	// Scroll indicator
-	if len(m.displayNodes) > viewportHeight {
-		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf(" (%d-%d of %d)", start+1, end, len(m.displayNodes))))
+	// Header block (title row + its bottom border) then one row per visible
+	// node — no trailing newline and no scroll indicator, so the emitted
+	// height is exactly the 2 header rows getViewportHeight() reserves plus
+	// the nodes. The indicator rides the host's status row (ScrollIndicator).
+	if len(rows) == 0 {
+		return b.String()
 	}
-
+	b.WriteString("\n")
+	b.WriteString(strings.Join(rows, "\n"))
 	return b.String()
 }
 
@@ -1177,14 +1190,18 @@ func getPlanStatusIcon(status string) string {
 
 // getViewportHeight calculates how many lines are available for the list content,
 // accounting for chrome rendered within this view component.
+//
+// The only chrome this component still emits is the table's header block —
+// the title row plus the bottom border theme.TableHeader draws under it. The
+// tree emits nothing but node rows, and neither mode emits a trailing blank
+// or a scroll-indicator row any more (the host folds the indicator onto its
+// status line), so those reservations are gone.
 func (m *Model) getViewportHeight() int {
-	var fixedLines int
+	const tableHeaderRows = 2 // header text + TableHeader's bottom border
+
+	fixedLines := 0
 	if m.viewMode == TableView {
-		// Account for table header (2 lines), scroll indicator (2 lines), and bottom margin (1 line).
-		fixedLines = 5
-	} else {
-		// Account for scroll indicator (2 lines) and bottom margin (1 line).
-		fixedLines = 3
+		fixedLines = tableHeaderRows
 	}
 
 	availableHeight := m.height - fixedLines
