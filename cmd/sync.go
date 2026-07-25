@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/paths"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
 	"github.com/grovetools/nb/pkg/service"
@@ -250,13 +252,13 @@ write that resolves the divergence.`,
 	}
 }
 
-// NewSyncIncomingCmd reviews server-vs-laptop heads without writing notebook
-// files. --escrow asks groved to re-check the reviewed generation and durably
-// save hash-verified server content for later adoption after a VM is deleted.
+// NewSyncIncomingCmd reviews server-vs-laptop heads. Plain incoming is
+// byte-for-byte read-only; --escrow only saves recovery content, while --apply
+// is the explicit user-authorized laptop notebook write boundary.
 func NewSyncIncomingCmd() *cobra.Command {
 	var workspaces []string
 	var satellite string
-	var escrow, jsonOutput bool
+	var escrow, apply, yes, jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "incoming",
 		Short: "Review incoming record changes without writing the notebook",
@@ -264,6 +266,12 @@ func NewSyncIncomingCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(workspaces) == 0 {
 				return fmt.Errorf("at least one explicit --workspace is required")
+			}
+			if apply && satellite == "" {
+				return fmt.Errorf("--satellite is required with --apply")
+			}
+			if apply && escrow {
+				return fmt.Errorf("--apply and --escrow are mutually exclusive")
 			}
 			q := url.Values{}
 			q.Set("workspaces", strings.Join(workspaces, ","))
@@ -315,7 +323,7 @@ func NewSyncIncomingCmd() *cobra.Command {
 				fmt.Printf("Verified record-return escrow: %s (generation %s)\n", saved.Path, saved.Generation)
 				return nil
 			}
-			if jsonOutput {
+			if jsonOutput && !apply {
 				fmt.Print(string(body))
 				return nil
 			}
@@ -331,20 +339,86 @@ func NewSyncIncomingCmd() *cobra.Command {
 			if err = json.Unmarshal(body, &display); err != nil {
 				return err
 			}
-			fmt.Printf("Generation: %s\n", display.Manifest.Generation)
+			// The review summary always precedes a write. Under --apply --json it
+			// goes to stderr so the user still sees what they are authorizing
+			// while stdout stays a clean JSON stream.
+			out := cmd.OutOrStdout()
+			if jsonOutput {
+				out = cmd.ErrOrStderr()
+			}
+			fmt.Fprintf(out, "Generation: %s\n", display.Manifest.Generation)
 			if display.Clean {
-				fmt.Println("No incoming record changes.")
+				fmt.Fprintln(out, "No incoming record changes.")
 			} else {
+				counts := map[string]int{}
+				for _, op := range display.Manifest.Operations {
+					counts[op.Type]++
+				}
+				fmt.Fprintf(out, "Summary: create=%d update=%d move=%d delete=%d\n", counts["create"], counts["update"], counts["move"], counts["delete"])
 				for _, op := range display.Manifest.Operations {
 					if op.Type == "move" {
-						fmt.Printf("  move    %s/%s <- %s\n", op.Workspace, op.Path, op.PreviousPath)
+						fmt.Fprintf(out, "  move    %s/%s <- %s\n", op.Workspace, op.Path, op.PreviousPath)
 					} else {
-						fmt.Printf("  %-7s %s/%s\n", op.Type, op.Workspace, op.Path)
+						fmt.Fprintf(out, "  %-7s %s/%s\n", op.Type, op.Workspace, op.Path)
 					}
 				}
 			}
 			if display.EscrowVerified {
-				fmt.Printf("Verified escrow: %s\n", display.EscrowPath)
+				fmt.Fprintf(out, "Verified escrow: %s\n", display.EscrowPath)
+			}
+			if !apply {
+				return nil
+			}
+			if !display.Clean && !yes {
+				if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+					return fmt.Errorf("confirmation required; rerun with --yes")
+				}
+				fmt.Fprint(cmd.ErrOrStderr(), "Apply this reviewed generation to the laptop notebook? [y/N] ")
+				answer, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+				answer = strings.ToLower(strings.TrimSpace(answer))
+				if answer != "y" && answer != "yes" {
+					return fmt.Errorf("apply cancelled")
+				}
+			}
+			req, err := json.Marshal(map[string]any{"satellite": satellite, "manifest": incoming.Manifest})
+			if err != nil {
+				return err
+			}
+			resp, err := daemonSyncRequest(cmd.Context(), http.MethodPost, "/api/sync/apply", bytes.NewReader(req))
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			result, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return err
+			}
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("daemon returned %d: %s", resp.StatusCode, strings.TrimSpace(string(result)))
+			}
+			if jsonOutput {
+				fmt.Print(string(result))
+				return nil
+			}
+			var applied struct {
+				Generation string `json:"generation"`
+				EscrowPath string `json:"escrow_path"`
+				Outcome    string `json:"outcome"`
+				Counts     struct {
+					Create int `json:"create"`
+					Update int `json:"update"`
+					Move   int `json:"move"`
+					Delete int `json:"delete"`
+					Noop   int `json:"noop"`
+				} `json:"counts"`
+			}
+			if err := json.Unmarshal(result, &applied); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Outcome: %s (generation %s)\n", applied.Outcome, applied.Generation)
+			fmt.Fprintf(cmd.OutOrStdout(), "Applied: create=%d update=%d move=%d delete=%d no-op=%d\n", applied.Counts.Create, applied.Counts.Update, applied.Counts.Move, applied.Counts.Delete, applied.Counts.Noop)
+			if applied.EscrowPath != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Verified escrow: %s\n", applied.EscrowPath)
 			}
 			return nil
 		},
@@ -352,7 +426,9 @@ func NewSyncIncomingCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&workspaces, "workspace", nil, "Workspace to compare (repeatable; at least one required)")
 	cmd.Flags().StringVar(&satellite, "satellite", "", "Satellite name used to locate/write its laptop escrow")
 	cmd.Flags().BoolVar(&escrow, "escrow", false, "Durably save this reviewed generation and hash-verified server heads")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit the versioned manifest as JSON")
+	cmd.Flags().BoolVar(&apply, "apply", false, "Apply the reviewed generation to the selected laptop workspaces")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Confirm batch apply noninteractively")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Emit stable metadata as JSON")
 	return cmd
 }
 
