@@ -87,8 +87,6 @@ func NewSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 				}
 			}
 
-			notifyDaemonRefreshCmd()
-
 			return nil
 		},
 	}
@@ -183,7 +181,6 @@ func NewSyncRestoreCmd(svc **service.Service, workspaceOverride *string) *cobra.
 			if err := os.WriteFile(absPath, content, 0o644); err != nil {
 				return fmt.Errorf("write restored content: %w", err)
 			}
-			notifyDaemonRefreshCmd()
 			fmt.Printf("Restored %s/%s to version %s (%d bytes)\n", workspace, relPath, version, len(content))
 			return nil
 		},
@@ -245,7 +242,6 @@ write that resolves the divergence.`,
 			if err := os.WriteFile(absPath, content, 0o644); err != nil {
 				return fmt.Errorf("write adopted content: %w", err)
 			}
-			notifyDaemonRefreshCmd()
 			fmt.Printf("Adopted %s/%s at server head (%d bytes)\n", workspace, relPath, len(content))
 			return nil
 		},
