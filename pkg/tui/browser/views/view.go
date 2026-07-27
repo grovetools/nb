@@ -112,18 +112,35 @@ func (m *Model) recomputePrefixes(nodes []*DisplayNode) {
 	}
 }
 
+// visibleRange returns the [start, end) span of displayNodes the viewport
+// shows. Both bounds are clamped into the node list, so the range is never
+// inverted even if scrollOffset is stale — a filter that shrinks the tree
+// below a scrolled-down offset (typing a '/' search, for instance) used to
+// leave start > end here and panic the render with
+// "makeslice: cap out of range". clampCursor keeps the state honest; this is
+// the render-side backstop.
+func (m *Model) visibleRange() (int, int) {
+	start := m.scrollOffset
+	if start < 0 {
+		start = 0
+	}
+	if start > len(m.displayNodes) {
+		start = len(m.displayNodes)
+	}
+	end := start + m.getViewportHeight()
+	if end > len(m.displayNodes) {
+		end = len(m.displayNodes)
+	}
+	return start, end
+}
+
 // renderTreeView renders the hierarchical tree view.
 func (m *Model) renderTreeView() string {
 	// Recompute prefixes for the current view
 	m.recomputePrefixes(m.displayNodes)
 
 	// Viewport calculation
-	viewportHeight := m.getViewportHeight()
-	start := m.scrollOffset
-	end := m.scrollOffset + viewportHeight
-	if end > len(m.displayNodes) {
-		end = len(m.displayNodes)
-	}
+	start, end := m.visibleRange()
 
 	// Render visible nodes
 	lines := make([]string, 0, end-start)
@@ -163,15 +180,10 @@ func (m *Model) renderTreeView() string {
 // renders it on a row it already spends (the status line) rather than giving
 // it a row of its own — see browser.View().
 func (m *Model) ScrollIndicator() string {
-	viewportHeight := m.getViewportHeight()
-	if len(m.displayNodes) <= viewportHeight {
+	if len(m.displayNodes) <= m.getViewportHeight() {
 		return ""
 	}
-	start := m.scrollOffset
-	end := start + viewportHeight
-	if end > len(m.displayNodes) {
-		end = len(m.displayNodes)
-	}
+	start, end := m.visibleRange()
 	return fmt.Sprintf("(%d-%d of %d)", start+1, end, len(m.displayNodes))
 }
 
@@ -227,12 +239,7 @@ func (m *Model) renderTableView() string {
 	b.WriteString(theme.DefaultTheme.TableHeader.Render(header))
 
 	// Viewport calculation
-	viewportHeight := m.getViewportHeight()
-	start := m.scrollOffset
-	end := m.scrollOffset + viewportHeight
-	if end > len(m.displayNodes) {
-		end = len(m.displayNodes)
-	}
+	start, end := m.visibleRange()
 
 	// Render visible nodes
 	rows := make([]string, 0, end-start)
