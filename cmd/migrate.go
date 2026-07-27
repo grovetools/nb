@@ -319,10 +319,6 @@ Advanced flags (hidden from the flag list, still accepted):
 				printMigrationReport(report, migrateDryRun)
 			}
 
-			if !migrateDryRun {
-				notifyDaemonRefreshCmd()
-			}
-
 			return nil
 		},
 	}
