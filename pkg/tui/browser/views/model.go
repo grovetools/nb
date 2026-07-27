@@ -641,7 +641,15 @@ func (m *Model) GetCollapseState() map[string]bool {
 	return m.collapsedNodes
 }
 
-// clampCursor ensures the cursor is within the valid range of display nodes.
+// clampCursor ensures the cursor and the scroll offset are within the valid
+// range of display nodes. Every site that replaces m.displayNodes calls this.
+//
+// The scroll clamp matters as much as the cursor one: filtering can shrink the
+// tree far below an offset left over from a scrolled-down view (type '/' and a
+// query while paged down and the match list is a handful of rows), which would
+// otherwise scroll the viewport clean past the end — rendering an empty panel
+// at best, and panicking the render path with "makeslice: cap out of range"
+// where the visible span went negative.
 func (m *Model) clampCursor() {
 	if m.cursor >= len(m.displayNodes) {
 		if len(m.displayNodes) > 0 {
@@ -650,6 +658,19 @@ func (m *Model) clampCursor() {
 			m.cursor = 0
 		}
 	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+
+	maxOffset := len(m.displayNodes) - m.getViewportHeight()
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if m.scrollOffset > maxOffset {
+		m.scrollOffset = maxOffset
+	}
+	// Re-anchor the viewport on the (now valid) cursor.
+	m.adjustScroll()
 }
 
 // GetCounts returns note count and selection counts for display.
