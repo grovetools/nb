@@ -443,6 +443,121 @@ func (m *Model) SetCursorToPath(path string) {
 	}
 }
 
+// rebuildTree re-runs the display-tree pipeline in the same order the fold
+// helpers do, so a programmatic collapse-state change lands with the active
+// git/substring filters still applied.
+func (m *Model) rebuildTree() {
+	m.BuildDisplayTree()
+	m.FilterDisplayTreeByGitStatus()
+	m.FilterDisplayTree()
+}
+
+// findNode returns the index of the first display node satisfying match, or -1.
+func (m *Model) findNode(match func(*DisplayNode) bool) int {
+	for i, node := range m.displayNodes {
+		if node.Item == nil {
+			continue
+		}
+		if match(node) {
+			return i
+		}
+	}
+	return -1
+}
+
+// RevealGroup folds the whole tree shut, then re-opens exactly the ancestors of
+// workspaceName/group and parks the cursor on that group's row — the "take me
+// to this section with everything else out of the way" jump behind treemux's
+// drawer notes summary.
+//
+// group is the note index's relative group path ("inbox", "plans/my-plan"), so
+// each path segment is expanded in turn: a nested group is unreachable until
+// its parent has been re-opened and the tree rebuilt. Expansion stops at the
+// deepest segment that actually resolves to a row, which is what makes a stale
+// group (renamed, archived, filtered out) land on the workspace rather than
+// nowhere. Reports whether the full target was found.
+//
+// priority, when set to "p0".."p3", descends one level further: the group is
+// opened and the cursor lands on that priority's synthetic bucket. Doing so
+// requires the priority grouping axis, so the caller's group-by is switched —
+// the urgent subset is what was asked for, and it does not exist as a row under
+// any other axis.
+func (m *Model) RevealGroup(workspaceName, group, priority string) bool {
+	if priority != "" {
+		m.groupBy = "priority"
+	}
+	if !m.revealGroupRow(workspaceName, group) {
+		return false
+	}
+	if priority == "" {
+		return true
+	}
+	// The bucket only exists once its enclosing group is open; its stable
+	// synthetic path is the one renderSyntheticGroups mints.
+	node := m.GetCurrentNode()
+	if node == nil || node.Item == nil {
+		return false
+	}
+	if node.IsFoldable() {
+		delete(m.collapsedNodes, node.NodeID())
+		m.rebuildTree()
+	}
+	bucketPath := filepath.Join(node.Item.Path, ".synthetic-priority-"+priority)
+	idx := m.findNode(func(n *DisplayNode) bool { return n.Item.Path == bucketPath })
+	if idx < 0 {
+		return false
+	}
+	m.cursor = idx
+	m.clampCursor()
+	m.adjustScroll()
+	return true
+}
+
+func (m *Model) revealGroupRow(workspaceName, group string) bool {
+	// Start from a fully-expanded tree so closeAllFolds can see — and therefore
+	// collapse — every foldable row, not just the ones open right now.
+	m.collapsedNodes = make(map[string]bool)
+	m.rebuildTree()
+	m.closeAllFolds()
+
+	matchers := []func(*DisplayNode) bool{
+		func(n *DisplayNode) bool { return n.IsWorkspace() && n.Item.Name == workspaceName },
+	}
+	segments := strings.Split(group, "/")
+	for i := range segments {
+		want := workspaceName + ":" + strings.Join(segments[:i+1], "/")
+		matchers = append(matchers, func(n *DisplayNode) bool { return n.GroupKey() == want })
+	}
+
+	deepest := -1
+	for i, match := range matchers {
+		idx := m.findNode(match)
+		if idx < 0 {
+			break
+		}
+		deepest = i
+		// Only ancestors need opening; the target row itself stays folded so the
+		// jump lands on a single collapsed line rather than dumping its notes.
+		if i < len(matchers)-1 {
+			node := m.displayNodes[idx]
+			if node.IsFoldable() {
+				delete(m.collapsedNodes, node.NodeID())
+				m.rebuildTree()
+			}
+		}
+	}
+	// Resolve the cursor against the FINAL tree: every intermediate index was
+	// invalidated by the rebuild that followed it.
+	if deepest >= 0 {
+		if idx := m.findNode(matchers[deepest]); idx >= 0 {
+			m.cursor = idx
+		}
+	}
+	m.clampCursor()
+	m.adjustScroll()
+	return deepest == len(matchers)-1
+}
+
 // GetTargetedNotePaths returns the paths of all selected notes.
 func (m *Model) GetTargetedNotePaths() []string {
 	if len(m.selected) > 0 {

@@ -134,6 +134,28 @@ type Model struct {
 	// to resolve human-readable artifact titles and correlate artifacts with the
 	// owning job markdown file (nesting / count badge).
 	jobs map[string]*orchestration.Job
+
+	// pendingGoto holds a GotoGroupMsg that arrived before the note index had
+	// finished loading. A jump into an empty tree would find nothing and be
+	// silently dropped, so it is replayed once itemsLoadedMsg lands — which is
+	// the ordinary case when a host opens the notebook panel and jumps in the
+	// same breath.
+	pendingGoto *GotoGroupMsg
+}
+
+// GotoGroupMsg asks the browser to jump to a workspace's note group, folding
+// the rest of the tree shut. Group is the note index's relative group path
+// ("inbox", "plans/my-plan"); Priority, when set to "p0".."p3", additionally
+// filters the tree to notes at that priority so the jump lands on the urgent
+// subset rather than the whole group.
+//
+// It is the "goto" entry point for hosts that embed the browser (treemux's
+// drawer notes summary sends it when the user selects a group row) and for the
+// `nb tui --goto` CLI flag.
+type GotoGroupMsg struct {
+	Workspace string
+	Group     string
+	Priority  string
 }
 
 // groupByCycle defines the rotation order for the CycleGrouping keybind.

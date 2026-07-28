@@ -1,6 +1,8 @@
 package service
 
 import (
+	"strings"
+
 	coreconfig "github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/theme"
 )
@@ -130,4 +132,102 @@ var DefaultNoteTypes = map[string]*coreconfig.NoteTypeConfig{
 		DefaultExpand: false,
 		Description:   "Context rules and presets.",
 	},
+}
+
+// ResolveNoteTypes builds the effective note-type registry: the built-in
+// DefaultNoteTypes overlaid with the default notebook's user-defined types from
+// grove config. It is what Service.NoteTypes is built from, exported so
+// out-of-process consumers that only need the presentation metadata (icons,
+// sort order) can resolve it without constructing a full Service — the drawer's
+// notes summary in treemux reads it to render nb's own group icons.
+//
+// The returned map is always freshly allocated with copied values, so callers
+// may mutate it without corrupting the package-level defaults.
+func ResolveNoteTypes(coreCfg *coreconfig.Config) map[string]*coreconfig.NoteTypeConfig {
+	final := make(map[string]*coreconfig.NoteTypeConfig, len(DefaultNoteTypes))
+	for name, cfg := range DefaultNoteTypes {
+		copyCfg := *cfg
+		final[name] = &copyCfg
+	}
+
+	if coreCfg == nil || coreCfg.Notebooks == nil || coreCfg.Notebooks.Definitions == nil {
+		return final
+	}
+	defaultNotebookName := "default" //nolint:goconst
+	if coreCfg.Notebooks.Rules != nil && coreCfg.Notebooks.Rules.Default != "" {
+		defaultNotebookName = coreCfg.Notebooks.Rules.Default
+	}
+	notebook, ok := coreCfg.Notebooks.Definitions[defaultNotebookName]
+	if !ok || notebook == nil || notebook.Types == nil {
+		return final
+	}
+	for name, userCfg := range notebook.Types {
+		if userCfg == nil {
+			continue
+		}
+		existing, exists := final[name]
+		if !exists {
+			// User defined a completely new type.
+			copyCfg := *userCfg
+			final[name] = &copyCfg
+			continue
+		}
+		if userCfg.Icon != "" {
+			existing.Icon = userCfg.Icon
+		}
+		if userCfg.IconColor != "" {
+			existing.IconColor = userCfg.IconColor
+		}
+		if userCfg.DefaultExpand {
+			existing.DefaultExpand = userCfg.DefaultExpand
+		}
+		if userCfg.SortOrder != 0 {
+			existing.SortOrder = userCfg.SortOrder
+		}
+		if userCfg.Description != "" {
+			existing.Description = userCfg.Description
+		}
+		if userCfg.TemplatePath != "" {
+			existing.TemplatePath = userCfg.TemplatePath
+		}
+		if userCfg.FilenameFormat != "" {
+			existing.FilenameFormat = userCfg.FilenameFormat
+		}
+	}
+	return final
+}
+
+// GroupIcon returns the icon for a note group, matching the browser tree's own
+// resolution: an exact full-path match wins, a nested organizational
+// subdirectory falls back to the generic folder icon, and a top-level group
+// falls back to its base type's icon.
+func GroupIcon(groupName string, noteTypes map[string]*coreconfig.NoteTypeConfig) string {
+	if typeConfig, ok := noteTypes[groupName]; ok && typeConfig.Icon != "" {
+		return typeConfig.Icon
+	}
+	parts := strings.Split(groupName, "/")
+	if len(parts) > 1 {
+		return theme.IconFolder
+	}
+	if len(parts) > 0 {
+		if typeConfig, ok := noteTypes[parts[0]]; ok && typeConfig.Icon != "" {
+			return typeConfig.Icon
+		}
+	}
+	return theme.IconFolder
+}
+
+// GroupSortOrder returns the configured display order for a top-level note
+// group, or a large sentinel for groups with no configured order so they sort
+// after the known ones (matching the tree's own trailing placement).
+func GroupSortOrder(groupName string, noteTypes map[string]*coreconfig.NoteTypeConfig) int {
+	const unranked = 1 << 20
+	base := groupName
+	if i := strings.Index(base, "/"); i >= 0 {
+		base = base[:i]
+	}
+	if cfg, ok := noteTypes[base]; ok && cfg.SortOrder != 0 {
+		return cfg.SortOrder
+	}
+	return unranked
 }
