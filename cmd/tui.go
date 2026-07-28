@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/compositor"
@@ -21,11 +22,18 @@ import (
 
 // NewTuiCmd creates the `nb tui` command.
 func NewTuiCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	var gotoTarget, gotoPriority string
 	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Launch an interactive TUI for browsing notes across workspaces",
 		Long: `Launch an interactive Terminal User Interface for browsing and managing notes.
-This view provides a workspace-centric way to explore your entire notebook.`,
+This view provides a workspace-centric way to explore your entire notebook.
+
+--goto opens directly on one group with the rest of the tree folded shut:
+
+  nb tui --goto inbox                     # inbox of the current workspace
+  nb tui --goto grovetools:plans/my-plan  # an explicit workspace
+  nb tui --goto inbox --goto-priority p0  # only the p0 bucket of that group`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Check for TTY
 			if !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd()) {
@@ -71,6 +79,13 @@ This view provides a workspace-centric way to explore your entire notebook.`,
 				Context:      ctx,
 			})
 			host := &cliEnvironmentHost{model: browserModel}
+			if gotoTarget != "" {
+				defaultWorkspace := ""
+				if ctx != nil && ctx.NotebookContextWorkspace != nil {
+					defaultWorkspace = ctx.NotebookContextWorkspace.Name
+				}
+				host.gotoGroup = parseGotoTarget(gotoTarget, gotoPriority, defaultWorkspace)
+			}
 
 			// Wrap in StandaloneHost (handles DoneMsg, CloseRequestMsg,
 			// EditRequestMsg) then compositor (GPU-accelerated rendering).
@@ -98,7 +113,27 @@ This view provides a workspace-centric way to explore your entire notebook.`,
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&gotoTarget, "goto", "", "Open on [workspace:]group with the rest of the tree folded (e.g. inbox, grovetools:plans/my-plan)")
+	cmd.Flags().StringVar(&gotoPriority, "goto-priority", "", "Descend into a priority bucket of --goto (p0..p3)")
 	return cmd
+}
+
+// parseGotoTarget splits a --goto value into its workspace and group parts.
+// The workspace prefix is optional and separated by the first colon; a group
+// path itself never contains one, so the split is unambiguous. An omitted
+// workspace falls back to the resolved notebook context.
+func parseGotoTarget(target, priority, defaultWorkspace string) *browser.GotoGroupMsg {
+	ws := defaultWorkspace
+	group := target
+	if i := strings.Index(target, ":"); i >= 0 {
+		ws = target[:i]
+		group = target[i+1:]
+	}
+	ws, group = strings.TrimSpace(ws), strings.TrimSpace(strings.Trim(group, "/"))
+	if ws == "" || group == "" {
+		return nil
+	}
+	return &browser.GotoGroupMsg{Workspace: ws, Group: group, Priority: strings.ToLower(strings.TrimSpace(priority))}
 }
 
 // cliEnvironmentHost is a tea.Model wrapper that intercepts embed messages from
@@ -116,6 +151,9 @@ This view provides a workspace-centric way to explore your entire notebook.`,
 type cliEnvironmentHost struct {
 	model tea.Model
 
+	// gotoGroup is the parsed --goto target, replayed as a message from Init.
+	gotoGroup *browser.GotoGroupMsg
+
 	// Tmux split state, owned by the host so the browser model stays free of
 	// any environment awareness.
 	tmuxSplitPaneID string
@@ -123,6 +161,12 @@ type cliEnvironmentHost struct {
 }
 
 func (h *cliEnvironmentHost) Init() tea.Cmd {
+	if h.gotoGroup != nil {
+		// Emitted alongside Init: the browser stashes it until the note index
+		// has loaded, so the jump lands on the first fully-built tree.
+		target := *h.gotoGroup
+		return tea.Batch(h.model.Init(), func() tea.Msg { return target })
+	}
 	return h.model.Init()
 }
 

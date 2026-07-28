@@ -58,6 +58,51 @@ func parseSearchInput(raw string) (query string, tag string, isGrep, isTag bool)
 	}
 }
 
+// applyGotoGroup executes a GotoGroupMsg: clear whatever filter is narrowing
+// the tree, apply the priority grouping axis when one was asked for, and hand
+// off to the views layer to fold everything shut around the target.
+//
+// An active search would silently override the collapse state (BuildDisplayTree
+// ignores folds while filtering), so the jump clears it — arriving somewhere
+// with the rest of the tree still expanded is exactly what the caller asked us
+// not to do.
+func (m *Model) applyGotoGroup(msg GotoGroupMsg) {
+	if msg.Workspace == "" || msg.Group == "" {
+		return
+	}
+	// Before the index has loaded there is no tree to walk; replay on arrival.
+	if len(m.allItems) == 0 {
+		pending := msg
+		m.pendingGoto = &pending
+		return
+	}
+
+	m.filterInput.SetValue("")
+	m.filterInput.Blur()
+	m.isGrepping = false
+	m.isFilteringByTag = false
+	m.selectedTag = ""
+	m.recentNotesMode = false
+	m.archiveViewMode = false
+	m.showGitModifiedOnly = false
+
+	if msg.Priority != "" {
+		m.groupBy = "priority"
+		m.views.SetGroupBy(m.groupBy)
+	}
+	m.updateViewsState()
+
+	if m.views.RevealGroup(msg.Workspace, msg.Group, msg.Priority) {
+		m.statusMessage = ""
+		return
+	}
+	target := msg.Group
+	if msg.Priority != "" {
+		target += " · " + strings.ToUpper(msg.Priority)
+	}
+	m.statusMessage = "Not found in " + msg.Workspace + ": " + target
+}
+
 // updateViewsState synchronizes the view state with the browser model. It parses
 // the search input's prefix (see parseSearchInput) to derive the grep/tag/plain
 // mode rather than relying on standalone mode booleans, then pushes the stripped
@@ -394,6 +439,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		m.updateViewsState()
 		return m, nil
 
+	case GotoGroupMsg:
+		m.applyGotoGroup(msg)
+		return m, m.updatePreviewContent()
+
 	case itemsLoadedMsg:
 		if m.loadingCount > 0 {
 			m.loadingCount--
@@ -406,6 +455,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			m.focusChanged = false
 		}
 		m.updateViewsState()
+
+		// A jump that arrived before the index was ready replays now that the
+		// tree it needs to walk actually exists.
+		if m.pendingGoto != nil {
+			pending := *m.pendingGoto
+			m.pendingGoto = nil
+			m.applyGotoGroup(pending)
+		}
 
 		// Trigger git status fetching for items in git repos
 		var gitCmds []tea.Cmd

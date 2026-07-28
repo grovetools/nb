@@ -14,6 +14,7 @@ import (
 	"github.com/grovetools/core/util/pathutil"
 
 	"github.com/grovetools/nb/pkg/models"
+	"github.com/grovetools/nb/pkg/service"
 	"github.com/grovetools/nb/pkg/tree"
 )
 
@@ -1094,27 +1095,10 @@ func getNoteIcon(noteType string) string {
 // getGroupIcon returns the appropriate icon for a note group.
 // For nested groups (e.g. "skills/kitchen/prep"), checks the root type for its icon
 // and falls back to a generic folder icon for organizational subdirectories.
+// The resolution itself lives in pkg/service so surfaces outside the browser
+// (treemux's drawer notes summary) render the same glyph for the same group.
 func getGroupIcon(groupName string, noteTypes map[string]*coreconfig.NoteTypeConfig) string {
-	// Look up the exact full path icon from the NoteTypes registry
-	if typeConfig, ok := noteTypes[groupName]; ok && typeConfig.Icon != "" {
-		return typeConfig.Icon
-	}
-
-	// Fallback: check base type (e.g. "skills" from "skills/kitchen/prep")
-	parts := strings.Split(groupName, "/")
-	if len(parts) > 1 {
-		// Nested organizational folders get generic folder icon
-		return theme.IconFolder
-	}
-
-	// Top-level groups check their base type config
-	if len(parts) > 0 {
-		if typeConfig, ok := noteTypes[parts[0]]; ok && typeConfig.Icon != "" {
-			return typeConfig.Icon
-		}
-	}
-
-	return theme.IconFolder
+	return service.GroupIcon(groupName, noteTypes)
 }
 
 // getPlanStatus reads the plan status from the .grove-plan.yml file

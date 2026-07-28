@@ -374,55 +374,11 @@ type Config struct {
 func New(config *Config, provider *coreworkspace.Provider, coreCfg *coreconfig.Config, logger *logrus.Entry) (*Service, error) {
 	notebookLocator := coreworkspace.NewNotebookLocator(coreCfg)
 
-	// Build the final note type registry
-	finalNoteTypes := make(map[string]*coreconfig.NoteTypeConfig)
-
-	// 1. Load built-in defaults
-	for name, cfg := range DefaultNoteTypes {
-		// Create a copy to avoid shared pointers
-		copyCfg := *cfg
-		finalNoteTypes[name] = &copyCfg
-	}
-
-	// 2. Merge user-defined types from grove.yml, overriding defaults
-	if coreCfg != nil && coreCfg.Notebooks != nil && coreCfg.Notebooks.Definitions != nil {
-		// Get default notebook name
-		defaultNotebookName := "default" //nolint:goconst
-		if coreCfg.Notebooks.Rules != nil && coreCfg.Notebooks.Rules.Default != "" {
-			defaultNotebookName = coreCfg.Notebooks.Rules.Default
-		}
-		if notebook, ok := coreCfg.Notebooks.Definitions[defaultNotebookName]; ok && notebook != nil && notebook.Types != nil {
-			for name, userCfg := range notebook.Types {
-				if existingCfg, exists := finalNoteTypes[name]; exists {
-					// Merge user config with existing default
-					if userCfg.Icon != "" {
-						existingCfg.Icon = userCfg.Icon
-					}
-					if userCfg.IconColor != "" {
-						existingCfg.IconColor = userCfg.IconColor
-					}
-					if userCfg.DefaultExpand {
-						existingCfg.DefaultExpand = userCfg.DefaultExpand
-					}
-					if userCfg.SortOrder != 0 {
-						existingCfg.SortOrder = userCfg.SortOrder
-					}
-					if userCfg.Description != "" {
-						existingCfg.Description = userCfg.Description
-					}
-					if userCfg.TemplatePath != "" {
-						existingCfg.TemplatePath = userCfg.TemplatePath
-					}
-					if userCfg.FilenameFormat != "" {
-						existingCfg.FilenameFormat = userCfg.FilenameFormat
-					}
-				} else {
-					// User defined a completely new type
-					finalNoteTypes[name] = userCfg
-				}
-			}
-		}
-	}
+	// Build the final note type registry: built-in defaults overlaid with the
+	// default notebook's user-defined types. Shared with out-of-process
+	// consumers (treemux's drawer notes summary) via ResolveNoteTypes so the
+	// icons and sort order can never drift between the two renderers.
+	finalNoteTypes := ResolveNoteTypes(coreCfg)
 
 	return &Service{
 		workspaceProvider: provider,
