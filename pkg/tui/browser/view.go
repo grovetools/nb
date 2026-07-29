@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
+	"github.com/grovetools/core/panelkit/layout"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
@@ -463,24 +463,16 @@ func (m Model) View() string {
 // indicator is dropped (the cursor row still conveys position).
 func (m Model) alignScrollIndicator(status string) string {
 	indicator := m.views.ScrollIndicator()
+	if indicator == "" {
+		return status
+	}
 	// contentWidth mirrors the frame's PaddingLeft(2) below: the status row
 	// is laid out inside that inset, not against the raw pane width.
-	contentWidth := m.width - 2
-	if indicator == "" || contentWidth <= 0 {
-		return status
-	}
-	// One column of separation between the status text and the indicator.
-	statusWidth := contentWidth - lipgloss.Width(indicator) - 1
-	if statusWidth < 1 {
-		return status
-	}
-	if lipgloss.Width(status) > statusWidth {
-		status = ansi.Truncate(status, statusWidth, "…")
-	}
-	// Width() pads the (now guaranteed short enough) status text out so the
-	// indicator lands flush right without a manual space run.
-	return lipgloss.NewStyle().Width(statusWidth).Render(status) + " " +
-		theme.DefaultTheme.Muted.Render(indicator)
+	return layout.RightPin(
+		status,
+		theme.DefaultTheme.Muted.Render(indicator),
+		m.width-2,
+	)
 }
 
 // FooterView returns the help text for use as the pager footer.
