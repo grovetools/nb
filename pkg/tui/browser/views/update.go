@@ -47,6 +47,80 @@ type treeRenderConfig struct {
 	includeClosed       bool
 }
 
+// RepoNotesGroupName is the label of the synthetic row that holds an
+// ecosystem's sub-repo workspaces.
+const RepoNotesGroupName = "repos_notes"
+
+// repoNotesPath is the synthetic path of an ecosystem's repos container. It
+// deliberately points at a dot-directory that never exists on disk — the row is
+// display-only, and the path exists solely to give it a stable fold ID.
+func repoNotesPath(ecoPath string) string {
+	return filepath.Join(ecoPath, ".repos-notes")
+}
+
+// repoNotesNodeID is the collapse-state key for an ecosystem's repos container.
+func repoNotesNodeID(ecoPath string) string {
+	return "dir:" + repoNotesPath(ecoPath)
+}
+
+// newRepoNotesNode builds the container row that an ecosystem's sub-repo
+// workspaces hang off, sitting at the same depth as the ecosystem's own note
+// groups.
+func newRepoNotesNode(eco *workspace.WorkspaceNode, childCount int) *DisplayNode {
+	return &DisplayNode{
+		Item: &tree.Item{
+			Path:     repoNotesPath(eco.Path),
+			Name:     RepoNotesGroupName,
+			IsDir:    true,
+			Type:     tree.TypeRepoNotes,
+			Metadata: make(map[string]interface{}),
+		},
+		Depth:      eco.Depth + 1,
+		ChildCount: childCount,
+	}
+}
+
+// isWorkspaceUnder reports whether child sits below parent in the filesystem,
+// using the same case-insensitive normalization the workspace filtering does.
+func isWorkspaceUnder(child, parent string) bool {
+	normChild, err := pathutil.NormalizeForLookup(child)
+	if err != nil {
+		return false
+	}
+	normParent, err := pathutil.NormalizeForLookup(parent)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(normChild, normParent+string(filepath.Separator))
+}
+
+// countRepoChildren maps an ecosystem's path to the number of sub-repo
+// workspaces that will render beneath it, mirroring the skip rules of the
+// render loop so the container's badge matches what expanding it reveals.
+func (m *Model) countRepoChildren(workspacesToShow []*workspace.WorkspaceNode, notesByWorkspace map[string]map[string][]*models.Note) map[string]int {
+	counts := make(map[string]int)
+	var eco *workspace.WorkspaceNode
+	for _, ws := range workspacesToShow {
+		if ws.IsWorktree() {
+			continue
+		}
+		hasNotes := len(notesByWorkspace[strings.ToLower(ws.Name)]) > 0
+		if !hasNotes && m.focusedWorkspace == nil && ws.Depth > 0 && ws.Name != "global" {
+			continue
+		}
+		if eco != nil && isWorkspaceUnder(ws.Path, eco.Path) {
+			counts[eco.Path]++
+			continue
+		}
+		if ws.IsEcosystem() {
+			eco = ws
+		} else {
+			eco = nil
+		}
+	}
+	return counts
+}
+
 // Update handles navigation, folding, and selection key events.
 // Returns updated model and any commands. Parent should handle other keys.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -370,26 +444,24 @@ func (m *Model) BuildDisplayTree() { //nolint:gocyclo
 	// 3. Build the display node list and jump map
 	m.jumpMap = make(map[rune]int)
 	jumpCounter := '1'
-	needsSeparator := false // Track if we need to add a separator before the next workspace
+
+	// An ecosystem's sub-repo workspaces render under a synthetic "repos_notes"
+	// row rather than as bare siblings of the ecosystem's own note groups.
+	// Without it the repos were only *visually* nested: folding the ecosystem
+	// hid its own notes and left every repo behind. Pre-count the children each
+	// ecosystem will actually render so the container can carry a badge.
+	repoChildCounts := m.countRepoChildren(workspacesToShow, notesByWorkspace)
+	var activeEco *workspace.WorkspaceNode // ecosystem currently owning repo children
+	activeEcoCollapsed := false
+	reposNodeEmitted := false
 
 	for _, ws := range workspacesToShow {
 		// Normalize workspace name to lowercase for case-insensitive matching
 		wsKey := strings.ToLower(ws.Name)
+		// Jump keys follow the workspace's real place in the hierarchy, not the
+		// extra level the repos container adds below.
+		jumpDepth := ws.Depth
 
-		// Add separator between ecosystem's own notes and child workspaces
-		if needsSeparator && m.focusedWorkspace != nil && m.focusedWorkspace.IsEcosystem() {
-			isSame, _ := pathutil.ComparePaths(ws.Path, m.focusedWorkspace.Path)
-			if !isSame {
-				// This is a child workspace, add separator
-				// Separator nodes have nil Item
-				nodes = append(nodes, &DisplayNode{
-					Item:   nil, // Separator
-					Prefix: "  ",
-					Depth:  0,
-				})
-				needsSeparator = false // Only add separator once
-			}
-		}
 		// Skip worktrees - they never have their own notes
 		if ws.IsWorktree() {
 			continue
@@ -402,6 +474,37 @@ func (m *Model) BuildDisplayTree() { //nolint:gocyclo
 		if !hasNotes && m.focusedWorkspace == nil && ws.Depth > 0 && ws.Name != "global" {
 			// In global view, only skip non-ecosystem workspaces that have no notes
 			continue
+		}
+
+		if activeEco != nil && isWorkspaceUnder(ws.Path, activeEco.Path) {
+			// A collapsed ecosystem now hides its repos along with its notes.
+			if activeEcoCollapsed && !hasSearchFilter {
+				continue
+			}
+			reposNodeID := repoNotesNodeID(activeEco.Path)
+			if !reposNodeEmitted {
+				nodes = append(nodes, newRepoNotesNode(activeEco, repoChildCounts[activeEco.Path]))
+				reposNodeEmitted = true
+				// Collapsed on first sight, like .archive/.artifacts: opening a
+				// notebook lands on the ecosystem's own groups plus one repos
+				// row, not every repo. A later user toggle is honored.
+				m.seedCollapsedDefault(reposNodeID)
+			}
+			if m.collapsedNodes[reposNodeID] && !hasSearchFilter {
+				continue
+			}
+			// Render one level deeper, under the container. Copy first: outside
+			// the focused view these nodes are shared with m.workspaces, and a
+			// mutated depth would compound on every rebuild.
+			child := *ws
+			child.Depth = ws.Depth + 1
+			ws = &child
+		} else {
+			activeEco, activeEcoCollapsed, reposNodeEmitted = nil, false, false
+			if ws.IsEcosystem() && repoChildCounts[ws.Path] > 0 {
+				activeEco = ws
+				activeEcoCollapsed = m.collapsedNodes["dir:"+ws.Path]
+			}
 		}
 
 		// Add workspace node
@@ -420,7 +523,7 @@ func (m *Model) BuildDisplayTree() { //nolint:gocyclo
 		}
 
 		// Assign jump key for workspaces at depth <= 1
-		if ws.Depth <= 1 && jumpCounter <= '9' {
+		if jumpDepth <= 1 && jumpCounter <= '9' {
 			node.JumpKey = jumpCounter
 			m.jumpMap[jumpCounter] = len(nodes)
 			jumpCounter++
@@ -733,16 +836,6 @@ func (m *Model) BuildDisplayTree() { //nolint:gocyclo
 						})
 					}
 				}
-			}
-		}
-
-		// Mark that we need a separator before child workspaces
-		// This is set after rendering the focused ecosystem's own note groups
-		// Only show separator if the ecosystem is expanded
-		if m.focusedWorkspace != nil && m.focusedWorkspace.IsEcosystem() && !wsCollapsed {
-			isSame, _ := pathutil.ComparePaths(ws.Path, m.focusedWorkspace.Path)
-			if isSame {
-				needsSeparator = true
 			}
 		}
 	}

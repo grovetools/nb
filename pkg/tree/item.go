@@ -14,6 +14,12 @@ const (
 	TypeGeneric   ItemType = "generic"   // A generic file, e.g., notes.txt
 	TypeWorkspace ItemType = "workspace" // A workspace root directory
 	TypeGroup     ItemType = "group"     // A generic grouping directory, e.g., 'inbox', 'meetings'
+
+	// TypeRepoNotes is the synthetic container an ecosystem's sub-repo
+	// workspaces render under, so folding the ecosystem folds them away with
+	// its own notes instead of leaving them behind as bare siblings. Its Path
+	// does not exist on disk — it is a display-only row.
+	TypeRepoNotes ItemType = "repo-notes"
 )
 
 // Item represents a single node in the notebook's file tree. It can be a file or a directory.

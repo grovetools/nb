@@ -1936,12 +1936,14 @@ func (m *Model) autoArchiveStaleNotesCmd() tea.Cmd {
 }
 
 // collapseChildWorkspaces collapses all child workspaces of the given parent
-func (m *Model) collapseChildWorkspaces(parent *workspace.WorkspaceNode) {
+// into collapsedNodes. It writes into the caller's map rather than the live
+// collapse state: its callers are building a fresh state that they install
+// afterwards, and installing it would otherwise discard these entries.
+func (m *Model) collapseChildWorkspaces(parent *workspace.WorkspaceNode, collapsedNodes map[string]bool) {
 	if parent == nil {
 		return
 	}
 
-	collapsedNodes := m.views.GetCollapseState()
 	normParent, _ := pathutil.NormalizeForLookup(parent.Path)
 	for _, ws := range m.workspaces {
 		// Skip the parent workspace itself
@@ -1957,17 +1959,87 @@ func (m *Model) collapseChildWorkspaces(parent *workspace.WorkspaceNode) {
 			collapsedNodes[wsNodeID] = true
 		}
 	}
-	m.views.SetCollapseState(collapsedNodes)
 }
 
-// collapseAllWorkspaces collapses all top-level workspaces
-func (m *Model) collapseAllWorkspaces() {
-	collapsedNodes := m.views.GetCollapseState()
+// collapseAllWorkspaces collapses all top-level workspaces into collapsedNodes.
+// Like collapseChildWorkspaces it writes into the caller's map: its caller is
+// building a fresh state that it installs afterwards, and installing it would
+// otherwise discard these entries.
+func (m *Model) collapseAllWorkspaces(collapsedNodes map[string]bool) {
 	for _, ws := range m.workspaces {
 		wsNodeID := "dir:" + ws.Path
 		collapsedNodes[wsNodeID] = true
 	}
-	m.views.SetCollapseState(collapsedNodes)
+}
+
+// workspaceNodeByName returns the node from m.workspaces matching name, so path
+// resolution uses the same instance tree building does, falling back to the
+// focused workspace when it isn't in the list.
+func (m *Model) workspaceNodeByName(name string) *workspace.WorkspaceNode {
+	for _, ws := range m.workspaces {
+		if ws.Name == name {
+			return ws
+		}
+	}
+	return m.focusedWorkspace
+}
+
+// collapseWorkspaceGroups folds every note group of wsNode into collapsedNodes,
+// including the intermediate directories a nested group implies.
+//
+// Notes carry only their innermost group ("plans/rolling", "concepts/vision"),
+// but the tree renders a row for each path segment. Folding just the innermost
+// one left every parent that holds no notes of its own — "plans", "concepts",
+// "skills" — open, so a repo opened one level deep instead of on its headings.
+//
+// Groups whose type sets DefaultExpand stay open; the caller re-opens those
+// afterwards for the types that have no notes yet.
+func (m *Model) collapseWorkspaceGroups(wsNode *workspace.WorkspaceNode, wsName string, collapsedNodes map[string]bool) {
+	groupsSeen := make(map[string]bool)
+	for _, item := range m.allItems {
+		itemWs, _ := item.Metadata["Workspace"].(string)
+		if itemWs != wsName {
+			continue
+		}
+		groupName, _ := item.Metadata["Group"].(string)
+		if groupName == "" {
+			continue
+		}
+		segments := strings.Split(groupName, "/")
+		for i := range segments {
+			group := strings.Join(segments[:i+1], "/")
+			if groupsSeen[group] {
+				continue
+			}
+			groupsSeen[group] = true
+
+			// Use GetGroupDir for centralized path resolution.
+			groupPath, err := m.service.GetNotebookLocator().GetGroupDir(wsNode, group)
+			if err != nil {
+				continue
+			}
+			shouldExpand := false
+			if typeConfig, ok := m.service.NoteTypes[group]; ok {
+				shouldExpand = typeConfig.DefaultExpand
+			}
+			if !shouldExpand {
+				collapsedNodes["dir:"+groupPath] = true
+			}
+		}
+	}
+}
+
+// expandDefaultExpandGroups re-opens the groups whose type asks to be expanded
+// on arrival, including ones that hold no notes yet.
+func (m *Model) expandDefaultExpandGroups(wsNode *workspace.WorkspaceNode, collapsedNodes map[string]bool) {
+	for groupName, typeConfig := range m.service.NoteTypes {
+		if !typeConfig.DefaultExpand {
+			continue
+		}
+		if groupPath, err := m.service.GetNotebookLocator().GetGroupDir(wsNode, groupName); err == nil {
+			delete(collapsedNodes, "dir:"+groupPath)
+		}
+	}
 }
 
 // setCollapseStateForFocus systematically sets the collapse state based on the current focus level
@@ -1976,7 +2048,7 @@ func (m *Model) setCollapseStateForFocus() {
 
 	if m.focusedWorkspace == nil {
 		// Global/top level view: collapse all workspaces for a clean overview
-		m.collapseAllWorkspaces()
+		m.collapseAllWorkspaces(collapsedNodes)
 	} else if m.focusedWorkspace.IsEcosystem() {
 		// Ecosystem focus: collapse ALL note groups and child workspaces
 		// to show a clean view of the ecosystem structure
@@ -1984,59 +2056,14 @@ func (m *Model) setCollapseStateForFocus() {
 		wsNodeID := "dir:" + m.focusedWorkspace.Path
 		delete(collapsedNodes, wsNodeID)
 
-		// Collapse all child workspaces under this ecosystem
-		m.collapseChildWorkspaces(m.focusedWorkspace)
+		// Collapse all child workspaces under this ecosystem: they render under
+		// the "repos_notes" container, which stays open, so the ecosystem lands
+		// on a list of repo names rather than every repo's groups at once.
+		m.collapseChildWorkspaces(m.focusedWorkspace, collapsedNodes)
 
-		// Get workspace node from m.workspaces to ensure we use the same one as tree building
-		var wsNode *workspace.WorkspaceNode
-		for _, ws := range m.workspaces {
-			if ws.Name == m.focusedWorkspace.Name {
-				wsNode = ws
-				break
-			}
-		}
-		if wsNode == nil {
-			wsNode = m.focusedWorkspace
-		}
-
-		// Use GetGroupDir for all path resolution to ensure consistency
-		groupsSeen := make(map[string]bool)
-		for _, item := range m.allItems {
-			wsName, _ := item.Metadata["Workspace"].(string)
-			groupName, _ := item.Metadata["Group"].(string)
-			if wsName == m.focusedWorkspace.Name && !groupsSeen[groupName] {
-				// Use GetGroupDir for centralized path resolution
-				groupPath, err := m.service.GetNotebookLocator().GetGroupDir(wsNode, groupName)
-				if err != nil {
-					// Skip if we can't resolve path
-					groupsSeen[groupName] = true
-					continue
-				}
-
-				groupNodeID := "dir:" + groupPath
-
-				// Use DefaultExpand from NoteTypes to determine if group should be expanded
-				shouldExpand := false
-				if typeConfig, ok := m.service.NoteTypes[groupName]; ok {
-					shouldExpand = typeConfig.DefaultExpand
-				}
-
-				// Collapse groups that shouldn't be expanded by default
-				if !shouldExpand {
-					collapsedNodes[groupNodeID] = true
-				}
-				groupsSeen[groupName] = true
-			}
-		}
-
-		// Ensure groups with DefaultExpand=true are expanded
-		for groupName, typeConfig := range m.service.NoteTypes {
-			if typeConfig.DefaultExpand {
-				if groupPath, err := m.service.GetNotebookLocator().GetGroupDir(wsNode, groupName); err == nil {
-					delete(collapsedNodes, "dir:"+groupPath)
-				}
-			}
-		}
+		wsNode := m.workspaceNodeByName(m.focusedWorkspace.Name)
+		m.collapseWorkspaceGroups(wsNode, m.focusedWorkspace.Name, collapsedNodes)
+		m.expandDefaultExpandGroups(wsNode, collapsedNodes)
 	} else {
 		// Leaf workspace focus (e.g., repo or worktree)
 		// This implements the requested default folding behavior.
@@ -2049,60 +2076,12 @@ func (m *Model) setCollapseStateForFocus() {
 		delete(collapsedNodes, wsNodeID)
 
 		// 3. Collapse any child workspaces (if any)
-		m.collapseChildWorkspaces(m.focusedWorkspace)
+		m.collapseChildWorkspaces(m.focusedWorkspace, collapsedNodes)
 
 		// 4. Collapse/expand note groups according to rules
-		// NOW USING GetGroupDir for ALL path resolution to ensure consistency
-		var wsNode *workspace.WorkspaceNode
-		for _, ws := range m.workspaces {
-			if ws.Name == m.focusedWorkspace.Name {
-				wsNode = ws
-				break
-			}
-		}
-
-		if wsNode == nil {
-			wsNode = m.focusedWorkspace
-		}
-
-		groupsSeen := make(map[string]bool)
-		for _, item := range m.allItems {
-			wsName, _ := item.Metadata["Workspace"].(string)
-			groupName, _ := item.Metadata["Group"].(string)
-
-			if wsName == m.focusedWorkspace.Name && !groupsSeen[groupName] {
-				// Use GetGroupDir for centralized path resolution
-				groupPath, err := m.service.GetNotebookLocator().GetGroupDir(wsNode, groupName)
-				if err != nil {
-					// Skip if we can't resolve path
-					groupsSeen[groupName] = true
-					continue
-				}
-
-				groupNodeID := "dir:" + groupPath
-
-				// Use DefaultExpand from NoteTypes to determine if group should be expanded
-				shouldExpand := false
-				if typeConfig, ok := m.service.NoteTypes[groupName]; ok {
-					shouldExpand = typeConfig.DefaultExpand
-				}
-
-				// Collapse groups that shouldn't be expanded by default
-				if !shouldExpand {
-					collapsedNodes[groupNodeID] = true
-				}
-				groupsSeen[groupName] = true
-			}
-		}
-
-		// Ensure groups with DefaultExpand=true are expanded
-		for groupName, typeConfig := range m.service.NoteTypes {
-			if typeConfig.DefaultExpand {
-				if groupPath, err := m.service.GetNotebookLocator().GetGroupDir(wsNode, groupName); err == nil {
-					delete(collapsedNodes, "dir:"+groupPath)
-				}
-			}
-		}
+		wsNode := m.workspaceNodeByName(m.focusedWorkspace.Name)
+		m.collapseWorkspaceGroups(wsNode, m.focusedWorkspace.Name, collapsedNodes)
+		m.expandDefaultExpandGroups(wsNode, collapsedNodes)
 	}
 
 	m.views.SetCollapseState(collapsedNodes)
