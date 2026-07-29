@@ -79,6 +79,7 @@ func TestArtifactSubgroupNestsDeepDirs(t *testing.T) {
 		"/ws/plans/demo", // parentPath
 		"demo",           // parentName
 		"plans/demo",     // parentGroup
+		2,                // parentDepth (the plan row's depth)
 	)
 
 	// Collect the directory (group) nodes with their derived display name, depth,

@@ -1477,17 +1477,21 @@ func (s *Service) ListAllItems(ctx *WorkspaceContext, includeArchived bool, incl
 
 					switch contentDir.Type {
 					case "plans":
-						var group string
+						// A file sitting directly in plans/ belongs to the
+						// container itself, not to a plan: its group is "plans",
+						// never "plans/" — a trailing slash reads downstream as a
+						// plan with an empty name.
+						group := "plans"
 						if len(parts) > 1 {
-							group = strings.Join(parts[:len(parts)-1], "/")
+							group = "plans/" + strings.Join(parts[:len(parts)-1], "/")
 						}
-						item.Metadata["Group"] = "plans/" + group
+						item.Metadata["Group"] = group
 					case "chats":
-						var group string
+						group := "chats"
 						if len(parts) > 1 {
-							group = strings.Join(parts[:len(parts)-1], "/")
+							group = "chats/" + strings.Join(parts[:len(parts)-1], "/")
 						}
-						item.Metadata["Group"] = "chats/" + group
+						item.Metadata["Group"] = group
 					case "notes":
 						var group string
 						if len(parts) > 1 {

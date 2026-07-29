@@ -24,7 +24,7 @@ func TestSyntheticBucketsCarryEnclosingGroup(t *testing.T) {
 	}
 
 	var nodes []*DisplayNode
-	m.renderSyntheticGroups(&nodes, notes, ws, "/tmp/ws/notes/inbox", "inbox", "├ ", 1, map[string]string{}, false, false)
+	m.renderSyntheticGroups(&nodes, notes, ws, "/tmp/ws/notes/inbox", "inbox", "├ ", 1, map[string]string{}, false, false, nil, "")
 
 	var buckets []*DisplayNode
 	for _, n := range nodes {

@@ -145,11 +145,13 @@ type Model struct {
 
 	// Flow plan jobs keyed by job ID (the opaque `.artifacts/<jobID>` dir name),
 	// supplied by the parent controller. Derived lookup maps are rebuilt in
-	// SetParentState: jobIDToTitle resolves an artifact dir to a human title,
-	// jobFileToID maps a plan job markdown filename to its job ID (for nesting
-	// and the artifact-count badge).
+	// SetParentState: jobIDToFile names an artifact dir after the job markdown
+	// it belongs to (the name flow's job table shows), jobIDToTitle is the
+	// fallback when the plan no longer holds the job, and jobFileToID maps a
+	// plan job markdown filename to its job ID (for nesting and the badge).
 	jobs              map[string]*orchestration.Job
 	jobIDToTitle      map[string]string
+	jobIDToFile       map[string]string
 	jobFileToID       map[string]string
 	jobIDToArtifactCt map[string]int // job ID -> number of artifact files under .artifacts/<jobID>
 
@@ -233,11 +235,12 @@ func (m *Model) SetParentState(
 }
 
 // setJobs stores the flow job map and rebuilds the derived lookup maps used
-// during rendering (jobIDToTitle, jobFileToID). Done once per items refresh so
-// the render path only does cheap map lookups.
+// during rendering (jobIDToFile, jobIDToTitle, jobFileToID). Done once per items
+// refresh so the render path only does cheap map lookups.
 func (m *Model) setJobs(jobs map[string]*orchestration.Job) {
 	m.jobs = jobs
 	m.jobIDToTitle = make(map[string]string, len(jobs))
+	m.jobIDToFile = make(map[string]string, len(jobs))
 	m.jobFileToID = make(map[string]string, len(jobs))
 	for id, job := range jobs {
 		if job == nil {
@@ -247,18 +250,17 @@ func (m *Model) setJobs(jobs map[string]*orchestration.Job) {
 			m.jobIDToTitle[id] = job.Title
 		}
 		if job.Filename != "" {
+			m.jobIDToFile[id] = job.Filename
 			m.jobFileToID[job.Filename] = id
 		}
 	}
 
 	// Count artifact files per job ID by scanning loaded items for paths of the
-	// form "<planDir>/.artifacts/<jobID>/<file>". This MUST match the set the
+	// form "<planDir>/.artifacts/<jobID>/...". This MUST match the set the
 	// nested "artifacts (N)" node renders (addNestedArtifacts), which is the
-	// exact-match subgroup keyed by jobID — i.e. only files that are DIRECT
-	// children of ".artifacts/<jobID>/". Files in deeper subdirs
-	// (".artifacts/<jobID>/sub/file") land in a different subgroup
-	// ("<jobID>/sub") that the per-job nested node never shows, so they must be
-	// excluded here too or the badge will disagree with the expanded count.
+	// job's WHOLE subtree — its own files plus everything in nested dirs like
+	// ".artifacts/<jobID>/workflows/…" — so every file below the job dir counts,
+	// at any depth.
 	m.jobIDToArtifactCt = make(map[string]int)
 	for _, item := range m.allItems {
 		if item.IsDir {
@@ -275,14 +277,24 @@ func (m *Model) setJobs(jobs map[string]*orchestration.Job) {
 			// attributable to a job, so skip for badge purposes.
 			continue
 		}
-		// Only count direct children of the per-job dir; reject any deeper
-		// nesting so the badge equals the nested node's ChildCount.
-		if strings.IndexByte(rest[slash+1:], '/') >= 0 {
-			continue
-		}
 		jobID := rest[:slash]
 		m.jobIDToArtifactCt[jobID]++
 	}
+}
+
+// artifactDirLabel names a `.artifacts/<jobID>` directory. The job's markdown
+// filename wins: that is what flow's job table shows and what the plan's own
+// note rows are called, so the two views agree and the numeric prefixes sort the
+// dirs into job order. Titles are the fallback for jobs the plan no longer
+// holds, and the raw ID for UUID-only / orphaned dirs.
+func (m *Model) artifactDirLabel(jobID string) string {
+	if file, ok := m.jobIDToFile[jobID]; ok && file != "" {
+		return file
+	}
+	if title, ok := m.jobIDToTitle[jobID]; ok && title != "" {
+		return title
+	}
+	return jobID
 }
 
 // jobIDForNote resolves the flow job ID for a note display node, if the node is

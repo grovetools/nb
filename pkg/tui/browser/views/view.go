@@ -414,12 +414,7 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 				// Deeper directory: label by the final path segment as-is.
 				info.name = rel[strings.LastIndexByte(rel, '/')+1:]
 			} else {
-				// Top job-dir segment: resolve the job ID to a friendly title.
-				if title, ok := m.jobIDToTitle[rel]; ok && title != "" {
-					info.name = title
-				} else {
-					info.name = rel
-				}
+				info.name = m.artifactDirLabel(rel)
 			}
 		} else if node.IsPlan() {
 			// Handle plan nodes (but not archive nodes that start with "plans/")
