@@ -34,7 +34,7 @@ func TestChordConfigKeyStability(t *testing.T) {
 	ck := configKeys(t)
 	want := map[string]string{
 		"toggle_archives":   "ta",
-		"toggle_artifacts":  "tb",
+		"toggle_artifacts":  "tj",
 		"toggle_global":     "tg",
 		"toggle_hold":       "th",
 		"toggle_columns":    "tc",
@@ -100,7 +100,7 @@ func TestNamespacesMembership(t *testing.T) {
 	for _, b := range ns[0].Bindings {
 		toggleKeys[firstKey(b)] = true
 	}
-	for _, k := range []string{"ta", "tb", "tg", "th", "tc", "tp"} {
+	for _, k := range []string{"ta", "tj", "tg", "th", "tc", "tp"} {
 		if !toggleKeys[k] {
 			t.Errorf("Toggle namespace missing member %q", k)
 		}

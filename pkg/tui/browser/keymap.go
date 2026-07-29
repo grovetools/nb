@@ -203,8 +203,8 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("ta", "toggle archives"),
 		),
 		ToggleArtifacts: key.NewBinding(
-			key.WithKeys("tb"),
-			key.WithHelp("tb", "toggle artifacts"),
+			key.WithKeys("tj"),
+			key.WithHelp("tj", "toggle job artifacts"),
 		),
 		ToggleGlobal: key.NewBinding(
 			key.WithKeys("tg"),

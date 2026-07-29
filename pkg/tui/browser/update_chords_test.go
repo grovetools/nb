@@ -91,7 +91,7 @@ func TestTogglePrefixArmsPopup(t *testing.T) {
 	if group.Title != "Toggle (t…)" {
 		t.Errorf("want group title %q, got %q", "Toggle (t…)", group.Title)
 	}
-	wantRows := map[string]bool{"a": true, "b": true, "g": true, "h": true, "c": true, "p": true}
+	wantRows := map[string]bool{"a": true, "j": true, "g": true, "h": true, "c": true, "p": true}
 	got := map[string]bool{}
 	for _, r := range group.Rows {
 		got[r.Keys] = true

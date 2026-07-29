@@ -551,6 +551,7 @@ func (m *Model) BuildDisplayTree() { //nolint:gocyclo
 			// jobName == "" means files directly under .artifacts (no per-job subdir).
 			var regularGroups []string
 			var rootNotes []*models.Note
+			var planRootNotes []*models.Note // files sitting directly in plans/, not in any plan
 			planGroups := make(map[string][]*models.Note)
 			holdPlanGroups := make(map[string][]*models.Note)
 			archiveSubgroups := make(map[string]map[string][]*models.Note)
@@ -662,6 +663,15 @@ func (m *Model) BuildDisplayTree() { //nolint:gocyclo
 					continue
 				}
 
+				// Files that live directly in plans/ (no plan subdirectory) belong
+				// INSIDE the plans container, not beside it — rendering them as a
+				// regular group named "plans" produced a second, near-empty
+				// "plans" row next to the real one.
+				if name == "plans" {
+					planRootNotes = append(planRootNotes, notes...)
+					continue
+				}
+
 				// Handle plans grouping
 				if strings.HasPrefix(name, "plans/") {
 					planName := strings.TrimPrefix(name, "plans/")
@@ -746,7 +756,7 @@ func (m *Model) BuildDisplayTree() { //nolint:gocyclo
 			})
 
 			// Check if we have plans to add a "plans" parent group
-			hasPlans := len(planGroups) > 0 || len(archiveSubgroups["plans"]) > 0
+			hasPlans := len(planGroups) > 0 || len(archiveSubgroups["plans"]) > 0 || len(planRootNotes) > 0
 			hasHoldPlans := len(holdPlanGroups) > 0
 
 			// Render groups in the sorted order
@@ -791,7 +801,7 @@ func (m *Model) BuildDisplayTree() { //nolint:gocyclo
 				// Render Plans Group in its sorted position
 				if hasPlans {
 					hasGroupsAfter := len(groupsAfterPlans) > 0 || hasHoldPlans || len(rootNotes) > 0
-					m.addPlansGroup(&nodes, ws, planGroups, archiveSubgroups, artifactSubgroups, hasSearchFilter, workspacePathMap, hasGroupsAfter)
+					m.addPlansGroup(&nodes, ws, planGroups, planRootNotes, archiveSubgroups, artifactSubgroups, hasSearchFilter, workspacePathMap, hasGroupsAfter)
 				}
 
 				// Render groups after plans
@@ -1001,6 +1011,7 @@ func (m *Model) addArchiveSubgroup(
 	parentPath string,
 	parentName string,
 	parentGroup string,
+	parentDepth int,
 ) {
 	// Sort archived child names
 	var archivedNames []string
@@ -1035,7 +1046,7 @@ func (m *Model) addArchiveSubgroup(
 	archiveParentNode := &DisplayNode{
 		Item:       archiveParentItem,
 		Prefix:     archivePrefix.String(),
-		Depth:      ws.Depth + 2,
+		Depth:      parentDepth + 1,
 		ChildCount: totalArchivedNotes,
 	}
 	*nodes = append(*nodes, archiveParentNode)
@@ -1066,7 +1077,7 @@ func (m *Model) addArchiveSubgroup(
 					} else {
 						notePrefix.WriteString("├ ")
 					}
-					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
+					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: parentDepth + 2, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
 				}
 				continue
 			}
@@ -1095,7 +1106,7 @@ func (m *Model) addArchiveSubgroup(
 			archivedChildNode := &DisplayNode{
 				Item:       archivedChildItem,
 				Prefix:     archivedPrefix.String(),
-				Depth:      ws.Depth + 3,
+				Depth:      parentDepth + 2,
 				ChildCount: len(archivedNotes),
 			}
 			*nodes = append(*nodes, archivedChildNode)
@@ -1115,7 +1126,7 @@ func (m *Model) addArchiveSubgroup(
 					} else {
 						archivedNotePrefix.WriteString("├ ")
 					}
-					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: archivedNotePrefix.String(), Depth: ws.Depth + 4, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
+					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: archivedNotePrefix.String(), Depth: parentDepth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
 				}
 			}
 		}
@@ -1132,6 +1143,7 @@ func (m *Model) addClosedSubgroup(
 	parentPath string,
 	parentName string,
 	parentGroup string,
+	parentDepth int,
 ) {
 	// Sort closed child names
 	var closedNames []string
@@ -1166,7 +1178,7 @@ func (m *Model) addClosedSubgroup(
 	closedParentNode := &DisplayNode{
 		Item:       closedParentItem,
 		Prefix:     closedPrefix.String(),
-		Depth:      ws.Depth + 2,
+		Depth:      parentDepth + 1,
 		ChildCount: totalClosedNotes,
 	}
 	*nodes = append(*nodes, closedParentNode)
@@ -1197,7 +1209,7 @@ func (m *Model) addClosedSubgroup(
 					} else {
 						notePrefix.WriteString("├ ")
 					}
-					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
+					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: parentDepth + 2, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
 				}
 				continue
 			}
@@ -1226,7 +1238,7 @@ func (m *Model) addClosedSubgroup(
 			closedChildNode := &DisplayNode{
 				Item:       closedChildItem,
 				Prefix:     closedChildPrefix.String(),
-				Depth:      ws.Depth + 3,
+				Depth:      parentDepth + 2,
 				ChildCount: len(closedNotes),
 			}
 			*nodes = append(*nodes, closedChildNode)
@@ -1246,38 +1258,29 @@ func (m *Model) addClosedSubgroup(
 					} else {
 						closedNotePrefix.WriteString("├ ")
 					}
-					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: closedNotePrefix.String(), Depth: ws.Depth + 4, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
+					*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: closedNotePrefix.String(), Depth: parentDepth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
 				}
 			}
 		}
 	}
 }
 
-func (m *Model) addArtifactSubgroup(
-	nodes *[]*DisplayNode,
-	ws *workspace.WorkspaceNode,
-	groupPrefix string,
-	artifactJobs map[string][]*models.Note,
-	hasSearchFilter bool,
-	workspacePathMap map[string]string,
-	parentPath string,
-	parentName string,
-	parentGroup string,
-) {
-	// The keys of artifactJobs are full relative paths under .artifacts/ (e.g.
-	// "test-2b3a8ac9/workflows/wf_xxx/agents"). Build an in-memory tree from
-	// those segments so nested directories render as a properly indented tree,
-	// preserving intermediate dirs (e.g. "workflows/") that would otherwise be
-	// dropped. The empty key ("") means files sit directly under .artifacts/.
-	artifactsTree := newGroupTreeNode("", "")
-	var rootNotes []*models.Note // notes directly under .artifacts/ (jobName == "")
+// buildArtifactTree turns a map of "<path under .artifacts>" -> notes into an
+// in-memory directory tree so nested dirs render as a properly indented tree,
+// preserving intermediate dirs (e.g. "workflows/") that would otherwise be
+// dropped. The empty key ("") means files sit directly under .artifacts/; those
+// notes are returned separately. Each node's fullName is the full relative path
+// under .artifacts/, which the renderer turns back into a real filesystem path.
+func buildArtifactTree(artifactJobs map[string][]*models.Note) (*groupTreeNode, []*models.Note) {
+	root := newGroupTreeNode("", "")
+	var rootNotes []*models.Note
 	for jobName, notes := range artifactJobs {
 		if jobName == "" {
 			rootNotes = append(rootNotes, notes...)
 			continue
 		}
 		parts := strings.Split(jobName, "/")
-		currentNode := artifactsTree
+		currentNode := root
 		for i, part := range parts {
 			if _, ok := currentNode.children[part]; !ok {
 				fullName := strings.Join(parts[:i+1], "/")
@@ -1296,18 +1299,47 @@ func (m *Model) addArtifactSubgroup(
 			sortNodes(c)
 		}
 	}
-	sortNodes(artifactsTree)
+	sortNodes(root)
+	return root, rootNotes
+}
 
-	// Count total artifact files across the whole subtree.
-	var countAll func(*groupTreeNode) int
-	countAll = func(n *groupTreeNode) int {
-		total := len(n.notes)
-		for _, c := range n.children {
-			total += countAll(c)
-		}
-		return total
+// countArtifactTree returns the number of note files anywhere in the subtree.
+func countArtifactTree(n *groupTreeNode) int {
+	if n == nil {
+		return 0
 	}
-	totalArtifacts := countAll(artifactsTree) + len(rootNotes)
+	total := len(n.notes)
+	for _, c := range n.children {
+		total += countArtifactTree(c)
+	}
+	return total
+}
+
+func (m *Model) addArtifactSubgroup(
+	nodes *[]*DisplayNode,
+	ws *workspace.WorkspaceNode,
+	groupPrefix string,
+	artifactJobs map[string][]*models.Note,
+	hasSearchFilter bool,
+	workspacePathMap map[string]string,
+	parentPath string,
+	parentName string,
+	parentGroup string,
+	parentDepth int,
+) {
+	// The keys of artifactJobs are full relative paths under .artifacts/ (e.g.
+	// "test-2b3a8ac9/workflows/wf_xxx/agents").
+	artifactsTree, rootNotes := buildArtifactTree(artifactJobs)
+
+	// buildArtifactTree sorts every level by raw segment, which at the top level
+	// is the opaque job ID. Re-sort the job dirs by the label they actually
+	// render under (the job's markdown filename), so they land in job order —
+	// 01-, 02-, 03- — instead of ID order.
+	sort.SliceStable(artifactsTree.childKeys, func(i, j int) bool {
+		return m.artifactDirLabel(artifactsTree.childKeys[i]) < m.artifactDirLabel(artifactsTree.childKeys[j])
+	})
+
+	totalArtifacts := countArtifactTree(artifactsTree) + len(rootNotes)
 
 	// Calculate .artifacts prefix (last child under this group)
 	var artifactsPrefix strings.Builder
@@ -1329,7 +1361,7 @@ func (m *Model) addArtifactSubgroup(
 	artifactsParentNode := &DisplayNode{
 		Item:       artifactsParentItem,
 		Prefix:     artifactsPrefix.String(),
-		Depth:      ws.Depth + 2,
+		Depth:      parentDepth + 1,
 		ChildCount: totalArtifacts,
 	}
 	*nodes = append(*nodes, artifactsParentNode)
@@ -1345,7 +1377,7 @@ func (m *Model) addArtifactSubgroup(
 	// .artifacts (rootNotes) render after the dir children, and govern the
 	// last-child glyph of the deepest dir branch.
 	hasRootNotes := len(rootNotes) > 0
-	m.renderArtifactTree(nodes, ws, artifactsTree, artifactsPrefix.String(), ws.Depth+3,
+	m.renderArtifactTree(nodes, ws, artifactsTree, artifactsPrefix.String(), parentDepth+2,
 		hasSearchFilter, workspacePathMap, parentPath, parentGroup, hasRootNotes)
 
 	if hasRootNotes {
@@ -1361,7 +1393,7 @@ func (m *Model) addArtifactSubgroup(
 			} else {
 				notePrefix.WriteString("├ ")
 			}
-			*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: ws.Depth + 3, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
+			*nodes = append(*nodes, &DisplayNode{Item: noteToItem(note), Prefix: notePrefix.String(), Depth: parentDepth + 2, RelativePath: calculateRelativePath(note, workspacePathMap, m.focusedWorkspace)})
 		}
 	}
 }
@@ -1470,7 +1502,7 @@ func (m *Model) renderArtifactTree(
 	}
 }
 
-func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, planGroups map[string][]*models.Note, archiveSubgroups map[string]map[string][]*models.Note, artifactSubgroups map[string]map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasGroupsAfter bool) {
+func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode, planGroups map[string][]*models.Note, planRootNotes []*models.Note, archiveSubgroups map[string]map[string][]*models.Note, artifactSubgroups map[string]map[string][]*models.Note, hasSearchFilter bool, workspacePathMap map[string]string, hasGroupsAfter bool) {
 	// Calculate plans parent prefix
 	var plansPrefix strings.Builder
 	indentPrefix := strings.ReplaceAll(ws.TreePrefix, "├ ", "│ ")
@@ -1533,7 +1565,13 @@ func (m *Model) addPlansGroup(nodes *[]*DisplayNode, ws *workspace.WorkspaceNode
 			includeArchives:     false,
 			includeClosed:       false,
 		}
-		m.renderTree(nodes, ws, planTree, plansPrefix.String(), ws.Depth+2, hasSearchFilter, workspacePathMap, plansPath, config, hasPlansArchive, nil, nil, artifactSubgroups)
+		m.renderTree(nodes, ws, planTree, plansPrefix.String(), ws.Depth+2, hasSearchFilter, workspacePathMap, plansPath, config, hasPlansArchive || len(planRootNotes) > 0, nil, nil, artifactSubgroups)
+
+		// Loose files that sit in plans/ itself render as plain children of the
+		// container, below the plans.
+		if len(planRootNotes) > 0 {
+			m.addNoteNodes(nodes, planRootNotes, ws, plansPrefix.String(), ws.Depth+1, workspacePathMap, hasPlansArchive, nil, "", hasSearchFilter)
+		}
 
 		// Add .archive parent group if there are archived children
 		if hasPlansArchive {
@@ -1808,8 +1846,33 @@ func (m *Model) addUngroupedSection(nodes *[]*DisplayNode, ungroupedWorkspaces [
 	}
 }
 
+// collectJobArtifacts returns every artifact subgroup owned by jobID: the job's
+// own directory (key == jobID) plus every directory nested beneath it (keys
+// prefixed "<jobID>/"). The whole subtree nests under the owning job row, so a
+// job that wrote into ".artifacts/<jobID>/workflows/..." keeps those files with
+// their job instead of stranding them in the standalone .artifacts node.
+func collectJobArtifacts(jobsForGroup map[string][]*models.Note, jobID string) map[string][]*models.Note {
+	if jobID == "" || len(jobsForGroup) == 0 {
+		return nil
+	}
+	owned := make(map[string][]*models.Note)
+	prefix := jobID + "/"
+	for key, notes := range jobsForGroup {
+		if len(notes) == 0 {
+			continue
+		}
+		if key == jobID || strings.HasPrefix(key, prefix) {
+			owned[key] = notes
+		}
+	}
+	if len(owned) == 0 {
+		return nil
+	}
+	return owned
+}
+
 // groupHasArtifactOrphans reports whether the artifact jobs map for a group
-// contains at least one jobID that does NOT correspond to a job note present in
+// contains at least one directory that does NOT belong to a job note present in
 // notesInGroup. Those orphans (UUID-only dirs / deleted jobs) still render under
 // a standalone .artifacts subgroup after nesting, so this drives the trailing
 // branch-glyph decision for the note list.
@@ -1823,9 +1886,13 @@ func (m *Model) groupHasArtifactOrphans(notesInGroup []*models.Note, jobsForGrou
 			owned[id] = struct{}{}
 		}
 	}
-	for jobID, arts := range jobsForGroup {
+	for key, arts := range jobsForGroup {
 		if len(arts) == 0 {
 			continue
+		}
+		jobID := key
+		if slash := strings.IndexByte(key, '/'); slash >= 0 {
+			jobID = key[:slash]
 		}
 		if _, isOwned := owned[jobID]; !isOwned {
 			return true
@@ -1849,6 +1916,7 @@ func (m *Model) addNoteNodes(
 	hasFollowingSiblings bool,
 	artifactSubgroups map[string]map[string][]*models.Note,
 	artifactGroupKey string,
+	hasSearchFilter bool,
 ) {
 	// Sort notes within the group
 	m.sortNotes(notesInGroup)
@@ -1868,14 +1936,15 @@ func (m *Model) addNoteNodes(
 			notePrefix.WriteString("├ ")
 		}
 
-		// Resolve nested artifacts for this note, if any.
+		// Resolve nested artifacts for this note, if any. The whole per-job
+		// subtree (".artifacts/<jobID>" and everything below it) comes along.
 		var jobID string
-		var jobArtifacts []*models.Note
+		var jobArtifacts map[string][]*models.Note
 		if jobsForGroup != nil && m.showArtifacts {
 			if id, ok := m.jobFileToID[filepath.Base(note.Path)]; ok {
-				if arts, ok := jobsForGroup[id]; ok && len(arts) > 0 {
+				if owned := collectJobArtifacts(jobsForGroup, id); len(owned) > 0 {
 					jobID = id
-					jobArtifacts = arts
+					jobArtifacts = owned
 				}
 			}
 		}
@@ -1893,31 +1962,54 @@ func (m *Model) addNoteNodes(
 			continue
 		}
 
-		// Consume this jobID so the orphan-mop-up subgroup won't re-render it,
-		// even when the note row is folded (so it can't reappear as a sibling).
-		delete(jobsForGroup, jobID)
+		// Consume this job's directories so the orphan-mop-up subgroup won't
+		// re-render them, even when the note row is folded (so they can't
+		// reappear as a sibling).
+		for key := range jobArtifacts {
+			delete(jobsForGroup, key)
+		}
 
 		// Folding the job row itself hides its nested artifacts entirely.
 		if m.collapsedNodes[noteNode.NodeID()] {
 			continue
 		}
 
-		m.addNestedArtifacts(nodes, ws, note, notePrefix.String(), depth+1, workspacePathMap, jobArtifacts)
+		m.addNestedArtifacts(nodes, ws, note, notePrefix.String(), depth+1, hasSearchFilter, workspacePathMap, jobID, jobArtifacts)
 	}
 }
 
-// addNestedArtifacts renders an "artifacts" parent node plus its files directly
-// beneath the owning job note row (Phase 3). The parent collapses by default and
-// honors any later user toggle via seedCollapsedDefault.
+// addNestedArtifacts renders an "artifacts" parent node beneath the owning job
+// note row (Phase 3), holding the job's whole artifact subtree: its own files
+// plus any nested directories (e.g. "workflows/wf_x/agents") rendered as an
+// indented tree. The parent collapses by default and honors any later user
+// toggle via seedCollapsedDefault.
+//
+// jobArtifacts is keyed by path relative to `.artifacts/` — the job's own dir
+// ("<jobID>") plus its descendants ("<jobID>/workflows/…") — so the dir nodes
+// this renders carry the same paths, and therefore the same NodeIDs and labels,
+// as the standalone .artifacts rendering they were lifted out of.
 func (m *Model) addNestedArtifacts(
 	nodes *[]*DisplayNode,
 	ws *workspace.WorkspaceNode,
 	note *models.Note,
 	notePrefix string,
 	noteDepth int,
+	hasSearchFilter bool,
 	workspacePathMap map[string]string,
-	jobArtifacts []*models.Note,
+	jobID string,
+	jobArtifacts map[string][]*models.Note,
 ) {
+	// The plan directory owns the `.artifacts/` dir: job notes sit directly in
+	// it, so the note's parent is the anchor for every artifact path below.
+	planPath := filepath.Dir(note.Path)
+	planGroup := note.Group
+
+	artifactsTree, _ := buildArtifactTree(jobArtifacts)
+	jobNode := artifactsTree.children[jobID]
+	if jobNode == nil {
+		return
+	}
+	totalArtifacts := countArtifactTree(jobNode)
 	// The artifacts node sits one level beneath the note; convert the note's
 	// branch glyphs into vertical continuations, then attach a last-child glyph.
 	childIndent := strings.ReplaceAll(notePrefix, "├ ", "│ ")
@@ -1928,14 +2020,14 @@ func (m *Model) addNestedArtifacts(
 	artifactsPrefix.WriteString("└ ")
 
 	artifactsItem := &tree.Item{
-		Path:     filepath.Join(filepath.Dir(note.Path), ".artifacts-nested", filepath.Base(note.Path)),
+		Path:     filepath.Join(planPath, ".artifacts-nested", filepath.Base(note.Path)),
 		Name:     "artifacts",
 		IsDir:    true,
 		Type:     tree.TypeGroup,
 		Metadata: make(map[string]interface{}),
 	}
 	artifactsItem.Metadata["Workspace"] = ws.Name
-	artifactsItem.Metadata["Group"] = note.Group + "/.artifacts-nested"
+	artifactsItem.Metadata["Group"] = planGroup + "/.artifacts-nested"
 	if icon := getGroupIcon(".artifacts", m.service.NoteTypes); icon != "" {
 		artifactsItem.Metadata["Icon"] = icon
 	}
@@ -1943,22 +2035,28 @@ func (m *Model) addNestedArtifacts(
 		Item:       artifactsItem,
 		Prefix:     artifactsPrefix.String(),
 		Depth:      noteDepth + 1,
-		ChildCount: len(jobArtifacts),
+		ChildCount: totalArtifacts,
 	}
 	*nodes = append(*nodes, artifactsNode)
 
 	artifactsNodeID := artifactsNode.NodeID()
 	m.seedCollapsedDefault(artifactsNodeID)
-	if m.collapsedNodes[artifactsNodeID] {
+	if m.collapsedNodes[artifactsNodeID] && !hasSearchFilter {
 		return
 	}
 
-	m.sortNotes(jobArtifacts)
+	// Nested directories first, then the job's own files — the same order (and
+	// last-child glyph handoff) the standalone .artifacts node uses.
+	ownFiles := jobNode.notes
+	m.renderArtifactTree(nodes, ws, jobNode, artifactsPrefix.String(), noteDepth+2,
+		hasSearchFilter, workspacePathMap, planPath, planGroup, len(ownFiles) > 0)
+
+	m.sortNotes(ownFiles)
 
 	fileIndent := strings.ReplaceAll(artifactsPrefix.String(), "├ ", "│ ")
 	fileIndent = strings.ReplaceAll(fileIndent, "└ ", "  ")
-	for ai, art := range jobArtifacts {
-		isLast := ai == len(jobArtifacts)-1
+	for ai, art := range ownFiles {
+		isLast := ai == len(ownFiles)-1
 		var filePrefix strings.Builder
 		filePrefix.WriteString(fileIndent)
 		if isLast {
@@ -2000,12 +2098,13 @@ func (m *Model) renderSyntheticGroups(
 	workspacePathMap map[string]string,
 	hasFollowingSiblings bool,
 	hasSearchFilter bool,
+	artifactSubgroups map[string]map[string][]*models.Note,
+	artifactGroupKey string,
 ) {
 	buckets := m.partitionNotes(notesInGroup)
 	if len(buckets) == 0 {
-		// Nothing to bucket: fall back to a flat note list. Artifacts stay as a
-		// sibling subgroup under group-by, so no nesting map is passed.
-		m.addNoteNodes(nodes, notesInGroup, ws, groupPrefix, depth, workspacePathMap, hasFollowingSiblings, nil, "")
+		// Nothing to bucket: fall back to a flat note list.
+		m.addNoteNodes(nodes, notesInGroup, ws, groupPrefix, depth, workspacePathMap, hasFollowingSiblings, artifactSubgroups, artifactGroupKey, hasSearchFilter)
 		return
 	}
 
@@ -2050,10 +2149,34 @@ func (m *Model) renderSyntheticGroups(
 		}
 		*nodes = append(*nodes, bucketNode)
 
-		// Render the bucket's notes when expanded. Artifacts remain a sibling
-		// subgroup under group-by, so no nesting map is passed.
+		// Render the bucket's notes when expanded. A job's artifacts nest under
+		// its own row here too: bucketing changes how jobs are ordered, not who
+		// owns the scratch files.
 		if !m.collapsedNodes[bucketNode.NodeID()] || hasSearchFilter {
-			m.addNoteNodes(nodes, bucket.notes, ws, bucketPrefix.String(), depth+1, workspacePathMap, false, nil, "")
+			m.addNoteNodes(nodes, bucket.notes, ws, bucketPrefix.String(), depth+1, workspacePathMap, false, artifactSubgroups, artifactGroupKey, hasSearchFilter)
+			continue
+		}
+		// Collapsing a bucket hides its jobs, so it hides their artifacts too:
+		// claim them here as well, or the mop-up .artifacts node would show the
+		// files of jobs the user just folded away.
+		m.consumeBucketArtifacts(artifactSubgroups[artifactGroupKey], bucket.notes)
+	}
+}
+
+// consumeBucketArtifacts removes the artifact directories owned by these notes
+// from the group's subgroup map without rendering them, so a folded row can
+// neither show its artifacts nor strand them in the standalone .artifacts node.
+func (m *Model) consumeBucketArtifacts(jobsForGroup map[string][]*models.Note, notes []*models.Note) {
+	if len(jobsForGroup) == 0 || !m.showArtifacts {
+		return
+	}
+	for _, note := range notes {
+		id, ok := m.jobFileToID[filepath.Base(note.Path)]
+		if !ok {
+			continue
+		}
+		for key := range collectJobArtifacts(jobsForGroup, id) {
+			delete(jobsForGroup, key)
 		}
 	}
 }
@@ -2371,10 +2494,10 @@ func (m *Model) renderTree(
 
 			hasNotes := len(child.notes) > 0
 
-			// Phase 3 nesting only applies in the flat (non-grouped) note layout.
-			// When a "group by" axis is active we keep artifacts as a sibling
-			// subgroup so the synthetic buckets stay legible.
-			nestArtifacts := hasArtifacts && config.includeArtifacts && (m.groupBy == "" || m.groupBy == "none")
+			// Artifacts nest under their owning job row in every layout,
+			// including the synthetic "group by" buckets — a job's scratch files
+			// belong with the job whichever axis the list is sorted on.
+			nestArtifacts := hasArtifacts && config.includeArtifacts
 
 			// When nesting, determine up front whether any artifacts will remain
 			// as orphans (jobIDs with no matching job note in this group). Only
@@ -2389,32 +2512,32 @@ func (m *Model) renderTree(
 				hasFollowingNoteSiblings := hasArchives || hasClosed || hasArtifactOrphans
 
 				if hasNotes {
+					// Pass the artifact subgroups so owning job rows nest their
+					// artifacts directly; consumed jobIDs are removed in place.
+					subgroupsForNesting := artifactSubgroups
+					if !nestArtifacts {
+						subgroupsForNesting = nil
+					}
 					if m.groupBy != "" && m.groupBy != "none" {
-						m.renderSyntheticGroups(nodes, child.notes, ws, groupPath, config.groupMetadataPrefix+child.fullName, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings, hasSearchFilter)
+						m.renderSyntheticGroups(nodes, child.notes, ws, groupPath, config.groupMetadataPrefix+child.fullName, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings, hasSearchFilter, subgroupsForNesting, artifactGroupKey)
 					} else {
-						// Pass the artifact subgroups so owning job rows nest their
-						// artifacts directly; consumed jobIDs are removed in place.
-						subgroupsForNesting := artifactSubgroups
-						if !nestArtifacts {
-							subgroupsForNesting = nil
-						}
-						m.addNoteNodes(nodes, child.notes, ws, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings, subgroupsForNesting, artifactGroupKey)
+						m.addNoteNodes(nodes, child.notes, ws, childPrefix.String(), depth, workspacePathMap, hasFollowingNoteSiblings, subgroupsForNesting, artifactGroupKey, hasSearchFilter)
 					}
 				}
 
 				fullGroupMetadata := config.groupMetadataPrefix + child.fullName
 
 				if hasArchives {
-					m.addArchiveSubgroup(nodes, ws, childPrefix.String(), archiveSubgroups[child.fullName], hasSearchFilter, workspacePathMap, groupPath, itemName, fullGroupMetadata)
+					m.addArchiveSubgroup(nodes, ws, childPrefix.String(), archiveSubgroups[child.fullName], hasSearchFilter, workspacePathMap, groupPath, itemName, fullGroupMetadata, depth)
 				}
 				if hasClosed {
-					m.addClosedSubgroup(nodes, ws, childPrefix.String(), closedSubgroups[child.fullName], hasSearchFilter, workspacePathMap, groupPath, itemName, fullGroupMetadata)
+					m.addClosedSubgroup(nodes, ws, childPrefix.String(), closedSubgroups[child.fullName], hasSearchFilter, workspacePathMap, groupPath, itemName, fullGroupMetadata, depth)
 				}
 				// Mop up any artifacts not nested under a job row (orphans /
 				// UUID-only dirs / deleted jobs) under the standalone .artifacts
 				// node. After nesting consumed matched jobIDs, re-check the count.
 				if config.includeArtifacts && m.showArtifacts && len(artifactSubgroups[artifactGroupKey]) > 0 {
-					m.addArtifactSubgroup(nodes, ws, childPrefix.String(), artifactSubgroups[artifactGroupKey], hasSearchFilter, workspacePathMap, groupPath, itemName, fullGroupMetadata)
+					m.addArtifactSubgroup(nodes, ws, childPrefix.String(), artifactSubgroups[artifactGroupKey], hasSearchFilter, workspacePathMap, groupPath, itemName, fullGroupMetadata, depth)
 				}
 			}
 		}
