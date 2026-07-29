@@ -364,6 +364,15 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 				info.indicator = theme.IconRepo
 			}
 		}
+	} else if node.IsRepoNotes() {
+		// The ecosystem's sub-repo container: styled like a group heading, but
+		// carrying the repo icon its children use.
+		info.isGroup = true
+		info.name = node.Item.Name
+		info.indicator = theme.IconRepo
+		if node.ChildCount > 0 {
+			info.count = fmt.Sprintf(" (%d)", node.ChildCount)
+		}
 	} else if node.IsGroup() {
 		info.isGroup = true
 		groupName := node.Item.Name

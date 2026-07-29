@@ -9,6 +9,12 @@ import (
 
 // DefaultNoteTypes provides the built-in configuration for "special" note types.
 // User configurations in grove.yml can override these settings.
+//
+// DefaultExpand is false for every built-in type on purpose: opening a notebook
+// should land on the workspace's group headings with their counts — an index —
+// rather than on whichever groups happened to expand into hundreds of note
+// rows. Users who want a group open on arrival set default_expand on it in
+// their notebook config.
 var DefaultNoteTypes = map[string]*coreconfig.NoteTypeConfig{
 	"inbox": {
 		Icon:          theme.IconNoteInbox,
@@ -27,7 +33,7 @@ var DefaultNoteTypes = map[string]*coreconfig.NoteTypeConfig{
 	"plans": {
 		Icon:          theme.IconPlan,
 		IconColor:     "blue",
-		DefaultExpand: true,
+		DefaultExpand: false,
 		SortOrder:     13,
 		Description:   "Directory for structured project plans.",
 	},
@@ -40,7 +46,7 @@ var DefaultNoteTypes = map[string]*coreconfig.NoteTypeConfig{
 	"in_progress": {
 		Icon:          theme.IconNoteInProgress,
 		IconColor:     "blue",
-		DefaultExpand: true,
+		DefaultExpand: false,
 		SortOrder:     20,
 		Description:   "Notes for tasks currently being worked on.",
 	},
@@ -123,7 +129,7 @@ var DefaultNoteTypes = map[string]*coreconfig.NoteTypeConfig{
 		Icon:          theme.IconLightbulb,
 		IconColor:     "cyan",
 		SortOrder:     60,
-		DefaultExpand: true,
+		DefaultExpand: false,
 		Description:   "Project concepts and architectural memory.",
 	},
 	"context": {

@@ -91,6 +91,14 @@ func (n *DisplayNode) IsWorkspace() bool {
 	return n.Item != nil && n.Item.Type == tree.TypeWorkspace
 }
 
+// IsRepoNotes returns true if this is the synthetic container holding an
+// ecosystem's sub-repo workspaces. It is deliberately neither a group nor a
+// workspace: it owns no notes and no on-disk directory, so note actions
+// (paste, create, delete) must not resolve against it.
+func (n *DisplayNode) IsRepoNotes() bool {
+	return n.Item != nil && n.Item.Type == tree.TypeRepoNotes
+}
+
 // IsSeparator returns true if this is a separator node (no Item).
 func (n *DisplayNode) IsSeparator() bool {
 	return n.Item == nil
@@ -465,6 +473,29 @@ func (m *Model) findNode(match func(*DisplayNode) bool) int {
 	return -1
 }
 
+// foldAncestorsOf returns the fold IDs of every foldable ancestor row of the
+// first node matching pred, derived from the current display tree by walking
+// backwards through strictly shallower rows.
+func (m *Model) foldAncestorsOf(pred func(*DisplayNode) bool) []string {
+	idx := m.findNode(pred)
+	if idx < 0 {
+		return nil
+	}
+	depth := m.displayNodes[idx].Depth
+	var ids []string
+	for i := idx - 1; i >= 0 && depth > 0; i-- {
+		node := m.displayNodes[i]
+		if node.Item == nil || node.Depth >= depth {
+			continue
+		}
+		depth = node.Depth
+		if node.IsFoldable() {
+			ids = append(ids, node.NodeID())
+		}
+	}
+	return ids
+}
+
 // RevealGroup folds the whole tree shut, then re-opens exactly the ancestors of
 // workspaceName/group and parks the cursor on that group's row — the "take me
 // to this section with everything else out of the way" jump behind treemux's
@@ -515,10 +546,28 @@ func (m *Model) RevealGroup(workspaceName, group, priority string) bool {
 
 func (m *Model) revealGroupRow(workspaceName, group string) bool {
 	// Start from a fully-expanded tree so closeAllFolds can see — and therefore
-	// collapse — every foldable row, not just the ones open right now.
-	m.collapsedNodes = make(map[string]bool)
-	m.rebuildTree()
+	// collapse — every foldable row, not just the ones open right now. Two
+	// passes: the first lets any not-yet-seen default-collapse seed (.archive,
+	// .artifacts, repos_notes) fire and be recorded as seen, so the second
+	// clear yields a tree that really is fully expanded.
+	for i := 0; i < 2; i++ {
+		m.collapsedNodes = make(map[string]bool)
+		m.rebuildTree()
+	}
+
+	// A sub-repo workspace only has a row while its ecosystem and that
+	// ecosystem's repos container are open, so record its ancestors while
+	// everything is still visible and re-open exactly those after folding shut.
+	ancestors := m.foldAncestorsOf(func(n *DisplayNode) bool {
+		return n.IsWorkspace() && n.Item.Name == workspaceName
+	})
 	m.closeAllFolds()
+	if len(ancestors) > 0 {
+		for _, id := range ancestors {
+			delete(m.collapsedNodes, id)
+		}
+		m.rebuildTree()
+	}
 
 	matchers := []func(*DisplayNode) bool{
 		func(n *DisplayNode) bool { return n.IsWorkspace() && n.Item.Name == workspaceName },
