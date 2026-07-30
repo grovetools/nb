@@ -917,8 +917,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			return m, nil
 		case keymap.ChordMatched:
 			// Re-synthesize the completed chord's canonical key so the dispatch
-			// below resolves it via key.Matches.
-			if len(matched.Keys()) > 0 {
+			// below resolves it via key.Matches — but ONLY when the pressed key
+			// is not already one of the matched binding's keys.
+			//
+			// The unconditional form assumed a chord-only invariant: that
+			// Keys()[0] IS the chord, so rewriting is a no-op for anything that
+			// could have matched. Top now breaks that assumption — it carries
+			// "gg" AND the folded flat "home" (canon 60 §7.1) — and an
+			// unguarded rewrite silently turns every flat press into the chord.
+			// Harmless where both keys route to the same handler, wrong in
+			// general, and the guard costs one comparison.
+			if len(matched.Keys()) > 0 && !key.Matches(msg, matched) {
 				msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(matched.Keys()[0])}
 			}
 			// gg (top) and the z* folds are executed by the views sub-model,

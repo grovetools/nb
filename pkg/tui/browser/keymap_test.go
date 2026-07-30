@@ -42,6 +42,13 @@ func TestChordConfigKeyStability(t *testing.T) {
 		"jump_to_artifacts": "ga",
 		"focus_archive":     "gv",
 		"copy":              "yy",
+		// Canon 60 group 5: RULE T display toggles and the c… note mutators.
+		"sort":               "ts",
+		"cycle_grouping":     "to",
+		"toggle_git_changes": "tG",
+		"rename":             "cn",
+		"create_plan":        "cp",
+		"promote_to_job":     "cj",
 	}
 	for cfg, key := range want {
 		keys, ok := ck[cfg]
@@ -79,15 +86,36 @@ func TestNoEnabledFlatPrefixOrShadow(t *testing.T) {
 	}
 }
 
-// TestNamespacesMembership checks the two chord namespaces and their members.
+// TestNamespacesMembership checks the three chord namespaces and their members,
+// and — the part that actually bites — that every chord prefix in use is
+// DECLARED. ProcessChord only arms prefixes handed to it via Namespaces(), so a
+// chord whose prefix has no namespace never fires at all.
 func TestNamespacesMembership(t *testing.T) {
 	km := NewKeyMap(nil)
 	ns := km.Namespaces()
-	if len(ns) != 2 {
-		t.Fatalf("want 2 namespaces (t, g), got %d", len(ns))
+	if len(ns) != 3 {
+		t.Fatalf("want 3 namespaces (t, c, g), got %d", len(ns))
 	}
-	if ns[0].Prefix != "t" || ns[1].Prefix != "g" {
-		t.Fatalf("want prefixes t,g, got %q,%q", ns[0].Prefix, ns[1].Prefix)
+	if ns[0].Prefix != "t" || ns[1].Prefix != "c" || ns[2].Prefix != "g" {
+		t.Fatalf("want prefixes t,c,g, got %q,%q,%q", ns[0].Prefix, ns[1].Prefix, ns[2].Prefix)
+	}
+
+	// Completeness: every namespace MEMBER's keys must sit under a declared
+	// prefix. (The flat vim chords — dd, yy, zo/zc/za/zR/zM — reach the engine
+	// as ProcessChord's `extra` arguments instead of via a namespace; update.go
+	// pins that list.)
+	declared := map[string]bool{}
+	for _, n := range ns {
+		declared[n.Prefix] = true
+	}
+	for _, n := range ns {
+		for _, b := range n.Bindings {
+			for _, k := range b.Keys() {
+				if len([]rune(k)) == 2 && !declared[string([]rune(k)[0])] {
+					t.Errorf("chord %q uses prefix %q with no declared namespace — it can never arm", k, string([]rune(k)[0]))
+				}
+			}
+		}
 	}
 
 	firstKey := func(b interface{ Keys() []string }) string {
@@ -100,13 +128,22 @@ func TestNamespacesMembership(t *testing.T) {
 	for _, b := range ns[0].Bindings {
 		toggleKeys[firstKey(b)] = true
 	}
-	for _, k := range []string{"ta", "tj", "tg", "th", "tc", "tp"} {
+	for _, k := range []string{"ta", "tj", "tg", "th", "tc", "tp", "ts", "to", "tG"} {
 		if !toggleKeys[k] {
 			t.Errorf("Toggle namespace missing member %q", k)
 		}
 	}
-	gotoKeys := map[string]bool{}
+	changeKeys := map[string]bool{}
 	for _, b := range ns[1].Bindings {
+		changeKeys[firstKey(b)] = true
+	}
+	for _, k := range []string{"cn", "cp", "cj"} {
+		if !changeKeys[k] {
+			t.Errorf("Change namespace missing member %q", k)
+		}
+	}
+	gotoKeys := map[string]bool{}
+	for _, b := range ns[2].Bindings {
 		gotoKeys[firstKey(b)] = true
 	}
 	for _, k := range []string{"gg", "ga", "gv"} {
