@@ -38,6 +38,12 @@ func TestChordResolution(t *testing.T) {
 		wantHelp string
 	}{
 		{"toggle archives", []string{"t", "a"}, "ta", "toggle archives"},
+		{"toggle sort", []string{"t", "s"}, "ts", "toggle sort order"},
+		{"cycle grouping", []string{"t", "o"}, "to", "cycle group-by (none/date/status/tag/priority)"},
+		{"git changes filter", []string{"t", "G"}, "tG", "git changes"},
+		{"rename note", []string{"c", "n"}, "cn", "rename note"},
+		{"promote to plan", []string{"c", "p"}, "cp", "promote note to plan"},
+		{"promote to job", []string{"c", "j"}, "cj", "promote note to job"},
 		{"goto top", []string{"g", "g"}, "gg", "top"},
 		{"goto artifacts", []string{"g", "a"}, "ga", "goto job artifacts"},
 		{"copy yank", []string{"y", "y"}, "yy", "copy selected"},
@@ -68,7 +74,7 @@ func TestChordResolution(t *testing.T) {
 }
 
 // TestTogglePrefixArmsPopup pins that a lone "t" arms a pending namespace whose
-// ResolvePending popup lists the Toggle group with rows a/b/g/h/c/p.
+// ResolvePending popup lists the Toggle group with rows a/j/g/h/c/p/s/o/G.
 func TestTogglePrefixArmsPopup(t *testing.T) {
 	km := NewKeyMap(nil)
 	host := keymap.NewWhichKeyHost(nil, km.Namespaces()...)
@@ -91,7 +97,10 @@ func TestTogglePrefixArmsPopup(t *testing.T) {
 	if group.Title != "Toggle (t…)" {
 		t.Errorf("want group title %q, got %q", "Toggle (t…)", group.Title)
 	}
-	wantRows := map[string]bool{"a": true, "j": true, "g": true, "h": true, "c": true, "p": true}
+	wantRows := map[string]bool{
+		"a": true, "j": true, "g": true, "h": true, "c": true, "p": true,
+		"s": true, "o": true, "G": true,
+	}
 	got := map[string]bool{}
 	for _, r := range group.Rows {
 		got[r.Keys] = true
@@ -118,5 +127,80 @@ func TestParseSearchInputTag(t *testing.T) {
 	}
 	if query != "rest" {
 		t.Errorf("want within-tag query %q, got %q", "rest", query)
+	}
+}
+
+// TestFlatHomeAndEndSurviveTheChordSeam is the regression guard for the
+// re-synthesis bug the canon-60 home/end fold makes reachable. Top now carries
+// a chord ("gg") AND a flat key ("home"); the seam used to rewrite every matched
+// chord to Keys()[0] unconditionally, so a flat press was silently replaced by
+// the chord before dispatch. The guard only re-synthesizes when the pressed key
+// is not already one of the matched binding's keys.
+func TestFlatHomeAndEndSurviveTheChordSeam(t *testing.T) {
+	km := NewKeyMap(nil)
+	extra := chordExtra(km)
+
+	// home matches Top through the sequence engine and must stay "home".
+	host := keymap.NewWhichKeyHost(nil, km.Namespaces()...)
+	msg := tea.KeyMsg{Type: tea.KeyHome}
+	res, matched, _ := host.ProcessChord(msg, extra...)
+	if res != keymap.ChordMatched {
+		t.Fatalf("flat home: want ChordMatched, got %v", res)
+	}
+	if !key.Matches(msg, matched) {
+		t.Fatal("flat home matched a binding that does not carry it — the guard would rewrite the key away")
+	}
+
+	// end is NOT in the chord set at all (Bottom is dispatched flat), so the
+	// seam must pass it through untouched.
+	host = keymap.NewWhichKeyHost(nil, km.Namespaces()...)
+	endMsg := tea.KeyMsg{Type: tea.KeyEnd}
+	if res, _, _ = host.ProcessChord(endMsg, extra...); res != keymap.ChordNone {
+		t.Fatalf("flat end: want ChordNone, got %v", res)
+	}
+	if !key.Matches(endMsg, km.Bottom) {
+		t.Fatal("end no longer reaches Bottom — the home/end fold is incomplete")
+	}
+}
+
+// TestHomeEndConfigKeysAreGone pins the other half of canon 60 §7.1: the
+// standalone Home/End bindings are deleted, not aliased. An "end"->"bottom"
+// NormalizeAction alias would break the currently-clean `bottom` consistency
+// check, because a separate binding on keys ["end"] matches none of
+// StandardActions{"bottom", ["G"]}.
+func TestHomeEndConfigKeysAreGone(t *testing.T) {
+	ck := configKeys(t)
+	for _, dead := range []string{"home", "end"} {
+		if keys, ok := ck[dead]; ok {
+			t.Errorf("ConfigKey %q is still exported with keys %v — fold it into top/bottom instead", dead, keys)
+		}
+	}
+	if got := ck["top"]; len(got) != 2 || got[0] != "gg" || got[1] != "home" {
+		t.Errorf("top keys = %v, want [gg home]", got)
+	}
+	if got := ck["bottom"]; len(got) != 2 || got[0] != "G" || got[1] != "end" {
+		t.Errorf("bottom keys = %v, want [G end]", got)
+	}
+}
+
+// TestSearchPrecedenceRule pins canon 60 §3.3 at the source: nb binds "/" , so
+// n/N belong to search-next/search-prev and creation moved to the Ring-1 a/A
+// pair. This is what resolves nb-browser's only intra-TUI key conflict.
+func TestSearchPrecedenceRule(t *testing.T) {
+	km := NewKeyMap(nil)
+	if got := km.CreateNote.Keys(); len(got) != 1 || got[0] != "a" {
+		t.Errorf("CreateNote keys = %v, want [a]", got)
+	}
+	if got := km.CreateNoteInbox.Keys(); len(got) != 1 || got[0] != "A" {
+		t.Errorf("CreateNoteInbox keys = %v, want [A]", got)
+	}
+	if got := km.Base.SearchNext.Keys(); len(got) != 1 || got[0] != "n" {
+		t.Errorf("SearchNext keys = %v, want [n]", got)
+	}
+	// Archive stays FLAT on X: it is both a ReservedKeys entry and a
+	// StandardActions entry, so moving it to a chord would break the
+	// currently-clean `archive` canonical-consistency check (§3.1 rejects `ca`).
+	if got := km.Archive.Keys(); len(got) != 1 || got[0] != "X" {
+		t.Errorf("Archive keys = %v, want flat [X]", got)
 	}
 }

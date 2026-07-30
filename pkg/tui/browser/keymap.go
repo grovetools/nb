@@ -64,7 +64,8 @@ func (k KeyMap) ShortHelp() []key.Binding {
 // Namespaces returns the which-key chord namespaces for the browser TUI, built
 // from the named KeyMap fields (so any user override applied by ApplyTUIOverrides
 // is reflected — Phase-1 §4 ConfigKey-stability rule). The "t" Toggle namespace
-// groups ta/tb/tg/th/tc/tp; the "g" Goto namespace groups gg (Base.Top), ga, gv.
+// groups ta/tj/tg/th/tc/tp plus the canon-60 additions ts/to/tG; the "c" Change
+// namespace groups cn/cp/cj; the "g" Goto namespace groups gg (Base.Top), ga, gv.
 // The update loop arms them through the shared WhichKeyHost sequence engine and
 // View() renders the popup. Order here is the wire order ProcessChord relies on.
 func (k KeyMap) Namespaces() []keymap.Namespace {
@@ -72,6 +73,10 @@ func (k KeyMap) Namespaces() []keymap.Namespace {
 		{Prefix: "t", Label: "Toggle", Bindings: []key.Binding{
 			k.ToggleArchives, k.ToggleArtifacts, k.ToggleGlobal,
 			k.ToggleHold, k.ToggleColumns, k.Base.TogglePreview,
+			k.Sort, k.CycleGrouping, k.ToggleGitChanges,
+		}},
+		{Prefix: "c", Label: "Change", Bindings: []key.Binding{
+			k.Rename, k.CreatePlan, k.PromoteToJob,
 		}},
 		{Prefix: "g", Label: "Goto", Bindings: []key.Binding{
 			k.Base.Top, k.JumpToArtifacts, k.FocusArchive,
@@ -104,16 +109,19 @@ func (k KeyMap) Sections() []keymap.Section {
 		// in the Navigation section, so exporting it again would mint a duplicate
 		// `top` ConfigKey and trip ValidateRegistry's duplicate-ConfigKey error.
 		keymap.NewSection("Goto (g…)", k.JumpToArtifacts, k.FocusArchive),
-		keymap.NewSection(keymap.SectionFilter,
-			k.FilterByTag, k.ToggleGitChanges, k.Sort, k.CycleGrouping,
-		),
-		// Toggle (t…) namespace section (ta/tb/tg/th/tc/tp), rendered as
+		// Filter keeps only the Ring-3 tag filter; sort/grouping/git-changes are
+		// display toggles and moved into t… (canon 60 RULE T).
+		keymap.NewSection(keymap.SectionFilter, k.FilterByTag),
+		// Toggle (t…) namespace section (ta/tj/tg/th/tc/tp/ts/to/tG), rendered as
 		// "Toggle (t…)" via Namespace.Section().
 		ns[0].Section(),
-		// TUI-specific sections use explicit icons
+		// Change (c…) namespace section (cn/cp/cj).
+		ns[1].Section(),
+		// TUI-specific sections use explicit icons. The three note MUTATORS
+		// (rename / promote-to-plan / promote-to-job) live in the c… section
+		// above; what remains here is creation plus the priority pair.
 		keymap.NewSectionWithIcon("Notes", theme.IconNote,
 			k.CreateNote, k.CreateNoteInbox, k.CreateNoteGlobal,
-			k.CreatePlan, k.PromoteToJob, k.Rename,
 			k.PriorityUp, k.PriorityDown,
 		),
 		// CopyPath (ctrl+y) is already surfaced by Base.ActionsSection above;
@@ -176,24 +184,28 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("&"),
 			key.WithHelp("&", "filter by tag"),
 		),
+		// Toggle (t…) namespace member (canon 60 RULE T; was the `<` / `>` pair,
+		// which the handler never distinguished). Chord-only, no flat aliases
+		// (sign-off E4) — and it resolves the `<`/`>` cross-TUI conflicts.
+		// Uppercase-in-chord keeps it distinct from `tg` (toggle global) and is
+		// established house style (flow-status ships cM/cA).
 		ToggleGitChanges: key.NewBinding(
-			key.WithKeys("<", ">"),
-			// Help label uses "/" so it is treated as an alternate-key list and
-			// not audited as a single-key label (keys are "<" and ">").
-			key.WithHelp("</>", "git changes"),
+			key.WithKeys("tG"),
+			key.WithHelp("tG", "git changes"),
 		),
+		// Toggle (t…) namespace member (canon 60 RULE T; was flat `s`, which is
+		// Ring-1 sync here — `S` — and sort-ish in half the fleet).
 		Sort: key.NewBinding(
-			key.WithKeys("s"),
-			key.WithHelp("s", "toggle sort order"),
+			key.WithKeys("ts"),
+			key.WithHelp("ts", "toggle sort order"),
 		),
-		// NOTE: The briefing requested default key "g", but nb's browser already
-		// binds the "gg" go-to-top sequence; a lone "g" is always consumed as the
-		// prefix of that sequence and can never trigger a bare-key action. Per the
-		// "prefer real code over the plan, and note the deviation" rule we bind
-		// CycleGrouping to "o" (unused) instead. Users can remap via config.
+		// Toggle (t…) namespace member (canon 60 RULE T; was flat `o`, which is
+		// Ring-1 "open / primary row action" fleet-wide, §5.1). The historical
+		// note here explained why grouping could not be flat `g` — moot now that
+		// every cycle lives behind t….
 		CycleGrouping: key.NewBinding(
-			key.WithKeys("o"),
-			key.WithHelp("o", "cycle group-by (none/date/status/tag/priority)"),
+			key.WithKeys("to"),
+			key.WithHelp("to", "cycle group-by (none/date/status/tag/priority)"),
 		),
 		// Toggle (t…) namespace members. Chord-only — the legacy flat aliases
 		// (A/b/~/H/V) were dropped (sign-off E4, no deprecation window). nb has no
@@ -218,30 +230,42 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("tc"),
 			key.WithHelp("tc", "toggle columns"),
 		),
-		// Note operations
+		// Note operations.
+		//
+		// Creation keys are Ring-1 and flat BY NAME (canon 60 §5.1): `a` creates
+		// the TUI's primary noun, `A` is the secondary create form. The swap off
+		// `n` is the search-precedence rule (§3.3): in a TUI that binds `/`,
+		// `n`/`N` belong to search-next/search-prev, which is also what resolves
+		// nb-browser's only intra-TUI key conflict (n = create_note vs the
+		// promoted Base.SearchNext).
 		CreateNote: key.NewBinding(
-			key.WithKeys("n"),
-			key.WithHelp("n", "create note at cursor"),
+			key.WithKeys("a"),
+			key.WithHelp("a", "create note at cursor"),
 		),
 		CreateNoteInbox: key.NewBinding(
-			key.WithKeys("a"),
-			key.WithHelp("a", "inbox note (quick capture)"),
+			key.WithKeys("A"),
+			key.WithHelp("A", "inbox note (quick capture)"),
 		),
 		CreateNoteGlobal: key.NewBinding(
 			key.WithKeys("I"),
 			key.WithHelp("I", "global note"),
 		),
+		// Change (c…) namespace members (canon 60 §3.1/§4.3). Chord-only, no flat
+		// aliases (sign-off E4). These are note MUTATORS, not creations, so they
+		// belong in c… while `a`/`A`/`I` stay flat. `cn` is an exact cross-TUI
+		// match with flow-status's landed cn=rename; it needs the same deviation
+		// entry flow-status has. Retiring flat P/J clears two 3-way conflicts.
 		CreatePlan: key.NewBinding(
-			key.WithKeys("P"),
-			key.WithHelp("P", "promote note to plan"),
+			key.WithKeys("cp"),
+			key.WithHelp("cp", "promote note to plan"),
 		),
 		PromoteToJob: key.NewBinding(
-			key.WithKeys("J"),
-			key.WithHelp("J", "promote note to job"),
+			key.WithKeys("cj"),
+			key.WithHelp("cj", "promote note to job"),
 		),
 		Rename: key.NewBinding(
-			key.WithKeys("R"),
-			key.WithHelp("R", "rename note"),
+			key.WithKeys("cn"),
+			key.WithHelp("cn", "rename note"),
 		),
 		PriorityUp: key.NewBinding(
 			key.WithKeys("{"),
@@ -338,6 +362,26 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		key.WithHelp("enter", "open in own pane / confirm"),
 	)
 	km.Base.Yank.SetEnabled(false)
+
+	// Canon 60 §7.1: fold the standalone Home/End bindings into Top/Bottom and
+	// delete their ConfigKeys, rather than aliasing "end"->"bottom" in
+	// NormalizeAction. The alias looks like the obvious fix and is wrong: a
+	// separate `end` binding would normalize to `bottom` on keys ["end"], match
+	// none of StandardActions{"bottom", ["G"]}, and flip the currently-clean
+	// bottom consistency check to false. Folding keeps one canonical motion per
+	// direction with both spellings on it. Home/End were dead here anyway —
+	// nothing dispatched them — so this also makes the keys work for the first
+	// time. flow-plan-add already ships exactly this shape.
+	km.Base.Top = key.NewBinding(
+		key.WithKeys("gg", "home"),
+		key.WithHelp("gg/home", "top"),
+	)
+	km.Base.Bottom = key.NewBinding(
+		key.WithKeys("G", "end"),
+		key.WithHelp("G/end", "bottom"),
+	)
+	km.Base.Home.SetEnabled(false)
+	km.Base.End.SetEnabled(false)
 
 	// Open-mode split (hosted in treemux): enter opens the note in its own
 	// pinned per-file pane; e quick-opens it in the host's singleton Editor

@@ -439,10 +439,16 @@ func (m Model) View() string {
 	styledView := lipgloss.NewStyle().PaddingLeft(2).MaxWidth(m.width).Render(fullView)
 	frame := "\n" + styledView
 	// Composite the bottom-anchored which-key popup onto the final frame while a
-	// t…/g… namespace prefix is armed (past the show-delay). Returns frame
+	// t…/c…/g… namespace prefix is armed (past the show-delay). Returns frame
 	// unchanged otherwise; the delayed keymap.WhichKeyShowMsg tick forces the
 	// re-render that reveals it.
-	return m.whichKey.RenderOverlay(frame, lipgloss.Width(frame), *theme.DefaultTheme)
+	//
+	// The vertical budget is passed explicitly (RenderOverlayAvail): the frame
+	// is assembled from a header + a viewport-sized list + a status row and can
+	// be shorter than the terminal, and plain RenderOverlay clamps the popup to
+	// the frame's own line count — which truncates the nine-member t… namespace
+	// despite ample room on screen.
+	return m.whichKey.RenderOverlayAvail(frame, lipgloss.Width(frame), m.height, *theme.DefaultTheme)
 }
 
 // alignScrollIndicator pins the list's "(1-17 of 40)" position token to the
