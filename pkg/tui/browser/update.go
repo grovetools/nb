@@ -358,6 +358,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
+		// Only keep the 10fps tick alive while the spinner is actually drawn.
+		// View() renders it exactly when loadingCount > 0 (the "Loading
+		// notebook..." splash and the status bar), so once the last in-flight
+		// load lands, re-arming buys nothing but a full Model.View() — tree
+		// walk, plan-status lookups and all — ten times a second, forever.
+		// Every site that starts a load batches m.spinner.Tick alongside the
+		// fetch, and that fresh untagged tick is always accepted, so the
+		// animation restarts on its own whenever there is something to animate.
+		if m.loadingCount <= 0 {
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
