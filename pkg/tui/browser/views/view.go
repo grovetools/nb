@@ -476,6 +476,11 @@ func (m *Model) getNodeRenderInfo(node *DisplayNode) nodeRenderInfo {
 			}
 			info.suffix += fmt.Sprintf(" [%d %s]", count, noun)
 		}
+		// PR-state glyphs from the note's own `prs:` join. Local frontmatter
+		// only — the TUI issues no network calls for these.
+		if glyphs := renderPRStateGlyphs(note.PRStates); glyphs != "" {
+			info.suffix += " " + glyphs
+		}
 	}
 
 	// Add link suffix if the node is linked
@@ -671,6 +676,55 @@ func renderPriorityBadge(priority string) string {
 		style = style.Bold(true)
 	}
 	return style.Render("[" + priority + "]")
+}
+
+// PR-state glyphs for the ticket↔PR join. One glyph per PR, in note order, so
+// a ticket's row shows at a glance how many PRs it has and where they stand.
+//
+// The unknown glyph is deliberately distinct and muted: an unobserved or
+// unrecognized state must never read as merged or green (STATE.md D4). That is
+// also why there is no "assume open" fallback.
+const (
+	glyphPROpen    = "○"
+	glyphPRDraft   = "◌"
+	glyphPRMerged  = "●"
+	glyphPRClosed  = "✕"
+	glyphPRUnknown = "?"
+)
+
+// renderPRStateGlyphs renders one colored glyph per PR state, bracketed, or ""
+// when the note has no `prs:` entries. States are matched case-insensitively
+// because they are hand-editable.
+func renderPRStateGlyphs(states []string) string {
+	if len(states) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(theme.DefaultTheme.Muted.Render("["))
+	for _, state := range states {
+		glyph, color := prStateGlyph(state)
+		sb.WriteString(lipgloss.NewStyle().Foreground(color).Render(glyph))
+	}
+	sb.WriteString(theme.DefaultTheme.Muted.Render("]"))
+	return sb.String()
+}
+
+// prStateGlyph maps one PR state to its glyph and color. Anything not
+// recognized — including the empty string — falls through to unknown.
+func prStateGlyph(state string) (string, lipgloss.TerminalColor) {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "open":
+		return glyphPROpen, theme.DefaultTheme.Colors.Green
+	case "draft":
+		return glyphPRDraft, theme.DefaultTheme.Colors.MutedText
+	case "merged":
+		return glyphPRMerged, theme.DefaultTheme.Colors.Violet
+	case "closed":
+		return glyphPRClosed, theme.DefaultTheme.Colors.Red
+	default:
+		return glyphPRUnknown, theme.DefaultTheme.Colors.MutedText
+	}
 }
 
 // renderGitStatusIndicator returns a styled string for the given git status code.

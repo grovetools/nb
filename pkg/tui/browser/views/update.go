@@ -3373,6 +3373,9 @@ func ItemToNote(item *tree.Item) *models.Note {
 	if priority, ok := item.Metadata["Priority"].(string); ok {
 		note.Priority = priority
 	}
+	if prStates, ok := item.Metadata["PRStates"].([]string); ok {
+		note.PRStates = prStates
+	}
 	if created, ok := item.Metadata["Created"].(time.Time); ok {
 		note.CreatedAt = created
 	} else {
@@ -3429,6 +3432,9 @@ func noteToItem(note *models.Note) *tree.Item {
 	item.Metadata["Tags"] = note.Tags
 	item.Metadata["PlanRef"] = note.PlanRef
 	item.Metadata["Priority"] = note.Priority
+	if len(note.PRStates) > 0 {
+		item.Metadata["PRStates"] = note.PRStates
+	}
 	item.Metadata["Created"] = note.CreatedAt
 	item.Metadata["TodoOpen"] = note.TodoOpen
 	item.Metadata["TodoDone"] = note.TodoDone

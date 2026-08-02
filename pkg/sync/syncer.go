@@ -23,6 +23,20 @@ type Syncer struct {
 	svc               *service.Service
 	providerFactories map[string]ProviderFactory
 	logger            *logrus.Entry
+
+	// writeNote persists a note's frontmatter and body. It exists so passes
+	// that only rewrite frontmatter can be exercised against fixture notes
+	// without standing up a full service; nil means "use svc".
+	writeNote func(path string, fm *frontmatter.Frontmatter, body string) error
+}
+
+// persistNote writes a note back to disk through whichever writer is
+// configured. Callers must have already confirmed something changed.
+func (s *Syncer) persistNote(path string, fm *frontmatter.Frontmatter, body string) error {
+	if s.writeNote != nil {
+		return s.writeNote(path, fm, body)
+	}
+	return s.svc.UpdateNoteWithContent(path, fm, body)
 }
 
 // NewSyncer creates a new Syncer.
@@ -137,6 +151,14 @@ func (s *Syncer) syncWithProvider(
 		}
 	}
 
+	// The ticket↔PR join, built once per provider pass: it lets a mirrored PR
+	// note carry the plan_ref of the ticket whose branch the PR is built on.
+	// Only meaningful when PRs are mirrored at all.
+	var planLinks *planLinkIndex
+	if config.PRsType != "" {
+		planLinks = buildPlanLinkIndex(allLocalNotes)
+	}
+
 	// 3. Sync existing items (updates and remote deletions)
 	allSyncedIDs := make(map[string]bool)
 	for id := range remoteItemsMap {
@@ -166,7 +188,7 @@ func (s *Syncer) syncWithProvider(
 			if remoteItem.UpdatedAt.After(fileMtime) {
 				// Remote is newer ("pull")
 				if s.needsUpdate(localNote, remoteItem) {
-					if err := s.updateNoteFromItem(localNote, remoteItem); err != nil {
+					if err := s.updateNoteFromItem(localNote, remoteItem, planLinks); err != nil {
 						report.Failed++
 					} else {
 						report.Updated++
@@ -207,7 +229,7 @@ func (s *Syncer) syncWithProvider(
 							report.Failed++
 						} else {
 							// Update local note with new sync state from remote, clearing local content since we just pushed it
-							if err := s.updateNoteFromItemPreserveLocal(localNote, updatedRemoteItem, false); err != nil {
+							if err := s.updateNoteFromItemPreserveLocal(localNote, updatedRemoteItem, false, planLinks); err != nil {
 								report.Failed++
 							} else {
 								report.Updated++
@@ -218,7 +240,7 @@ func (s *Syncer) syncWithProvider(
 					// No local comment, but file is modified.
 					// Rebuild the synced section from remote to restore any deleted comments
 					// and preserve any local content after the marker.
-					if err := s.updateNoteFromItem(localNote, remoteItem); err != nil {
+					if err := s.updateNoteFromItem(localNote, remoteItem, planLinks); err != nil {
 						report.Failed++
 					} else {
 						report.Updated++
@@ -239,7 +261,7 @@ func (s *Syncer) syncWithProvider(
 			} else {
 				continue // Skip
 			}
-			_, err := s.createNoteFromItem(ctx, remoteItem, noteType)
+			_, err := s.createNoteFromItem(ctx, remoteItem, noteType, planLinks)
 			if err != nil {
 				report.Failed++
 			} else {
@@ -311,6 +333,11 @@ func (s *Syncer) syncWithProvider(
 		}
 	}
 
+	// 5. Freshness-only pass over `prs:` join entries. Read-only, degrades to
+	// a no-op when the provider cannot read PR state, and never moves a note
+	// between directories (D5).
+	report.PRs = s.refreshPRStates(allLocalNotes, provider)
+
 	s.logger.WithFields(logrus.Fields{
 		"provider":  provider.Name(),
 		"workspace": ctx.CurrentWorkspace.Name,
@@ -344,7 +371,12 @@ func formatComments(comments []*Comment) string {
 }
 
 // createNoteFromItem creates a new note from a sync.Item and returns the note path.
-func (s *Syncer) createNoteFromItem(ctx *service.WorkspaceContext, item *Item, noteType models.NoteType) (string, error) {
+func (s *Syncer) createNoteFromItem(
+	ctx *service.WorkspaceContext,
+	item *Item,
+	noteType models.NoteType,
+	planLinks *planLinkIndex,
+) (string, error) {
 	s.logger.WithFields(logrus.Fields{
 		"remote_id":  item.ID,
 		"remote_url": item.URL,
@@ -353,6 +385,7 @@ func (s *Syncer) createNoteFromItem(ctx *service.WorkspaceContext, item *Item, n
 	}).Info("Creating local note from remote item")
 
 	fm := s.buildFrontmatter(item)
+	s.applyPlanLink(fm, item, planLinks)
 
 	// Build the body with the main content, comments, and sync marker
 	var bodyBuilder strings.Builder
@@ -367,13 +400,39 @@ func (s *Syncer) createNoteFromItem(ctx *service.WorkspaceContext, item *Item, n
 	return note.Path, nil
 }
 
+// applyPlanLink stamps the mirrored PR note's symmetric plan_ref — the
+// ticket↔PR join seen from the PR side. It only ever FILLS an empty plan_ref:
+// an existing value (a human's, or a previous pass's) is authoritative, and
+// clearing one here would silently unlink a ticket. Purely frontmatter; it
+// drives no lifecycle transition and moves no note between directories (D5).
+func (s *Syncer) applyPlanLink(fm *frontmatter.Frontmatter, item *Item, planLinks *planLinkIndex) {
+	if fm == nil || fm.PlanRef != "" {
+		return
+	}
+	planRef := planLinks.planRefForItem(item)
+	if planRef == "" {
+		return
+	}
+	fm.PlanRef = planRef
+	s.logger.WithFields(logrus.Fields{
+		"remote_id":   item.ID,
+		"head_branch": item.HeadBranch,
+		"plan_ref":    planRef,
+	}).Debug("Linked mirrored PR note to promoted ticket's plan")
+}
+
 // updateNoteFromItem updates an existing note from a sync.Item.
-func (s *Syncer) updateNoteFromItem(note *models.Note, item *Item) error {
-	return s.updateNoteFromItemPreserveLocal(note, item, true)
+func (s *Syncer) updateNoteFromItem(note *models.Note, item *Item, planLinks *planLinkIndex) error {
+	return s.updateNoteFromItemPreserveLocal(note, item, true, planLinks)
 }
 
 // updateNoteFromItemPreserveLocal updates an existing note from a sync.Item with option to preserve local content.
-func (s *Syncer) updateNoteFromItemPreserveLocal(note *models.Note, item *Item, preserveLocal bool) error {
+func (s *Syncer) updateNoteFromItemPreserveLocal(
+	note *models.Note,
+	item *Item,
+	preserveLocal bool,
+	planLinks *planLinkIndex,
+) error {
 	content, err := os.ReadFile(note.Path)
 	if err != nil {
 		return fmt.Errorf("could not read existing note content: %w", err)
@@ -439,6 +498,9 @@ func (s *Syncer) updateNoteFromItemPreserveLocal(note *models.Note, item *Item, 
 		fm.Remote.Assignees = item.Assignees
 		fm.Remote.Milestone = item.Milestone
 	}
+
+	// Backfill the join on notes mirrored before the link existed.
+	s.applyPlanLink(fm, item, planLinks)
 
 	s.logger.WithFields(logrus.Fields{
 		"remote_id":    item.ID,

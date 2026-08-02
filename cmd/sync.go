@@ -28,14 +28,74 @@ import (
 
 var syncUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.sync")
 
-// NewSyncCmd creates the `sync` subcommand.
+// The naming split (concepts/hosted-git-and-prs/forge-provider.md, "Naming
+// cleanup"). Two unrelated things were both called "sync" and were nested
+// inside each other:
+//
+//   - forge/GitHub MIRRORING — in-process, talks to `gh`, mirrors issues and
+//     PRs into notes. Canonical home: `nb remote sync`.
+//   - notebook DOCUMENT SYNC — daemon-proxied over the groved socket; history,
+//     restore, adopt, incoming, conflicts. Canonical home: `nb sync <sub>`.
+//
+// Before the split the document-sync verbs were only reachable as
+// `nb remote sync <sub>` — filed under a "remote integrations" family they
+// have nothing to do with, and contradicting every skill doc in the ecosystem,
+// which already tells operators to run `nb sync adopt`.
+//
+// Nothing is removed: `nb remote sync <sub>` keeps working, marked deprecated.
+
+// NewNotebookSyncCmd creates the top-level `sync` command: the canonical home
+// of the daemon-proxied notebook document-sync family. Bare `nb sync` does NOT
+// mirror a forge — that is `nb remote sync` — so running it with no subcommand
+// prints help rather than reviving the collision.
+func NewNotebookSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Notebook document sync (history, restore, adopt, incoming, conflicts)",
+		Long: `Commands for the daemon-coordinated synchronization of notebook documents.
+
+This is document sync, not forge mirroring: to mirror GitHub issues and pull
+requests into notes, use ` + "`nb remote sync`" + `.`,
+	}
+
+	cmd.AddCommand(NewSyncHistoryCmd(svc, workspaceOverride))
+	cmd.AddCommand(NewSyncRestoreCmd(svc, workspaceOverride))
+	cmd.AddCommand(NewSyncAdoptCmd(svc, workspaceOverride))
+	cmd.AddCommand(NewSyncIncomingCmd())
+	cmd.AddCommand(NewSyncConflictsCmd(svc, workspaceOverride))
+
+	return cmd
+}
+
+// deprecatedAlias marks a command as a still-working legacy spelling. Cobra
+// prints a single line naming the replacement before the command runs.
+func deprecatedAlias(cmd *cobra.Command, replacement string) *cobra.Command {
+	cmd.Deprecated = fmt.Sprintf("use %q instead (this spelling still works and will keep working).", replacement)
+	return cmd
+}
+
+// NewSyncCmd is the pre-split name for the forge-mirroring command, kept so
+// existing callers keep compiling.
+//
+// Deprecated: use NewRemoteSyncCmd.
 func NewSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	return NewRemoteSyncCmd(svc, workspaceOverride)
+}
+
+// NewRemoteSyncCmd creates `nb remote sync`: the canonical entry point for
+// forge/GitHub mirroring. It also carries the deprecated `nb remote sync <sub>`
+// spellings of the notebook document-sync family, which now live at
+// `nb sync <sub>`.
+func NewRemoteSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	var provider string
 
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Sync notes with remote services",
-		Long:  `Syncs notes with configured remote services like GitHub issues and pull requests.`,
+		Short: "Mirror forge issues and pull requests into notes",
+		Long: `Mirrors issues and pull requests from configured forges (GitHub today) into notes.
+
+For notebook document sync — history, restore, adopt, incoming, conflicts —
+use ` + "`nb sync <subcommand>`" + `.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 			s := *svc
@@ -93,12 +153,14 @@ func NewSyncCmd(svc **service.Service, workspaceOverride *string) *cobra.Command
 
 	cmd.Flags().StringVar(&provider, "provider", "", "Sync only with a specific provider (e.g., github)")
 
-	// Add subcommands for Notebook Sync Phase 2 (daemon-coordinated)
-	cmd.AddCommand(NewSyncHistoryCmd(svc, workspaceOverride))
-	cmd.AddCommand(NewSyncRestoreCmd(svc, workspaceOverride))
-	cmd.AddCommand(NewSyncAdoptCmd(svc, workspaceOverride))
-	cmd.AddCommand(NewSyncIncomingCmd())
-	cmd.AddCommand(NewSyncConflictsCmd(svc, workspaceOverride))
+	// The pre-split spellings of the notebook document-sync family. These are
+	// fresh command instances, not the ones registered under `nb sync`, so
+	// marking them deprecated here does not affect the canonical family.
+	cmd.AddCommand(deprecatedAlias(NewSyncHistoryCmd(svc, workspaceOverride), "nb sync history"))
+	cmd.AddCommand(deprecatedAlias(NewSyncRestoreCmd(svc, workspaceOverride), "nb sync restore"))
+	cmd.AddCommand(deprecatedAlias(NewSyncAdoptCmd(svc, workspaceOverride), "nb sync adopt"))
+	cmd.AddCommand(deprecatedAlias(NewSyncIncomingCmd(), "nb sync incoming"))
+	cmd.AddCommand(deprecatedAlias(NewSyncConflictsCmd(svc, workspaceOverride), "nb sync conflicts"))
 
 	return cmd
 }

@@ -43,6 +43,11 @@ type Note struct {
 	// Remote sync metadata
 	Remote *RemoteMetadata `json:"remote,omitempty"`
 
+	// PRStates is one state per entry of the note's `prs:` ticket↔PR join, in
+	// note order. Purely local, read from frontmatter; an empty element means
+	// unknown. Carried for row rendering — see renderPRStateGlyphs.
+	PRStates []string `json:"pr_states,omitempty"`
+
 	// Frontmatter fields
 	ID         string   `json:"id"`
 	Aliases    []string `json:"aliases"`

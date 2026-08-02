@@ -10,11 +10,13 @@ import (
 func NewRemoteCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remote",
-		Short: "Manage remote integrations and sync notes",
-		Long:  `Commands for syncing notes with remote services like GitHub.`,
+		Short: "Manage forge integrations and mirror issues/PRs into notes",
+		Long: `Commands for mirroring remote forges (GitHub today) into notes.
+
+Notebook document sync lives at ` + "`nb sync`" + `, not here.`,
 	}
 
-	cmd.AddCommand(NewSyncCmd(svc, workspaceOverride))
+	cmd.AddCommand(NewRemoteSyncCmd(svc, workspaceOverride))
 
 	return cmd
 }

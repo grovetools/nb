@@ -42,6 +42,12 @@ func (s *Service) newItemFromFile(path string, info os.FileInfo) (*tree.Item, er
 			if fm.Remote != nil {
 				item.Metadata["RemoteState"] = fm.Remote.State
 			}
+			// The ticket↔PR join, flattened to just the states the row
+			// renderer needs. Read straight from local frontmatter — the TUI
+			// never reaches the network for these.
+			if states := prStatesOf(fm); len(states) > 0 {
+				item.Metadata["PRStates"] = states
+			}
 			// Use frontmatter timestamps if available
 			if created, err := frontmatter.ParseTimestamp(fm.Created); err == nil {
 				item.Metadata["Created"] = created
@@ -71,4 +77,18 @@ func (s *Service) newItemFromFile(path string, info os.FileInfo) (*tree.Item, er
 	item.Metadata["Path"] = path // Store full path in metadata for easy access in TUI
 
 	return item, nil
+}
+
+// prStatesOf flattens a note's `prs:` join to one state per PR, in the order
+// they appear on the note. An entry with no state yields the empty string,
+// which the renderer shows as unknown — never as merged or green (D4).
+func prStatesOf(fm *frontmatter.Frontmatter) []string {
+	if fm == nil || len(fm.PRs.Entries) == 0 {
+		return nil
+	}
+	states := make([]string, 0, len(fm.PRs.Entries))
+	for _, pr := range fm.PRs.Entries {
+		states = append(states, pr.State)
+	}
+	return states
 }

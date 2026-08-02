@@ -47,6 +47,13 @@ type Frontmatter struct {
 	// Remote sync metadata
 	Remote *RemoteMetadata `yaml:"remote,omitempty"`
 
+	// The ticket↔PR join: the pull requests opened for this ticket's work,
+	// plus the version of that shape (see prs.go). Nothing writes these
+	// automatically yet — publish is deferred — so they exist to be read,
+	// hand-edited, and refreshed.
+	PRs              PRList `yaml:"prs,omitempty"`
+	PRsSchemaVersion int    `yaml:"prs_schema_version,omitempty"`
+
 	// Blog-specific fields
 	Description string `yaml:"description,omitempty"`
 	PublishDate string `yaml:"publishDate,omitempty"`
@@ -157,8 +164,9 @@ var knownFieldNames = map[string]bool{
 	"id": true, "title": true, "type": true, "aliases": true, "tags": true,
 	"repository": true, "branch": true, "worktree": true, "created": true,
 	"modified": true, "started": true, "plan_ref": true, "plan_job": true,
-	"priority": true, "name": true, "remote": true, "description": true,
-	"publishDate": true, "updatedDate": true, "draft": true, "featured": true,
+	"priority": true, "name": true, "remote": true, "prs": true,
+	"prs_schema_version": true, "description": true, "publishDate": true,
+	"updatedDate": true, "draft": true, "featured": true,
 }
 
 // producerKeyPattern is the shape a producer-supplied extension key must have.
@@ -189,6 +197,11 @@ func Parse(content string) (*Frontmatter, string, error) {
 	}
 	if fm.Tags == nil {
 		fm.Tags = []string{}
+	}
+	// Normalize an empty catch-all to nil so a note with no unknown keys
+	// compares equal to a hand-built Frontmatter.
+	if len(fm.Extra) == 0 {
+		fm.Extra = nil
 	}
 
 	return &fm, bodyContent, nil
@@ -308,6 +321,22 @@ func Build(fm *Frontmatter) string {
 		if fm.Remote.Milestone != "" {
 			sb.WriteString(fmt.Sprintf("  milestone: %s\n", formatYAMLValue(fm.Remote.Milestone)))
 		}
+	}
+
+	// The ticket↔PR join. The version key precedes the list so a reader sees
+	// which shape follows. A version already on the note is re-emitted as-is
+	// (never downgraded); an unversioned list is stamped with the version this
+	// build understands. A value nb could not parse is passed through WITHOUT
+	// a version — stamping one would assert a shape that was never verified.
+	if prsBlock := renderPRs(fm.PRs); prsBlock != "" {
+		version := fm.PRsSchemaVersion
+		if version == 0 && !fm.PRs.Unparsed() {
+			version = PRsSchemaVersion
+		}
+		if version != 0 {
+			sb.WriteString(fmt.Sprintf("prs_schema_version: %d\n", version))
+		}
+		sb.WriteString(prsBlock)
 	}
 
 	// Blog-specific fields

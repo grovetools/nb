@@ -120,6 +120,39 @@ func (p *GitHubProvider) GetItem(itemType, itemID, repoPath string) (*sync.Item,
 	return p.fetchSingleItem(itemType, itemID, repoPath)
 }
 
+// FetchPRState implements sync.PRStateFetcher: a read-only `gh pr view` of a
+// PR identified by its full URL. `gh` resolves the repository from the URL, so
+// this needs no local checkout — which matters because a ticket's `prs:`
+// entries span repositories the current workspace has nothing to do with.
+//
+// Errors here are expected and ordinary (gh absent, offline, not logged in,
+// URL belongs to another forge). The caller reports them as "unknown" and
+// leaves the entry untouched; nothing in this path writes to GitHub.
+func (p *GitHubProvider) FetchPRState(url string) (*sync.PRState, error) {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return nil, fmt.Errorf("gh command not found in PATH: %w", err)
+	}
+
+	cmd := exec.Command("gh", "pr", "view", url, "--json", "state,updatedAt")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh pr view %s failed: %w", url, err)
+	}
+
+	var view struct {
+		State     string    `json:"state"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+	if err := json.Unmarshal(output, &view); err != nil {
+		return nil, fmt.Errorf("failed to parse gh JSON output for %s: %w", url, err)
+	}
+
+	return &sync.PRState{
+		State:     strings.ToLower(view.State),
+		UpdatedAt: view.UpdatedAt,
+	}, nil
+}
+
 // UpdateItem pushes changes for a single item to GitHub.
 func (p *GitHubProvider) UpdateItem(item *sync.Item, repoPath string) (*sync.Item, error) {
 	itemType := item.Type
@@ -165,9 +198,22 @@ func (p *GitHubProvider) UpdateItem(item *sync.Item, repoPath string) (*sync.Ite
 	return p.fetchSingleItem(itemType, item.ID, repoPath)
 }
 
+// baseJSONFields are the fields both issues and PRs expose.
+const baseJSONFields = "id,number,title,body,state,url,updatedAt,labels,assignees,milestone,comments"
+
+// jsonFieldsFor returns the --json field list for an item type. headRefName is
+// PR-only: asking for it on an issue makes gh reject the whole call, so the
+// field list cannot be shared.
+func jsonFieldsFor(itemType string) string {
+	if itemType == "pr" || itemType == "pull_request" {
+		return baseJSONFields + ",headRefName"
+	}
+	return baseJSONFields
+}
+
 // fetchSingleItem fetches a single issue or PR from GitHub.
 func (p *GitHubProvider) fetchSingleItem(itemType, itemID, repoPath string) (*sync.Item, error) {
-	cmdArgs := []string{itemType, "view", itemID, "--json", "id,number,title,body,state,url,updatedAt,labels,assignees,milestone,comments"}
+	cmdArgs := []string{itemType, "view", itemID, "--json", jsonFieldsFor(itemType)}
 	cmd := exec.Command("gh", cmdArgs...)
 	cmd.Dir = repoPath
 
@@ -212,17 +258,18 @@ func (p *GitHubProvider) ghItemToSyncItem(item *ghItem, itemType string) *sync.I
 	}
 
 	return &sync.Item{
-		ID:        fmt.Sprintf("%d", item.Number),
-		Type:      itemType,
-		Title:     item.Title,
-		Body:      item.Body,
-		State:     strings.ToLower(item.State),
-		URL:       item.URL,
-		Labels:    labels,
-		Assignees: assignees,
-		Milestone: milestone,
-		UpdatedAt: item.UpdatedAt,
-		Comments:  comments,
+		ID:         fmt.Sprintf("%d", item.Number),
+		Type:       itemType,
+		Title:      item.Title,
+		Body:       item.Body,
+		State:      strings.ToLower(item.State),
+		URL:        item.URL,
+		Labels:     labels,
+		Assignees:  assignees,
+		Milestone:  milestone,
+		UpdatedAt:  item.UpdatedAt,
+		Comments:   comments,
+		HeadBranch: item.HeadRefName,
 	}
 }
 
@@ -246,7 +293,9 @@ type ghItem struct {
 	URL       string      `json:"url"`
 	UpdatedAt time.Time   `json:"updatedAt"`
 	Comments  []ghComment `json:"comments"`
-	Labels    []struct {
+	// HeadRefName is populated for PRs only (see jsonFieldsFor).
+	HeadRefName string `json:"headRefName"`
+	Labels      []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
 	Assignees []struct {
@@ -259,7 +308,7 @@ type ghItem struct {
 
 // fetchItems executes the gh command to get issues or PRs.
 func (p *GitHubProvider) fetchItems(itemType string, repoPath string) ([]*sync.Item, error) {
-	cmdArgs := []string{itemType, "list", "--state", "all", "--limit", "200", "--json", "id,number,title,body,state,url,updatedAt,labels,assignees,milestone,comments"}
+	cmdArgs := []string{itemType, "list", "--state", "all", "--limit", "200", "--json", jsonFieldsFor(itemType)}
 	cmd := exec.Command("gh", cmdArgs...)
 	cmd.Dir = repoPath
 
