@@ -10,10 +10,15 @@ import (
 
 	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/grovetools/nb/pkg/models"
+	"github.com/grovetools/nb/pkg/notedoc"
 	"github.com/grovetools/nb/pkg/service"
 )
 
-const syncMarker = "<!-- nb-sync-marker -->"
+// syncMarker is the machine/human ownership boundary this package pioneered.
+// The literal now lives in notedoc, which generalized the rule so generated
+// notes outside the sync path (review packets, PR-body projection) split their
+// bodies exactly the same way; defining it from there keeps one definition.
+const syncMarker = notedoc.Marker
 
 // ProviderFactory is a function that creates a Provider instance.
 type ProviderFactory func() Provider

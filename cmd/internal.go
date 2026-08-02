@@ -24,6 +24,7 @@ func NewInternalCmd(svc **service.Service) *cobra.Command {
 
 	cmd.AddCommand(newUpdateNoteCmd(svc))
 	cmd.AddCommand(newUpdateFrontmatterCmd(svc))
+	cmd.AddCommand(newRewriteNoteCmd(svc))
 
 	return cmd
 }
