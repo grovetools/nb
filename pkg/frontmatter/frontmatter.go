@@ -3,6 +3,7 @@ package frontmatter
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -39,7 +40,16 @@ type Frontmatter struct {
 	PlanRef    string   `yaml:"plan_ref,omitempty"` // Reference to associated plan (slug form: plans/<planName>)
 	PlanJob    string   `yaml:"plan_job,omitempty"` // Per-job linkage: the promoted job's filename (e.g. 01-foo.md)
 	Priority   string   `yaml:"priority,omitempty"` // p0 (most critical) .. p3, empty = none
-	Name       string   `yaml:"name,omitempty"`     // Canonical name when the filename is generic (e.g. skills/<name>/SKILL.md)
+
+	// Gtd is the grove-gtd plugin's namespaced block, carried VERBATIM: a
+	// map for the full schema, or the bool shorthand (`gtd: true` tracks a
+	// note, `gtd: false` excludes one) preserved as a scalar rather than
+	// normalized — what the user wrote is what Build emits back. The typed
+	// struct otherwise drops unknown keys on a Parse→Build rewrite, and
+	// this field is what keeps any nb code path on that route from deleting
+	// gtd metadata. nb itself never interprets it.
+	Gtd  interface{} `yaml:"gtd,omitempty"`
+	Name string      `yaml:"name,omitempty"` // Canonical name when the filename is generic (e.g. skills/<name>/SKILL.md)
 
 	// Remote sync metadata
 	Remote *RemoteMetadata `yaml:"remote,omitempty"`
@@ -158,6 +168,12 @@ func Build(fm *Frontmatter) string {
 	}
 	if fm.Priority != "" {
 		sb.WriteString(fmt.Sprintf("priority: %s\n", formatYAMLValue(fm.Priority)))
+	}
+
+	// gtd passthrough — emitted deterministically (sorted keys) because Build
+	// hand-formats YAML and a Go map has no stable order of its own.
+	if fm.Gtd != nil {
+		writeGtdValue(&sb, "gtd", fm.Gtd, 0)
 	}
 
 	// Remote sync metadata
@@ -314,4 +330,50 @@ func MergeTags(sources ...[]string) []string {
 	}
 
 	return result
+}
+
+// writeGtdValue emits the gtd passthrough block with deterministic layout:
+// map keys sorted, two-space indent per level, scalars through
+// formatYAMLValue's quoting rules. It exists because Build hand-formats its
+// YAML — handing the block to yaml.Marshal would randomize map order and
+// disagree with the file the user last saw.
+func writeGtdValue(sb *strings.Builder, key string, value interface{}, depth int) {
+	indent := strings.Repeat("  ", depth)
+	switch v := value.(type) {
+	case map[string]interface{}:
+		if len(v) == 0 {
+			sb.WriteString(fmt.Sprintf("%s%s: {}\n", indent, key))
+			return
+		}
+		sb.WriteString(fmt.Sprintf("%s%s:\n", indent, key))
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			writeGtdValue(sb, k, v[k], depth+1)
+		}
+	case map[interface{}]interface{}:
+		// yaml.v2-style maps, in case a caller hands one over.
+		m := make(map[string]interface{}, len(v))
+		for k, val := range v {
+			m[fmt.Sprint(k)] = val
+		}
+		writeGtdValue(sb, key, m, depth)
+	case []interface{}:
+		items := make([]string, len(v))
+		for i, it := range v {
+			items[i] = fmt.Sprint(it)
+		}
+		sb.WriteString(fmt.Sprintf("%s%s: %s\n", indent, key, formatYAMLArray(items)))
+	case bool:
+		sb.WriteString(fmt.Sprintf("%s%s: %t\n", indent, key, v))
+	case string:
+		sb.WriteString(fmt.Sprintf("%s%s: %s\n", indent, key, formatYAMLValue(v)))
+	case nil:
+		sb.WriteString(fmt.Sprintf("%s%s:\n", indent, key))
+	default:
+		sb.WriteString(fmt.Sprintf("%s%s: %v\n", indent, key, v))
+	}
 }
