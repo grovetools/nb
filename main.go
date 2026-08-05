@@ -87,7 +87,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewObsidianCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewVersionCmd())
 	rootCmd.AddCommand(cmd.NewTuiCmd(&svc, &workspaceOverride))
-	rootCmd.AddCommand(cmd.NewUpdateCmd(&svc))
+	rootCmd.AddCommand(cmd.NewUpdateCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewInternalCmd(&svc))
 	rootCmd.AddCommand(cmd.NewTmuxCmd(&svc, &workspaceOverride))
 	rootCmd.AddCommand(cmd.NewRemoteCmd(&svc, &workspaceOverride))

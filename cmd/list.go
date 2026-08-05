@@ -25,12 +25,47 @@ import (
 
 var listUlog = grovelogging.NewUnifiedLogger("grove-notebook.cmd.list")
 
+// JSONL wire types — the streaming discovery contract for external consumers.
+type catalogRecord struct {
+	Kind          string `json:"kind"`
+	SchemaVersion int    `json:"schema_version"`
+	QueryType     string `json:"query_type"`
+}
+
+type noteRecord struct {
+	Kind         string         `json:"kind"`
+	NoteID       string         `json:"note_id"`
+	ReceiptPath  string         `json:"receipt_path"`
+	RelativePath string         `json:"relative_path"`
+	BundleType   string         `json:"bundle_type"`
+	Basename     string         `json:"basename"`
+	ModifiedAt   time.Time      `json:"modified_at"`
+	Frontmatter  map[string]any `json:"frontmatter"`
+}
+
+type scanErrorRecord struct {
+	Kind         string `json:"kind"`
+	ReceiptPath  string `json:"receipt_path"`
+	RelativePath string `json:"relative_path"`
+	Code         string `json:"code"`
+	Message      string `json:"message"`
+}
+
+type endRecord struct {
+	Kind     string `json:"kind"`
+	Complete bool   `json:"complete"`
+	Notes    int    `json:"notes"`
+	Errors   int    `json:"errors"`
+}
+
 func NewListCmd(svc **service.Service, workspaceOverride *string) *cobra.Command { //nolint:gocyclo
 	var (
 		listAll           bool
 		listType          string
 		listGlobal        bool
 		listJSON          bool
+		listJSONL         bool
+		listIncludeFM     bool
 		listAllWorkspaces bool
 		listAllBranches   bool
 		listTag           string
@@ -55,14 +90,32 @@ Examples:
 			ctx := context.Background()
 			s := *svc
 
-			// Get workspace context, potentially overridden
-			wsCtx, err := s.GetWorkspaceContext(*workspaceOverride)
+			// Flag validation.
+			if listJSON && listJSONL {
+				return fmt.Errorf("--json and --jsonl are mutually exclusive")
+			}
+			if listIncludeFM && !listJSONL {
+				return fmt.Errorf("--include-frontmatter requires --jsonl")
+			}
+			if listGlobal && *workspaceOverride != "" {
+				return fmt.Errorf("-g/--global and -W/--workspace conflict")
+			}
+
+			// Resolve workspace context — strict for explicit -W.
+			var wsCtx *service.WorkspaceContext
+			var err error
+			if listGlobal {
+				wsCtx, err = s.GetWorkspaceContext("global")
+			} else if *workspaceOverride != "" {
+				wsCtx, err = s.GetExplicitWorkspaceContext(*workspaceOverride)
+			} else {
+				wsCtx, err = s.GetWorkspaceContext("")
+			}
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}
 
-			// Resolve the effective priority filter. --critical-only is
-			// shorthand for --priority p0; both may not conflict.
+			// Resolve the effective priority filter.
 			priorityFilter := listPriority
 			if listCriticalOnly {
 				if priorityFilter != "" && priorityFilter != "p0" {
@@ -85,7 +138,6 @@ Examples:
 					return err
 				}
 
-				// Filter by tag if provided
 				if listTag != "" {
 					var filteredNotes []*models.Note
 					for _, note := range repoNotes {
@@ -147,17 +199,14 @@ Examples:
 
 			// Handle --workspaces flag first (list from all workspaces)
 			if listAllWorkspaces {
-				// Try daemon index first for fast listing
 				allNotes, err := tryDaemonListNotes(ctx, "", listTag)
 				if allNotes == nil && err == nil {
-					// Fallback to filesystem
 					allNotes, err = s.ListNotesFromAllWorkspaces(false, false)
 				}
 				if err != nil {
 					return err
 				}
 
-				// Filter by tag if provided
 				if listTag != "" {
 					var filteredNotes []*models.Note
 					for _, note := range allNotes {
@@ -189,7 +238,6 @@ Examples:
 					return nil
 				}
 
-				// Output based on format
 				if listJSON {
 					return outputJSON(allNotes)
 				} else {
@@ -199,18 +247,15 @@ Examples:
 			}
 
 			if listAll {
-				// List all notes in all directories (including custom/nested types)
 				var allNotes []*models.Note
 				var err error
 
-				// Try daemon index first
 				wsFilter := wsCtx.NotebookContextWorkspace.Name
 				if listGlobal {
 					wsFilter = "global"
 				}
 				allNotes, err = tryDaemonListNotes(ctx, wsFilter, listTag)
 				if allNotes == nil && err == nil {
-					// Fallback to filesystem
 					if listGlobal {
 						allNotes, err = s.ListAllGlobalNotes(false, false)
 					} else {
@@ -222,7 +267,6 @@ Examples:
 					return err
 				}
 
-				// Filter by tag if provided
 				if listTag != "" {
 					var filteredNotes []*models.Note
 					for _, note := range allNotes {
@@ -254,7 +298,6 @@ Examples:
 					return nil
 				}
 
-				// Output based on format
 				if listJSON {
 					return outputJSON(allNotes)
 				} else {
@@ -269,9 +312,19 @@ Examples:
 				noteType = args[0]
 			}
 
-			// Try the daemon's cached note index first; fall back to the
-			// filesystem walk when the daemon is down or has nothing indexed
-			// under the type's directory.
+			// JSONL streaming mode: bypass daemon, walk from disk.
+			if listJSONL {
+				return runJSONLScan(ctx, s, wsCtx, models.NoteType(noteType), listIncludeFM)
+			}
+
+			// Apply -g to single-type listing.
+			if listGlobal {
+				wsCtx, err = s.GetWorkspaceContext("global")
+				if err != nil {
+					return fmt.Errorf("get global workspace context: %w", err)
+				}
+			}
+
 			notes, err := tryDaemonListNotesForType(ctx, s, wsCtx, models.NoteType(noteType))
 			if notes == nil && err == nil {
 				notes, err = s.ListNotes(wsCtx, models.NoteType(noteType))
@@ -280,7 +333,6 @@ Examples:
 				return err
 			}
 
-			// Filter by tag if provided
 			if listTag != "" {
 				var filteredNotes []*models.Note
 				for _, note := range notes {
@@ -314,7 +366,6 @@ Examples:
 				return nil
 			}
 
-			// Output based on format
 			if listJSON {
 				return outputJSON(notes)
 			} else {
@@ -329,6 +380,8 @@ Examples:
 	cmd.Flags().StringVarP(&listType, "type", "t", "inbox", "Note type to list")
 	cmd.Flags().BoolVarP(&listGlobal, "global", "g", false, "List global notes only")
 	cmd.Flags().BoolVar(&listJSON, "json", false, "Output in JSON format")
+	cmd.Flags().BoolVar(&listJSONL, "jsonl", false, "Output in streaming JSONL format")
+	cmd.Flags().BoolVar(&listIncludeFM, "include-frontmatter", false, "Include frontmatter in JSONL output (requires --jsonl)")
 	cmd.Flags().BoolVarP(&listAllWorkspaces, "workspaces", "w", false, "List notes from all workspaces")
 	cmd.Flags().BoolVar(&listAllBranches, "all-branches", false, "List notes from all branches in the current repository")
 	cmd.Flags().StringVar(&listTag, "tag", "", "Filter notes by a specific tag")
@@ -338,6 +391,60 @@ Examples:
 	cmd.Flags().StringVar(&listPlanRef, "plan-ref", "", "Filter to notes whose plan_ref frontmatter exactly matches this value (e.g. plans/my-feature)")
 
 	return cmd
+}
+
+// runJSONLScan performs a streaming JSONL walk, emitting catalog/note/error/end
+// records one per line, each flushed immediately.
+func runJSONLScan(ctx context.Context, s *service.Service, wsCtx *service.WorkspaceContext, noteType models.NoteType, includeFM bool) error {
+	enc := json.NewEncoder(os.Stdout)
+
+	if err := enc.Encode(catalogRecord{Kind: "catalog", SchemaVersion: 1, QueryType: string(noteType)}); err != nil {
+		return err
+	}
+
+	noteCount := 0
+	errCount := 0
+
+	walkErr := s.WalkNotes(ctx, wsCtx, noteType, func(rec service.NoteScanRecord) error {
+		if rec.Err != nil {
+			errCount++
+			return enc.Encode(scanErrorRecord{
+				Kind:         "error",
+				ReceiptPath:  rec.Err.Path,
+				RelativePath: rec.Err.RelativePath,
+				Code:         rec.Err.Code,
+				Message:      rec.Err.Message,
+			})
+		}
+		n := rec.Note
+		var fmMap map[string]any
+		if includeFM {
+			if n.Frontmatter != nil {
+				fmMap = n.Frontmatter.ToMap()
+			} else {
+				fmMap = map[string]any{}
+			}
+		}
+		noteCount++
+		return enc.Encode(noteRecord{
+			Kind:         "note",
+			NoteID:       n.ID,
+			ReceiptPath:  n.Path,
+			RelativePath: n.RelativePath,
+			BundleType:   n.BundleType,
+			Basename:     n.Basename,
+			ModifiedAt:   n.ModifiedAt,
+			Frontmatter:  fmMap,
+		})
+	})
+
+	if walkErr != nil {
+		// A canceled or failed walk emits no end record: an absent end is how
+		// readers detect a partial stream.
+		return walkErr
+	}
+
+	return enc.Encode(endRecord{Kind: "end", Complete: true, Notes: noteCount, Errors: errCount})
 }
 
 func printNotesTable(notes []*models.Note, noteTypes map[string]*coreconfig.NoteTypeConfig) {
@@ -525,7 +632,7 @@ func tryDaemonListNotes(ctx context.Context, wsFilter, tagFilter string) ([]*mod
 
 	entries, err := client.GetNoteIndex(fetchCtx, wsFilter)
 	if err != nil || len(entries) == 0 {
-		return nil, nil // Fallback to filesystem
+		return nil, nil
 	}
 
 	notes := make([]*models.Note, 0, len(entries))

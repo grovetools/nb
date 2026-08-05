@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -333,4 +334,222 @@ func TestValidateNoteFilename(t *testing.T) {
 	for _, bad := range []string{"", "a/b.md", `a\b.md`, "..", "article.txt", ".md", "../up.md"} {
 		assert.Error(t, ValidateNoteFilename(bad), "want rejection for %q", bad)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// UpdateStructuredNoteForContext tests (checklist A4)
+// ---------------------------------------------------------------------------
+
+func writeStructuredTestNote(t *testing.T, path, id, title string, extraFields map[string]string, body string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	sb.WriteString("id: " + id + "\n")
+	sb.WriteString("title: " + title + "\n")
+	sb.WriteString("aliases: []\n")
+	sb.WriteString("tags: []\n")
+	sb.WriteString("created: 2026-08-05T10:00:00Z\n")
+	sb.WriteString("modified: 2026-08-05T10:00:00Z\n")
+	for k, v := range extraFields {
+		sb.WriteString(k + ": " + v + "\n")
+	}
+	sb.WriteString("---\n\n")
+	sb.WriteString(body)
+	require.NoError(t, os.WriteFile(path, []byte(sb.String()), 0o644))
+}
+
+func TestUpdateForContextSuccess(t *testing.T) {
+	captureNoteEvents(t)
+	s, ctx, root := newStructuredTestService(t)
+
+	clippingsDir := filepath.Join(root, "workspaces", "test-repo", "hn", "clippings")
+	notePath := filepath.Join(clippingsDir, "comments.md")
+	writeStructuredTestNote(t, notePath, "note-111", "HN Comments", map[string]string{
+		"idempotency_key": "hn:111",
+	}, "# Original body\n")
+
+	newBody := "# Updated body\n\nNew content.\n"
+	updated, err := s.UpdateStructuredNoteForContext(ctx, notePath,
+		producerFields(t, map[string]any{"hn_score": 42}),
+		&newBody,
+		ExpectedNoteIdentity{
+			TypePath:       "hn/clippings",
+			IdempotencyKey: "hn:111",
+			Filename:       "comments.md",
+		},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+
+	fm, body := readFrontmatter(t, notePath)
+	assert.Equal(t, "note-111", fm.ID, "nb-owned ID must be preserved")
+	assert.Equal(t, 42, fm.ExtraValue("hn_score"), "producer field must be merged")
+	assert.Contains(t, body, "# Updated body", "body must be replaced")
+	assert.NotContains(t, body, "# Original body", "old body must be gone")
+}
+
+func TestUpdateForContextNoteNotFound(t *testing.T) {
+	captureNoteEvents(t)
+	s, ctx, root := newStructuredTestService(t)
+
+	bogusPath := filepath.Join(root, "workspaces", "test-repo", "hn", "clippings", "nonexistent.md")
+
+	_, err := s.UpdateStructuredNoteForContext(ctx, bogusPath, nil, nil,
+		ExpectedNoteIdentity{
+			TypePath:       "hn/clippings",
+			IdempotencyKey: "hn:999",
+			Filename:       "nonexistent.md",
+		},
+	)
+	require.Error(t, err)
+	var sue *StructuredUpdateError
+	require.True(t, errors.As(err, &sue), "error must be *StructuredUpdateError, got %T", err)
+	assert.Equal(t, CodeNoteNotFound, sue.Code)
+}
+
+func TestUpdateForContextOutsideTarget(t *testing.T) {
+	captureNoteEvents(t)
+	s, ctx, _ := newStructuredTestService(t)
+
+	// Place note in a temp dir completely outside the workspace's notebook root.
+	outsideDir := t.TempDir()
+	notePath := filepath.Join(outsideDir, "stray.md")
+	writeStructuredTestNote(t, notePath, "stray-1", "Stray Note", nil, "body\n")
+
+	_, err := s.UpdateStructuredNoteForContext(ctx, notePath, nil, nil,
+		ExpectedNoteIdentity{
+			TypePath:       "hn/clippings",
+			IdempotencyKey: "",
+			Filename:       "stray.md",
+		},
+	)
+	require.Error(t, err)
+	var sue *StructuredUpdateError
+	require.True(t, errors.As(err, &sue), "error must be *StructuredUpdateError, got %T", err)
+	assert.Equal(t, CodeNoteOutsideTarget, sue.Code)
+}
+
+func TestUpdateForContextOutsideBundle(t *testing.T) {
+	captureNoteEvents(t)
+	s, ctx, root := newStructuredTestService(t)
+
+	// Note lives in hn/clippings/subdir/ -- a child of the type directory, not
+	// a direct child, so it is "outside the bundle".
+	subdirNote := filepath.Join(root, "workspaces", "test-repo", "hn", "clippings", "subdir", "deep.md")
+	writeStructuredTestNote(t, subdirNote, "deep-1", "Deep Note", map[string]string{
+		"idempotency_key": "hn:deep",
+	}, "body\n")
+
+	_, err := s.UpdateStructuredNoteForContext(ctx, subdirNote, nil, nil,
+		ExpectedNoteIdentity{
+			TypePath:       "hn/clippings",
+			IdempotencyKey: "hn:deep",
+			Filename:       "deep.md",
+		},
+	)
+	require.Error(t, err)
+	var sue *StructuredUpdateError
+	require.True(t, errors.As(err, &sue), "error must be *StructuredUpdateError, got %T", err)
+	assert.Equal(t, CodeNoteOutsideBundle, sue.Code)
+}
+
+func TestUpdateForContextIdentityMismatch(t *testing.T) {
+	captureNoteEvents(t)
+	s, ctx, root := newStructuredTestService(t)
+
+	clippingsDir := filepath.Join(root, "workspaces", "test-repo", "hn", "clippings")
+	notePath := filepath.Join(clippingsDir, "comments.md")
+	writeStructuredTestNote(t, notePath, "note-111", "HN Comments", map[string]string{
+		"idempotency_key": "hn:111",
+	}, "body\n")
+
+	_, err := s.UpdateStructuredNoteForContext(ctx, notePath, nil, nil,
+		ExpectedNoteIdentity{
+			TypePath:       "hn/clippings",
+			IdempotencyKey: "hn:222", // mismatch: persisted is hn:111
+			Filename:       "comments.md",
+		},
+	)
+	require.Error(t, err)
+	var sue *StructuredUpdateError
+	require.True(t, errors.As(err, &sue), "error must be *StructuredUpdateError, got %T", err)
+	assert.Equal(t, CodeNoteIdentityMismatch, sue.Code)
+}
+
+func TestUpdateForContextWrongFilename(t *testing.T) {
+	captureNoteEvents(t)
+	s, ctx, root := newStructuredTestService(t)
+
+	clippingsDir := filepath.Join(root, "workspaces", "test-repo", "hn", "clippings")
+	notePath := filepath.Join(clippingsDir, "comments.md")
+	writeStructuredTestNote(t, notePath, "note-111", "HN Comments", map[string]string{
+		"idempotency_key": "hn:111",
+	}, "body\n")
+
+	_, err := s.UpdateStructuredNoteForContext(ctx, notePath, nil, nil,
+		ExpectedNoteIdentity{
+			TypePath:       "hn/clippings",
+			IdempotencyKey: "hn:111",
+			Filename:       "article.md", // mismatch: actual file is comments.md
+		},
+	)
+	require.Error(t, err)
+	var sue *StructuredUpdateError
+	require.True(t, errors.As(err, &sue), "error must be *StructuredUpdateError, got %T", err)
+	assert.Equal(t, CodeNoteOutsideBundle, sue.Code)
+}
+
+func TestUpdateForContextNoFrontmatter(t *testing.T) {
+	captureNoteEvents(t)
+	s, ctx, root := newStructuredTestService(t)
+
+	clippingsDir := filepath.Join(root, "workspaces", "test-repo", "hn", "clippings")
+	require.NoError(t, os.MkdirAll(clippingsDir, 0o755))
+	barePath := filepath.Join(clippingsDir, "bare.md")
+	require.NoError(t, os.WriteFile(barePath, []byte("# Just markdown, no frontmatter\n"), 0o644))
+
+	_, err := s.UpdateStructuredNoteForContext(ctx, barePath, nil, nil,
+		ExpectedNoteIdentity{
+			TypePath:       "hn/clippings",
+			IdempotencyKey: "",
+			Filename:       "bare.md",
+		},
+	)
+	require.Error(t, err)
+	var sue *StructuredUpdateError
+	require.True(t, errors.As(err, &sue), "error must be *StructuredUpdateError, got %T", err)
+	assert.Equal(t, CodeNoteIdentityMismatch, sue.Code)
+}
+
+func TestUpdateForContextPreservesUnchangedFile(t *testing.T) {
+	captureNoteEvents(t)
+	s, ctx, root := newStructuredTestService(t)
+
+	clippingsDir := filepath.Join(root, "workspaces", "test-repo", "hn", "clippings")
+	notePath := filepath.Join(clippingsDir, "guarded.md")
+	writeStructuredTestNote(t, notePath, "guard-1", "Guarded", map[string]string{
+		"idempotency_key": "hn:guard",
+	}, "# Precious content\n")
+
+	// Snapshot the file bytes before the failing call.
+	before, err := os.ReadFile(notePath)
+	require.NoError(t, err)
+
+	// Trigger an identity-mismatch failure (wrong key).
+	_, err = s.UpdateStructuredNoteForContext(ctx, notePath, nil, nil,
+		ExpectedNoteIdentity{
+			TypePath:       "hn/clippings",
+			IdempotencyKey: "hn:wrong",
+			Filename:       "guarded.md",
+		},
+	)
+	require.Error(t, err)
+	var sue *StructuredUpdateError
+	require.True(t, errors.As(err, &sue))
+
+	// The file must be byte-identical: no partial write happened.
+	after, err := os.ReadFile(notePath)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "file must be byte-identical after a typed failure")
 }

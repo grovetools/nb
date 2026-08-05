@@ -654,6 +654,86 @@ func nodeShape(node yaml.Node) string {
 	}
 }
 
+// ToMap converts the frontmatter to a map suitable for JSON serialization.
+// Typed fields are included when non-zero; Extra nodes are decoded to plain Go
+// values. The result is read-only and does not share storage with fm.
+func (fm *Frontmatter) ToMap() map[string]any {
+	m := make(map[string]any)
+	if fm.ID != "" {
+		m["id"] = fm.ID
+	}
+	if fm.Title != "" {
+		m["title"] = fm.Title
+	}
+	if fm.Type != "" {
+		m["type"] = fm.Type
+	}
+	if len(fm.Aliases) > 0 {
+		m["aliases"] = fm.Aliases
+	}
+	if len(fm.Tags) > 0 {
+		m["tags"] = fm.Tags
+	}
+	if fm.Repository != "" {
+		m["repository"] = fm.Repository
+	}
+	if fm.Branch != "" {
+		m["branch"] = fm.Branch
+	}
+	if fm.Worktree != "" {
+		m["worktree"] = fm.Worktree
+	}
+	if fm.Created != "" {
+		m["created"] = fm.Created
+	}
+	if fm.Modified != "" {
+		m["modified"] = fm.Modified
+	}
+	if fm.Started != "" {
+		m["started"] = fm.Started
+	}
+	if fm.PlanRef != "" {
+		m["plan_ref"] = fm.PlanRef
+	}
+	if fm.PlanJob != "" {
+		m["plan_job"] = fm.PlanJob
+	}
+	if fm.Priority != "" {
+		m["priority"] = fm.Priority
+	}
+	if fm.Name != "" {
+		m["name"] = fm.Name
+	}
+	if fm.Description != "" {
+		m["description"] = fm.Description
+	}
+	if fm.PublishDate != "" {
+		m["publishDate"] = fm.PublishDate
+	}
+	if fm.UpdatedDate != "" {
+		m["updatedDate"] = fm.UpdatedDate
+	}
+	if fm.Draft {
+		m["draft"] = true
+	}
+	if fm.Featured {
+		m["featured"] = true
+	}
+	if fm.Remote != nil {
+		m["remote"] = fm.Remote
+	}
+	for k, v := range fm.Extra {
+		if knownFieldNames[k] {
+			continue
+		}
+		var val any
+		if err := v.Decode(&val); err == nil {
+			m[k] = val
+		}
+	}
+	return m
+}
+
 // MergeTags combines multiple tag sources and removes duplicates
 func MergeTags(sources ...[]string) []string {
 	seen := make(map[string]bool)

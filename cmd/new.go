@@ -185,11 +185,9 @@ Examples:
 					return err
 				}
 				if existed {
-					// The idempotency key matched: the receipt points at the
-					// existing note and nothing was written.
-					return emitNoteReceipt(cmd, newUlog, note, jsonOut, "already exists", "Exists:")
+					return emitNoteReceipt(cmd, newUlog, note, jsonOut, "already exists", "Exists:", "existing")
 				}
-				return emitNoteReceipt(cmd, newUlog, note, jsonOut, "created", "Created:")
+				return emitNoteReceipt(cmd, newUlog, note, jsonOut, "created", "Created:", "created")
 			}
 
 			// Create options

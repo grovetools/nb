@@ -1,8 +1,10 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2027,6 +2029,202 @@ func WithLimit(limit int) SearchOption {
 	return func(o *searchOptions) {
 		o.limit = limit
 	}
+}
+
+// NoteScanRecord is the per-file result WalkNotes emits: exactly one of Note
+// or Err is non-nil.
+type NoteScanRecord struct {
+	Note *NoteScanNote
+	Err  *NoteScanError
+}
+
+// NoteScanNote carries the metadata for one successfully read note.
+type NoteScanNote struct {
+	ID           string
+	Path         string
+	RelativePath string
+	BundleType   string
+	Basename     string
+	ModifiedAt   time.Time
+	Frontmatter  *frontmatter.Frontmatter
+}
+
+// NoteScanError carries a single-file failure preserving the path for the
+// command to render as a JSONL error record.
+type NoteScanError struct {
+	Path         string
+	RelativePath string
+	Code         string
+	Message      string
+}
+
+// WalkNotes walks every Markdown file under the type directory for noteType,
+// invoking visit with a note or error record for each file. It resolves root
+// once through NoteTypeDir, uses lexical filepath.WalkDir order, reads each
+// file from disk (bypassing the daemon index), and stops early on context
+// cancellation. No []*Note slice is accumulated.
+func (s *Service) WalkNotes(
+	ctx context.Context,
+	wsCtx *WorkspaceContext,
+	noteType models.NoteType,
+	visit func(NoteScanRecord) error,
+) error {
+	root, err := s.NoteTypeDir(wsCtx, noteType)
+	if err != nil {
+		return fmt.Errorf("resolve type directory: %w", err)
+	}
+
+	if _, statErr := os.Stat(root); os.IsNotExist(statErr) {
+		return nil
+	}
+
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			relPath := relativeScanPath(root, path)
+			return visit(NoteScanRecord{Err: &NoteScanError{
+				Path:         path,
+				RelativePath: relPath,
+				Code:         "read_failed",
+				Message:      walkErr.Error(),
+			}})
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".md") {
+			return nil
+		}
+
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		relParent, err := filepath.Rel(root, filepath.Dir(path))
+		if err != nil || filepath.IsAbs(relParent) || strings.HasPrefix(relParent, "..") {
+			relPath := relativeScanPath(root, path)
+			return visit(NoteScanRecord{Err: &NoteScanError{
+				Path:         path,
+				RelativePath: relPath,
+				Code:         "read_failed",
+				Message:      "note escapes type root",
+			}})
+		}
+		relParent = filepath.ToSlash(relParent)
+		relPath := relParent
+		if relPath == "." {
+			relPath = d.Name()
+		} else {
+			relPath = relPath + "/" + d.Name()
+		}
+
+		bundleType := string(noteType)
+		if relParent != "." {
+			bundleType = string(noteType) + "/" + relParent
+		}
+
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return visit(NoteScanRecord{Err: &NoteScanError{
+				Path:         path,
+				RelativePath: relPath,
+				Code:         "read_failed",
+				Message:      readErr.Error(),
+			}})
+		}
+
+		fm, _, fmErr := frontmatter.Parse(string(content))
+		if fmErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return visit(NoteScanRecord{Err: &NoteScanError{
+				Path:         path,
+				RelativePath: relPath,
+				Code:         "frontmatter_invalid",
+				Message:      fmErr.Error(),
+			}})
+		}
+
+		info, _ := d.Info()
+		modTime := time.Time{}
+		if info != nil {
+			modTime = info.ModTime()
+		}
+
+		noteID := ""
+		if fm != nil {
+			noteID = fm.ID
+		}
+
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return visit(NoteScanRecord{Note: &NoteScanNote{
+			ID:           noteID,
+			Path:         path,
+			RelativePath: relPath,
+			BundleType:   bundleType,
+			Basename:     d.Name(),
+			ModifiedAt:   modTime,
+			Frontmatter:  fm,
+		}})
+	})
+}
+
+func relativeScanPath(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return filepath.Base(path)
+	}
+	return filepath.ToSlash(rel)
+}
+
+// GetExplicitWorkspaceContext resolves a workspace from an explicit -W path.
+// Unlike GetWorkspaceContext, it never falls back to global or ambient context:
+// if the path does not resolve to a known workspace, it returns an error whose
+// message begins with "workspace_not_found".
+func (s *Service) GetExplicitWorkspaceContext(workspacePath string) (*WorkspaceContext, error) {
+	if workspacePath == "" {
+		return nil, fmt.Errorf("workspace_not_found: workspace path must not be empty for explicit resolution")
+	}
+
+	currentWorkspace, err := coreworkspace.GetProjectByPath(workspacePath)
+	if err != nil {
+		if ws := s.extractWorkspaceFromNotebooksPath(workspacePath); ws != nil {
+			currentWorkspace = ws
+		} else {
+			return nil, fmt.Errorf("workspace_not_found: no workspace found at %q", workspacePath)
+		}
+	} else if coreworkspace.IsNotebookRepo(currentWorkspace.Path) {
+		if ws := s.extractWorkspaceFromNotebooksPath(workspacePath); ws != nil {
+			currentWorkspace = ws
+		}
+	}
+
+	notebookContextWorkspace, err := s.findNotebookContextNode(currentWorkspace)
+	if err != nil {
+		return nil, fmt.Errorf("workspace_not_found: could not determine notebook context for %q: %w", workspacePath, err)
+	}
+
+	branch := ""
+	if git.IsGitRepo(currentWorkspace.Path) {
+		_, branch, _ = git.GetRepoInfo(currentWorkspace.Path)
+	}
+
+	paths, err := s.buildPathsMap(notebookContextWorkspace)
+	if err != nil {
+		return nil, fmt.Errorf("workspace_not_found: %w", err)
+	}
+
+	return &WorkspaceContext{
+		CurrentWorkspace:         currentWorkspace,
+		NotebookContextWorkspace: notebookContextWorkspace,
+		Branch:                   branch,
+		Paths:                    paths,
+	}, nil
 }
 
 func copyFile(src, dst string) error {

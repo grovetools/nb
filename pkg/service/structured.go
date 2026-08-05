@@ -32,6 +32,41 @@ import (
 	"github.com/grovetools/nb/pkg/models"
 )
 
+// ExpectedNoteIdentity carries the clipping identity the caller expects the
+// note to hold. UpdateStructuredNoteForContext validates all three fields
+// before any mutation.
+type ExpectedNoteIdentity struct {
+	TypePath       models.NoteType
+	IdempotencyKey string
+	Filename       string
+}
+
+// StructuredUpdateError is a typed, machine-parseable update failure.
+// cmd/update.go renders it as a compact JSON envelope on stdout.
+type StructuredUpdateError struct {
+	Code    string
+	Message string
+}
+
+const (
+	CodeNoteNotFound         = "note_not_found"
+	CodeNoteOutsideTarget    = "note_outside_target"
+	CodeNoteOutsideBundle    = "note_outside_bundle"
+	CodeNoteIdentityMismatch = "note_identity_mismatch"
+)
+
+func (e *StructuredUpdateError) Error() string {
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+// Is supports errors.Is matching by code.
+func (e *StructuredUpdateError) Is(target error) bool {
+	if t, ok := target.(*StructuredUpdateError); ok {
+		return e.Code == t.Code
+	}
+	return false
+}
+
 // StructuredNoteOptions carries the optional knobs of a structured create.
 type StructuredNoteOptions struct {
 	// IdempotencyKey, when non-empty, is stored in the note's frontmatter
@@ -300,6 +335,135 @@ func (s *Service) UpdateStructuredNote(path string, producer frontmatter.Produce
 	}
 
 	note, err := ParseNote(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("parse updated note: %w", err)
+	}
+	return note, nil
+}
+
+// UpdateStructuredNoteForContext validates that the note at path belongs to
+// the selected workspace context and matches the expected clipping identity
+// before applying producer fields and an optional body replacement. All
+// checks complete before any write.
+func (s *Service) UpdateStructuredNoteForContext(
+	ctx *WorkspaceContext,
+	path string,
+	producer frontmatter.ProducerFields,
+	body *string,
+	expected ExpectedNoteIdentity,
+) (*models.Note, error) {
+	if !filepath.IsAbs(path) {
+		return nil, fmt.Errorf("--path must be absolute, got %q", path)
+	}
+
+	// 1. Stat receipt; absence is note_not_found.
+	absPath := filepath.Clean(path)
+	if _, err := os.Stat(absPath); os.IsNotExist(err) {
+		return nil, &StructuredUpdateError{Code: CodeNoteNotFound, Message: fmt.Sprintf("note does not exist: %s", absPath)}
+	} else if err != nil {
+		return nil, fmt.Errorf("stat note: %w", err)
+	}
+
+	// Canonicalize receipt (resolve symlinks).
+	canonicalReceipt := absPath
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		canonicalReceipt = resolved
+	}
+
+	// 2. Resolve the selected route's notes authority root and canonicalize.
+	authorityRoot, err := s.getNotePathForContext(ctx, "")
+	if err != nil {
+		return nil, fmt.Errorf("resolve authority root: %w", err)
+	}
+	canonicalRoot := filepath.Clean(authorityRoot)
+	if resolved, err := filepath.EvalSymlinks(canonicalRoot); err == nil {
+		canonicalRoot = resolved
+	}
+
+	// Containment: canonical receipt must be under canonical root.
+	rootPrefix := canonicalRoot + string(filepath.Separator)
+	if canonicalReceipt != canonicalRoot && !strings.HasPrefix(canonicalReceipt, rootPrefix) {
+		return nil, &StructuredUpdateError{
+			Code:    CodeNoteOutsideTarget,
+			Message: fmt.Sprintf("note %s is outside the selected route's authority", absPath),
+		}
+	}
+
+	// 3. Resolve expected type directory and canonicalize.
+	expectedDir, err := s.getNotePathForContext(ctx, string(expected.TypePath))
+	if err != nil {
+		return nil, fmt.Errorf("resolve expected type path %q: %w", expected.TypePath, err)
+	}
+	canonicalExpectedDir := filepath.Clean(expectedDir)
+	if resolved, err := filepath.EvalSymlinks(canonicalExpectedDir); err == nil {
+		canonicalExpectedDir = resolved
+	}
+
+	// 4. Require the canonical receipt's parent to equal the canonical expected
+	//    type directory directly (not a descendant).
+	receiptParent := filepath.Dir(canonicalReceipt)
+	if receiptParent != canonicalExpectedDir {
+		return nil, &StructuredUpdateError{
+			Code:    CodeNoteOutsideBundle,
+			Message: fmt.Sprintf("note parent %s does not match expected type directory %s", receiptParent, canonicalExpectedDir),
+		}
+	}
+
+	// 5. Compare expected filename with canonical receipt's basename.
+	canonicalBasename := filepath.Base(canonicalReceipt)
+	if expected.Filename != "" && canonicalBasename != expected.Filename {
+		return nil, &StructuredUpdateError{
+			Code:    CodeNoteOutsideBundle,
+			Message: fmt.Sprintf("canonical basename %q does not match expected filename %q", canonicalBasename, expected.Filename),
+		}
+	}
+
+	// 6. Strictly parse existing frontmatter.
+	content, err := os.ReadFile(canonicalReceipt)
+	if err != nil {
+		return nil, fmt.Errorf("read note: %w", err)
+	}
+	fm, existingBody, err := frontmatter.Parse(string(content))
+	if err != nil {
+		return nil, fmt.Errorf("parse note frontmatter: %w", err)
+	}
+	if fm == nil {
+		return nil, &StructuredUpdateError{
+			Code:    CodeNoteIdentityMismatch,
+			Message: fmt.Sprintf("note %s has no frontmatter", absPath),
+		}
+	}
+
+	// 7. Require persisted idempotency key to match expected.
+	if expected.IdempotencyKey != "" {
+		persistedKey, _ := fm.ExtraString(frontmatter.IdempotencyKeyField)
+		if persistedKey != expected.IdempotencyKey {
+			return nil, &StructuredUpdateError{
+				Code:    CodeNoteIdentityMismatch,
+				Message: fmt.Sprintf("idempotency key mismatch: persisted %q, expected %q", persistedKey, expected.IdempotencyKey),
+			}
+		}
+	}
+
+	// 8. All checks passed — apply producer fields and write.
+	if err := frontmatter.ApplyProducerFields(fm, producer); err != nil {
+		return nil, err
+	}
+	if !IsValidPriority(fm.Priority) {
+		return nil, fmt.Errorf("invalid priority %q in frontmatter file (want one of p0,p1,p2,p3 or empty)", fm.Priority)
+	}
+	fm.Modified = frontmatter.FormatTimestamp(time.Now())
+
+	newBody := existingBody
+	if body != nil {
+		newBody = *body
+	}
+
+	if err := s.UpdateNoteWithContent(canonicalReceipt, fm, newBody); err != nil {
+		return nil, err
+	}
+
+	note, err := ParseNote(canonicalReceipt)
 	if err != nil {
 		return nil, fmt.Errorf("parse updated note: %w", err)
 	}
