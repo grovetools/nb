@@ -84,8 +84,29 @@ Examples:
 
 			s := *svc // Dereference the pointer to get the service instance
 
-			// Get workspace context, potentially overridden by the -W flag
-			ctx, err := s.GetWorkspaceContext(*workspaceOverride)
+			// -g and an explicit -W name two different routes; the same
+			// rejection list and update already enforce.
+			if globalNote && *workspaceOverride != "" {
+				return fmt.Errorf("-g/--global and -W/--workspace conflict")
+			}
+
+			// Get workspace context, potentially overridden by the -W flag.
+			// An explicit -W path resolves STRICTLY: a stale, removed, or
+			// mistyped path is workspace_not_found, never a silent fall-back
+			// into the global notebook — a create is a write, and writing a
+			// workspace-routed note into global is exactly the misdelivery
+			// the saved-navigation route contract exists to prevent. The
+			// literal "global" token keeps its historical meaning as a
+			// forced-global override (GetWorkspaceContext's own special case;
+			// the CLI contract tests invoke it), and an empty override keeps
+			// the ambient cwd-based resolution.
+			var ctx *service.WorkspaceContext
+			var err error
+			if *workspaceOverride != "" && *workspaceOverride != "global" {
+				ctx, err = s.GetExplicitWorkspaceContext(*workspaceOverride)
+			} else {
+				ctx, err = s.GetWorkspaceContext(*workspaceOverride)
+			}
 			if err != nil {
 				return fmt.Errorf("get workspace context: %w", err)
 			}

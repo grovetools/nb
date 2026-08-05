@@ -553,3 +553,168 @@ func TestUpdateForContextPreservesUnchangedFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, before, after, "file must be byte-identical after a typed failure")
 }
+
+// ---------------------------------------------------------------------------
+// Cross-workspace and symlink validation (saved-navigation Phase E gaps)
+// ---------------------------------------------------------------------------
+
+// wsContext builds a second workspace context against the same notebook root,
+// so two "workspaces" resolve to sibling authority subtrees under it.
+func wsContext(name string) *WorkspaceContext {
+	return &WorkspaceContext{
+		NotebookContextWorkspace: &coreworkspace.WorkspaceNode{Name: name, NotebookName: "main"},
+		Branch:                   "main",
+	}
+}
+
+func TestUpdateForContextReceiptUnderAFailsUnderB(t *testing.T) {
+	captureNoteEvents(t)
+	s, _, root := newStructuredTestService(t)
+	ctxA := wsContext("repo-a")
+	ctxB := wsContext("repo-b")
+
+	notePath := filepath.Join(root, "workspaces", "repo-a", "hn", "clippings", "comments.md")
+	writeStructuredTestNote(t, notePath, "a-1", "A Clip", map[string]string{
+		"idempotency_key": "hn:777",
+	}, "# a body\n")
+	before, err := os.ReadFile(notePath)
+	require.NoError(t, err)
+
+	expected := ExpectedNoteIdentity{
+		TypePath:       "hn/clippings",
+		IdempotencyKey: "hn:777",
+		Filename:       "comments.md",
+	}
+
+	// Same receipt, same identity, WRONG workspace: out of B's authority.
+	_, err = s.UpdateStructuredNoteForContext(ctxB, notePath, nil, nil, expected)
+	require.Error(t, err)
+	var sue *StructuredUpdateError
+	require.True(t, errors.As(err, &sue))
+	assert.Equal(t, CodeNoteOutsideTarget, sue.Code)
+
+	after, err := os.ReadFile(notePath)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "a cross-workspace attempt must not mutate the note")
+
+	// Sanity: the same call under A succeeds.
+	_, err = s.UpdateStructuredNoteForContext(ctxA, notePath, nil, nil, expected)
+	require.NoError(t, err)
+}
+
+func TestUpdateForContextEscapingSymlinkFails(t *testing.T) {
+	captureNoteEvents(t)
+	s, ctx, root := newStructuredTestService(t)
+
+	// The real file lives OUTSIDE every notebook root; a symlink inside the
+	// bundle points at it. The canonical receipt escapes, so containment
+	// must fail regardless of where the caller's alias sits.
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	writeStructuredTestNote(t, outside, "esc-1", "Escapee", map[string]string{
+		"idempotency_key": "hn:escape",
+	}, "# outside body\n")
+	before, err := os.ReadFile(outside)
+	require.NoError(t, err)
+
+	clippingsDir := filepath.Join(root, "workspaces", "test-repo", "hn", "clippings")
+	require.NoError(t, os.MkdirAll(clippingsDir, 0o755))
+	link := filepath.Join(clippingsDir, "comments.md")
+	require.NoError(t, os.Symlink(outside, link))
+
+	_, err = s.UpdateStructuredNoteForContext(ctx, link, nil, nil, ExpectedNoteIdentity{
+		TypePath:       "hn/clippings",
+		IdempotencyKey: "hn:escape",
+		Filename:       "comments.md",
+	})
+	require.Error(t, err)
+	var sue *StructuredUpdateError
+	require.True(t, errors.As(err, &sue))
+	assert.Equal(t, CodeNoteOutsideTarget, sue.Code)
+
+	after, err := os.ReadFile(outside)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "the symlink's target must stay untouched")
+}
+
+func TestUpdateForContextSymlinkAliasBasenameFails(t *testing.T) {
+	captureNoteEvents(t)
+	s, ctx, root := newStructuredTestService(t)
+
+	// article.md is real; comments.md is a symlink alias beside it. The
+	// caller's alias basename matches the expectation, but the CANONICAL
+	// basename is article.md — identity must be judged on the canonical
+	// name, so the update is outside the expected bundle identity.
+	clippingsDir := filepath.Join(root, "workspaces", "test-repo", "hn", "clippings")
+	articlePath := filepath.Join(clippingsDir, "article.md")
+	writeStructuredTestNote(t, articlePath, "al-1", "Aliased", map[string]string{
+		"idempotency_key": "hn:alias",
+	}, "# article body\n")
+	before, err := os.ReadFile(articlePath)
+	require.NoError(t, err)
+
+	alias := filepath.Join(clippingsDir, "comments.md")
+	require.NoError(t, os.Symlink(articlePath, alias))
+
+	_, err = s.UpdateStructuredNoteForContext(ctx, alias, nil, nil, ExpectedNoteIdentity{
+		TypePath:       "hn/clippings",
+		IdempotencyKey: "hn:alias",
+		Filename:       "comments.md",
+	})
+	require.Error(t, err)
+	var sue *StructuredUpdateError
+	require.True(t, errors.As(err, &sue))
+	assert.Equal(t, CodeNoteOutsideBundle, sue.Code)
+
+	after, err := os.ReadFile(articlePath)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "the aliased note must stay untouched")
+}
+
+func TestUpdateForContextSymlinkedAuthorityRootWorks(t *testing.T) {
+	captureNoteEvents(t)
+
+	// The configured notebook root is itself a symlink; the note lives under
+	// the canonical target. Canonicalizing BOTH sides must make containment
+	// agree — a reader whose notebook is a symlink is not out of target.
+	realRoot := t.TempDir()
+	linkParent := t.TempDir()
+	linkRoot := filepath.Join(linkParent, "notebook-link")
+	require.NoError(t, os.Symlink(realRoot, linkRoot))
+
+	cfg := &coreconfig.Config{
+		Notebooks: &coreconfig.NotebooksConfig{
+			Definitions: map[string]*coreconfig.Notebook{"main": {RootDir: linkRoot}},
+			Rules:       &coreconfig.NotebookRules{Default: "main"},
+		},
+	}
+	logger := logrus.New()
+	logger.SetOutput(os.Stderr)
+	logger.SetLevel(logrus.PanicLevel)
+	s, err := New(&Config{}, coreworkspace.NewProviderFromNodes(nil), cfg, logrus.NewEntry(logger))
+	require.NoError(t, err)
+	ctx := &WorkspaceContext{
+		NotebookContextWorkspace: &coreworkspace.WorkspaceNode{Name: "test-repo", NotebookName: "main"},
+		Branch:                   "main",
+	}
+
+	notePath := filepath.Join(realRoot, "workspaces", "test-repo", "hn", "clippings", "comments.md")
+	writeStructuredTestNote(t, notePath, "sym-1", "Symlinked Root", map[string]string{
+		"idempotency_key": "hn:symroot",
+	}, "# body\n")
+
+	// Address the note THROUGH the symlinked root, as a caller holding a
+	// receipt from an earlier create would.
+	aliasPath := filepath.Join(linkRoot, "workspaces", "test-repo", "hn", "clippings", "comments.md")
+	newBody := "# refreshed through the symlinked root\n"
+	note, err := s.UpdateStructuredNoteForContext(ctx, aliasPath, nil, &newBody, ExpectedNoteIdentity{
+		TypePath:       "hn/clippings",
+		IdempotencyKey: "hn:symroot",
+		Filename:       "comments.md",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, note)
+
+	content, err := os.ReadFile(notePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "refreshed through the symlinked root")
+}

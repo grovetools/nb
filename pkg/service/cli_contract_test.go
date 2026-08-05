@@ -582,8 +582,14 @@ func TestUpdateStaleExplicitWorkspaceFailsBeforeMutation(t *testing.T) {
 		"--expect-idempotency-key", "hn:111",
 		"--expect-filename", "comments.md",
 	})
-	_, runErr := runCapturingStdoutExpectError(t, c.Execute)
+	stdout, runErr := runCapturingStdoutExpectError(t, c.Execute)
 	assert.Contains(t, runErr.Error(), "workspace_not_found")
+
+	// workspace_not_found is NOT one of the four typed update errors: the
+	// machine channel stays silent and the failure surfaces to callers as a
+	// generic (fail-closed) one — no create fallback may be inferred from it.
+	assert.Empty(t, strings.TrimSpace(stdout),
+		"a stale -W failure must not write a machine envelope on stdout")
 
 	after, err := os.ReadFile(notePath)
 	require.NoError(t, err)
@@ -679,4 +685,291 @@ func TestUpdateExpectFlagsRequiredTogether(t *testing.T) {
 	err := c.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must be provided together")
+}
+
+// ---------------------------------------------------------------------------
+// Phase E: strict -W on create, explicit-workspace scans, route separation,
+// disk-hydrated frontmatter, and producer-string serialization conformance
+// ---------------------------------------------------------------------------
+
+// makeWorkspaceDir fabricates the smallest directory GetProjectByPath
+// classifies as a workspace: a named dir carrying a .git marker. The name is
+// what nb keys the workspace's notebook subtree on (workspaces/<name>).
+func makeWorkspaceDir(t *testing.T, name string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".git"), 0o755))
+	return dir
+}
+
+func TestCreateStaleExplicitWorkspaceFailsClosed(t *testing.T) {
+	restore := service.StubDaemonNotifierForTests(func(coremodels.NoteEvent) {})
+	defer restore()
+
+	svc, root := newCLITestService(t)
+	fmFile, bodyFile := writePomodoroFixtures(t, t.TempDir(), "pending")
+
+	override := filepath.Join(t.TempDir(), "definitely", "gone")
+	c := cmd.NewNewCmd(&svc, &override)
+	c.SetArgs([]string{
+		"--json",
+		"--type", "hn/clippings",
+		"--title", "Stale Route Clip",
+		"--idempotency-key", "hn:404",
+		"--filename", "comments.md",
+		"--frontmatter-file", fmFile,
+		"--body-file", bodyFile,
+		"--no-edit",
+	})
+	stdout, runErr := runCapturingStdoutExpectError(t, c.Execute)
+
+	assert.Contains(t, runErr.Error(), "workspace_not_found")
+	assert.Empty(t, strings.TrimSpace(stdout), "a failed create must emit no receipt")
+
+	// Nothing may have been written into the global notebook: the historical
+	// bug was exactly this silent fall-through.
+	_, statErr := os.Stat(filepath.Join(root, "notes", "hn", "clippings"))
+	assert.True(t, os.IsNotExist(statErr),
+		"a stale -W create must not write into the global notebook")
+}
+
+func TestCreateGlobalTokenOverrideStillForcesGlobal(t *testing.T) {
+	restore := service.StubDaemonNotifierForTests(func(coremodels.NoteEvent) {})
+	defer restore()
+
+	svc, root := newCLITestService(t)
+	override := "global" // the historical forced-global token, not a path
+
+	c := cmd.NewNewCmd(&svc, &override)
+	c.SetArgs([]string{"--json", "--type", "inbox", "--title", "Token Note", "--no-edit"})
+	stdout := runCapturingStdout(t, c.Execute)
+
+	_, path := parseReceipt(t, stdout)
+	assert.True(t, strings.HasPrefix(path, filepath.Join(root, "notes")+string(filepath.Separator)),
+		"override \"global\" must keep resolving into the global notebook, got %q", path)
+}
+
+func TestCreateGlobalFlagAndWorkspaceConflict(t *testing.T) {
+	restore := service.StubDaemonNotifierForTests(func(coremodels.NoteEvent) {})
+	defer restore()
+
+	svc, _ := newCLITestService(t)
+	override := "/some/workspace/path"
+
+	c := cmd.NewNewCmd(&svc, &override)
+	c.SetArgs([]string{"--json", "--type", "inbox", "--title", "Conflicted", "--no-edit", "-g"})
+	err := c.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "conflict")
+}
+
+func TestListJSONLExplicitWorkspaceScans(t *testing.T) {
+	restore := service.StubDaemonNotifierForTests(func(coremodels.NoteEvent) {})
+	defer restore()
+
+	svc, root := newCLITestService(t)
+	wsDir := makeWorkspaceDir(t, "ws-alpha")
+	fmFile, bodyFile := writePomodoroFixtures(t, t.TempDir(), "pending")
+
+	// Create THROUGH the workspace route, so the test learns where the
+	// workspace's clippings actually land instead of assuming a layout.
+	override := wsDir
+	create := cmd.NewNewCmd(&svc, &override)
+	create.SetArgs([]string{
+		"--json",
+		"--type", "hn/clippings",
+		"--title", "Workspace Clip",
+		"--idempotency-key", "hn:42",
+		"--filename", "comments.md",
+		"--frontmatter-file", fmFile,
+		"--body-file", bodyFile,
+		"--no-edit",
+	})
+	stdout := runCapturingStdout(t, create.Execute)
+	_, wsPath := parseReceipt(t, stdout)
+	assert.False(t, strings.HasPrefix(wsPath, filepath.Join(root, "notes")+string(filepath.Separator)),
+		"a workspace-routed create must not land in the global notebook, got %q", wsPath)
+
+	// A global note that must NOT appear in the workspace scan.
+	seedNote(t, filepath.Join(root, "notes", "hn", "clippings"), "comments.md", "gn1", "Global Clip")
+
+	list := cmd.NewListCmd(&svc, &override)
+	list.SetArgs([]string{"hn/clippings", "--jsonl", "--include-frontmatter"})
+	listOut := runCapturingStdout(t, list.Execute)
+
+	lines := strings.Split(strings.TrimSpace(listOut), "\n")
+	require.GreaterOrEqual(t, len(lines), 3, "expected catalog + note + end")
+	var notePaths []string
+	for _, line := range lines {
+		var rec map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &rec))
+		if rec["kind"] == "note" {
+			notePaths = append(notePaths, rec["receipt_path"].(string))
+		}
+	}
+	require.Len(t, notePaths, 1, "the workspace scan must see exactly the workspace note")
+	assert.Equal(t, wsPath, notePaths[0])
+
+	var end map[string]any
+	require.NoError(t, json.Unmarshal([]byte(lines[len(lines)-1]), &end))
+	assert.Equal(t, "end", end["kind"])
+	assert.Equal(t, true, end["complete"])
+}
+
+func TestListJSONLSameHNIDDistinctRoutes(t *testing.T) {
+	restore := service.StubDaemonNotifierForTests(func(coremodels.NoteEvent) {})
+	defer restore()
+
+	svc, root := newCLITestService(t)
+	wsDir := makeWorkspaceDir(t, "ws-beta")
+	fmFile, bodyFile := writePomodoroFixtures(t, t.TempDir(), "pending")
+
+	// The SAME story (same idempotency key, same bundle shape) delivered to
+	// the workspace route and to the global route.
+	wsOverride := wsDir
+	wsCreate := cmd.NewNewCmd(&svc, &wsOverride)
+	wsCreate.SetArgs([]string{
+		"--json", "--type", "hn/clippings/44556677-story", "--title", "Same Story",
+		"--idempotency-key", "hn:44556677", "--filename", "comments.md",
+		"--frontmatter-file", fmFile, "--body-file", bodyFile, "--no-edit",
+	})
+	_, wsPath := parseReceipt(t, runCapturingStdout(t, wsCreate.Execute))
+
+	gOverride := ""
+	gCreate := cmd.NewNewCmd(&svc, &gOverride)
+	gCreate.SetArgs([]string{
+		"--json", "--type", "hn/clippings/44556677-story", "--title", "Same Story",
+		"--idempotency-key", "hn:44556677", "--filename", "comments.md",
+		"--frontmatter-file", fmFile, "--body-file", bodyFile, "--no-edit", "-g",
+	})
+	_, gPath := parseReceipt(t, runCapturingStdout(t, gCreate.Execute))
+
+	require.NotEqual(t, wsPath, gPath, "two routes must hold two independent notes")
+	assert.True(t, strings.HasPrefix(gPath, filepath.Join(root, "notes")+string(filepath.Separator)))
+
+	collect := func(args []string, override string) []string {
+		c := cmd.NewListCmd(&svc, &override)
+		c.SetArgs(args)
+		out := runCapturingStdout(t, c.Execute)
+		var paths []string
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			var rec map[string]any
+			require.NoError(t, json.Unmarshal([]byte(line), &rec))
+			if rec["kind"] == "note" {
+				paths = append(paths, rec["receipt_path"].(string))
+			}
+		}
+		return paths
+	}
+
+	wsPaths := collect([]string{"hn/clippings", "--jsonl", "--include-frontmatter"}, wsDir)
+	require.Len(t, wsPaths, 1, "workspace route must see only its own copy")
+	assert.Equal(t, wsPath, wsPaths[0])
+
+	gPaths := collect([]string{"hn/clippings", "--jsonl", "--include-frontmatter", "-g"}, "")
+	require.Len(t, gPaths, 1, "global route must see only its own copy")
+	assert.Equal(t, gPath, gPaths[0])
+}
+
+func TestListJSONLReflectsExternalEditsDespiteStaleDaemon(t *testing.T) {
+	// The daemon notifier is stubbed to swallow every event, so as far as any
+	// daemon index could know, the note below never changed after creation.
+	// JSONL discovery reads every note from DISK, so the external edit must be
+	// visible anyway — that disk hydration is the contract this test pins.
+	restore := service.StubDaemonNotifierForTests(func(coremodels.NoteEvent) {})
+	defer restore()
+
+	svc, _ := newCLITestService(t)
+	override := ""
+	fmFile, bodyFile := writePomodoroFixtures(t, t.TempDir(), "pending")
+
+	create := cmd.NewNewCmd(&svc, &override)
+	create.SetArgs([]string{
+		"--json", "--type", "hn/clippings", "--title", "Editable",
+		"--idempotency-key", "hn:edit", "--filename", "comments.md",
+		"--frontmatter-file", fmFile, "--body-file", bodyFile, "--no-edit", "-g",
+	})
+	_, notePath := parseReceipt(t, runCapturingStdout(t, create.Execute))
+
+	// An EXTERNAL editor rewrites the note: nb is not told (and the stub
+	// guarantees no daemon heard anything).
+	content, err := os.ReadFile(notePath)
+	require.NoError(t, err)
+	edited := strings.Replace(string(content),
+		`pomodoro_summary_status: "pending"`,
+		`pomodoro_summary_status: "edited-elsewhere"`, 1)
+	require.NotEqual(t, string(content), edited, "the fixture edit must apply")
+	require.NoError(t, os.WriteFile(notePath, []byte(edited), 0o644))
+
+	list := cmd.NewListCmd(&svc, &override)
+	list.SetArgs([]string{"hn/clippings", "--jsonl", "--include-frontmatter", "-g"})
+	out := runCapturingStdout(t, list.Execute)
+
+	sawEdited := false
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var rec struct {
+			Kind        string         `json:"kind"`
+			Frontmatter map[string]any `json:"frontmatter"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(line), &rec))
+		if rec.Kind == "note" && rec.Frontmatter["pomodoro_summary_status"] == "edited-elsewhere" {
+			sawEdited = true
+		}
+	}
+	assert.True(t, sawEdited, "an external edit must be visible to JSONL discovery without daemon help")
+}
+
+func TestProducerStringVerbatimOnDiskPlainInJSONL(t *testing.T) {
+	// Serialization conformance for the panel contract (nb 30d8567 made the
+	// Extra passthrough verbatim): a producer string like hn_extraction "ok"
+	// keeps its quoting ON DISK, while the JSONL frontmatter map decodes it
+	// back to the PLAIN string. The hn panel's smoke test asserts the on-disk
+	// half; this test keeps both halves from drifting inside nb itself.
+	restore := service.StubDaemonNotifierForTests(func(coremodels.NoteEvent) {})
+	defer restore()
+
+	svc, _ := newCLITestService(t)
+	override := ""
+
+	fmFile := filepath.Join(t.TempDir(), "fm.json")
+	require.NoError(t, os.WriteFile(fmFile, []byte(`{"hn_extraction":"ok","hn_id":44556677}`), 0o644))
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	require.NoError(t, os.WriteFile(bodyFile, []byte("# article\n"), 0o644))
+
+	create := cmd.NewNewCmd(&svc, &override)
+	create.SetArgs([]string{
+		"--json", "--type", "hn/clippings", "--title", "Graded",
+		"--idempotency-key", "hn:grade", "--filename", "article.md",
+		"--frontmatter-file", fmFile, "--body-file", bodyFile, "--no-edit", "-g",
+	})
+	_, notePath := parseReceipt(t, runCapturingStdout(t, create.Execute))
+
+	onDisk, err := os.ReadFile(notePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(onDisk), `hn_extraction: "ok"`,
+		"producer strings serialize verbatim (JSON quoting intact) on disk")
+	assert.Contains(t, string(onDisk), "hn_id: 44556677",
+		"producer numbers serialize verbatim (unquoted) on disk")
+
+	list := cmd.NewListCmd(&svc, &override)
+	list.SetArgs([]string{"hn/clippings", "--jsonl", "--include-frontmatter", "-g"})
+	out := runCapturingStdout(t, list.Execute)
+
+	sawNote := false
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var rec struct {
+			Kind        string         `json:"kind"`
+			Frontmatter map[string]any `json:"frontmatter"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(line), &rec))
+		if rec.Kind != "note" {
+			continue
+		}
+		sawNote = true
+		assert.Equal(t, "ok", rec.Frontmatter["hn_extraction"],
+			"the JSONL frontmatter map must decode the string PLAIN, not doubly quoted")
+		assert.Equal(t, float64(44556677), rec.Frontmatter["hn_id"],
+			"the JSONL frontmatter map must decode the number as a number")
+	}
+	require.True(t, sawNote)
 }
