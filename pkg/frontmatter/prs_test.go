@@ -290,9 +290,9 @@ nested:
 	if err != nil {
 		t.Fatalf("re-Parse() error = %v", err)
 	}
-	nested, ok := fm2.Extra["nested"].(map[string]any)
+	nested, ok := fm2.ExtraValue("nested").(map[string]any)
 	if !ok {
-		t.Fatalf("nested key lost its mapping shape: %#v", fm2.Extra["nested"])
+		t.Fatalf("nested key lost its mapping shape: %#v", fm2.ExtraValue("nested"))
 	}
 	if nested["a"] != 1 {
 		t.Errorf("nested.a = %#v, want 1", nested["a"])

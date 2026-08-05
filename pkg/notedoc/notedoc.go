@@ -121,11 +121,7 @@ func SetExtra(fm *frontmatter.Frontmatter, key string, value any) error {
 		}
 		return nil
 	}
-	if fm.Extra == nil {
-		fm.Extra = map[string]any{}
-	}
-	fm.Extra[key] = value
-	return nil
+	return fm.SetExtra(key, value)
 }
 
 // modelledKeys is the set of frontmatter keys nb serializes from named struct
