@@ -150,7 +150,7 @@ Examples:
 					return fmt.Errorf("structured creation flags are not supported for the concepts type")
 				}
 
-				var producer map[string]any
+				var producer frontmatter.ProducerFields
 				if frontmatterFile != "" {
 					producer, err = frontmatter.LoadProducerFields(frontmatterFile)
 					if err != nil {

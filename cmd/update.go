@@ -102,7 +102,7 @@ Examples:
 
 			s := *svc
 
-			var producer map[string]any
+			var producer frontmatter.ProducerFields
 			if frontmatterFile != "" {
 				fields, err := frontmatter.LoadProducerFields(frontmatterFile)
 				if err != nil {

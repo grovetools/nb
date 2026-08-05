@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestParse(t *testing.T) {
@@ -555,14 +557,14 @@ Body.
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if fm.Extra["pomodoro_block_id"] != "blk-1" {
-		t.Errorf("Extra[pomodoro_block_id] = %v, want blk-1", fm.Extra["pomodoro_block_id"])
+	if got := fm.ExtraValue("pomodoro_block_id"); got != "blk-1" {
+		t.Errorf("Extra[pomodoro_block_id] = %v, want blk-1", got)
 	}
-	if fm.Extra["pomodoro_jobs_completed"] != 3 {
-		t.Errorf("Extra[pomodoro_jobs_completed] = %v (%T), want 3", fm.Extra["pomodoro_jobs_completed"], fm.Extra["pomodoro_jobs_completed"])
+	if got := fm.ExtraValue("pomodoro_jobs_completed"); got != 3 {
+		t.Errorf("Extra[pomodoro_jobs_completed] = %v (%T), want int 3", got, got)
 	}
-	if fm.Extra[IdempotencyKeyField] != "pomodoro:blk-1" {
-		t.Errorf("Extra[%s] = %v, want pomodoro:blk-1", IdempotencyKeyField, fm.Extra[IdempotencyKeyField])
+	if got := fm.ExtraValue(IdempotencyKeyField); got != "pomodoro:blk-1" {
+		t.Errorf("Extra[%s] = %v, want pomodoro:blk-1", IdempotencyKeyField, got)
 	}
 
 	rebuilt := BuildContent(fm, body)
@@ -586,8 +588,13 @@ Body.
 	if again := BuildContent(fm2, body2); again != rebuilt {
 		t.Errorf("Parse→Build not stable:\nfirst:\n%s\nsecond:\n%s", rebuilt, again)
 	}
-	if !reflect.DeepEqual(fm2.Extra, fm.Extra) {
-		t.Errorf("Extra changed across round-trip: %#v -> %#v", fm.Extra, fm2.Extra)
+	if len(fm2.Extra) != len(fm.Extra) {
+		t.Errorf("Extra key count changed: %d -> %d", len(fm.Extra), len(fm2.Extra))
+	}
+	for key := range fm.Extra {
+		if before, after := fm.ExtraValue(key), fm2.ExtraValue(key); !reflect.DeepEqual(before, after) {
+			t.Errorf("Extra[%s] changed across round-trip: %#v -> %#v", key, before, after)
+		}
 	}
 }
 
@@ -644,8 +651,20 @@ func TestBuildSkipsCollidingExtraKeys(t *testing.T) {
 	fm := &Frontmatter{
 		ID: "n1", Title: "Real Title", Aliases: []string{}, Tags: []string{},
 		Created: "2026-01-01T00:00:00Z", Modified: "2026-01-01T00:00:00Z",
-		Extra: map[string]any{"title": "Smuggled", "custom_key": "kept"},
 	}
+	// SetExtra refuses the colliding key outright; force it in to prove Build
+	// is defensive too, since Extra is a plain map any caller can write.
+	if err := fm.SetExtra("title", "Smuggled"); err == nil {
+		t.Error("SetExtra accepted a key that names a typed field")
+	}
+	if err := fm.SetExtra("custom_key", "kept"); err != nil {
+		t.Fatalf("SetExtra(custom_key): %v", err)
+	}
+	var smuggled yaml.Node
+	if err := smuggled.Encode("Smuggled"); err != nil {
+		t.Fatal(err)
+	}
+	fm.Extra["title"] = smuggled
 	built := Build(fm)
 	if strings.Count(built, "title:") != 1 {
 		t.Errorf("duplicate title key emitted:\n%s", built)
@@ -667,7 +686,7 @@ func TestApplyProducerFields(t *testing.T) {
 		Created:  "2026-01-01T00:00:00Z",
 		Modified: "2026-01-01T00:00:00Z",
 	}
-	err := ApplyProducerFields(fm, map[string]any{
+	err := ApplyProducerFields(fm, mustProducerFields(t, map[string]any{
 		"id":                "forged-id",             // nb-owned: ignored
 		"created":           "1999-01-01T00:00:00Z",  // nb-owned: ignored
 		"type":              "somewhere/else",        // nb-owned: ignored
@@ -676,7 +695,7 @@ func TestApplyProducerFields(t *testing.T) {
 		"priority":          "p1",                    // known: replaced
 		"pomodoro_block_id": "blk-1",                 // producer: Extra
 		"pomodoro_tokens":   1234,                    // producer: Extra
-	})
+	}))
 	if err != nil {
 		t.Fatalf("ApplyProducerFields: %v", err)
 	}
@@ -689,18 +708,18 @@ func TestApplyProducerFields(t *testing.T) {
 	if !reflect.DeepEqual(fm.Tags, []string{"pomodoro", "wb"}) {
 		t.Errorf("tags not coerced/replaced: %v", fm.Tags)
 	}
-	if fm.Extra["pomodoro_block_id"] != "blk-1" || fm.Extra["pomodoro_tokens"] != 1234 {
+	if fm.ExtraValue("pomodoro_block_id") != "blk-1" || fm.ExtraValue("pomodoro_tokens") != 1234 {
 		t.Errorf("producer fields not carried into Extra: %#v", fm.Extra)
 	}
 
 	// Shape violations are named errors, not silent coercions.
-	if err := ApplyProducerFields(fm, map[string]any{"title": 42}); err == nil {
+	if err := ApplyProducerFields(fm, mustProducerFields(t, map[string]any{"title": 42})); err == nil {
 		t.Error("expected non-string title to be rejected")
 	}
-	if err := ApplyProducerFields(fm, map[string]any{"tags": "not-a-list"}); err == nil {
+	if err := ApplyProducerFields(fm, mustProducerFields(t, map[string]any{"tags": "not-a-list"})); err == nil {
 		t.Error("expected non-list tags to be rejected")
 	}
-	if err := ApplyProducerFields(fm, map[string]any{"bad key!": "x"}); err == nil {
+	if err := ApplyProducerFields(fm, mustProducerFields(t, map[string]any{"bad key!": "x"})); err == nil {
 		t.Error("expected malformed extension key to be rejected")
 	}
 }
@@ -718,8 +737,11 @@ func TestLoadProducerFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadProducerFields(json): %v", err)
 	}
-	if fields["pomodoro_block_id"] != "blk-1" || fields["pomodoro_jobs_completed"] != 3 {
-		t.Errorf("json fields = %#v", fields)
+	if got := decodeField(t, fields, "pomodoro_block_id"); got != "blk-1" {
+		t.Errorf("json pomodoro_block_id = %#v", got)
+	}
+	if got := decodeField(t, fields, "pomodoro_jobs_completed"); got != 3 {
+		t.Errorf("json pomodoro_jobs_completed = %#v", got)
 	}
 
 	yamlPath := filepath.Join(dir, "fm.yml")
@@ -730,8 +752,8 @@ func TestLoadProducerFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadProducerFields(yaml): %v", err)
 	}
-	if fields["hn_item_id"] != 42 {
-		t.Errorf("yaml fields = %#v", fields)
+	if got := decodeField(t, fields, "hn_item_id"); got != 42 {
+		t.Errorf("yaml hn_item_id = %#v", got)
 	}
 
 	badPath := filepath.Join(dir, "bad.json")
@@ -786,4 +808,29 @@ func TestUpdateField(t *testing.T) {
 	if err := UpdateField(fm, "bogus", "x"); err == nil {
 		t.Error("expected unsupported field to be rejected")
 	}
+}
+
+// mustProducerFields is the in-process form of a --frontmatter-file: the map is
+// encoded to nodes through exactly the path LoadProducerFields uses.
+func mustProducerFields(t *testing.T, fields map[string]any) ProducerFields {
+	t.Helper()
+	pf, err := NewProducerFields(fields)
+	if err != nil {
+		t.Fatalf("NewProducerFields: %v", err)
+	}
+	return pf
+}
+
+// decodeField reads one producer field back as a plain Go value.
+func decodeField(t *testing.T, fields ProducerFields, key string) any {
+	t.Helper()
+	node, ok := fields[key]
+	if !ok {
+		t.Fatalf("producer field %q absent", key)
+	}
+	var v any
+	if err := node.Decode(&v); err != nil {
+		t.Fatalf("decode producer field %q: %v", key, err)
+	}
+	return v
 }

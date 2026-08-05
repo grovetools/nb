@@ -16,6 +16,16 @@ import (
 	"github.com/grovetools/nb/pkg/frontmatter"
 )
 
+// producerFields builds ProducerFields from a literal map so these tests keep
+// reading like the argument vectors a producer actually sends, while going
+// through the same node encoding the --frontmatter-file path uses.
+func producerFields(t *testing.T, fields map[string]any) frontmatter.ProducerFields {
+	t.Helper()
+	pf, err := frontmatter.NewProducerFields(fields)
+	require.NoError(t, err)
+	return pf
+}
+
 // newStructuredTestService builds a Service against a throwaway centralized
 // notebook root, plus a workspace context that resolves into it. Unlike
 // newTestService this wires a real NotebookLocator, because the structured
@@ -63,7 +73,7 @@ func TestCreateStructuredNoteMergesProducerFrontmatter(t *testing.T) {
 		"pomodoro_block_id": "blk-1",
 		"id":                "forged", // nb-owned: must lose
 	}
-	note, existed, err := s.CreateStructuredNote(ctx, "worklog/pomodoro", "Pomodoro Block", producer, "# Work-block summary\n", StructuredNoteOptions{
+	note, existed, err := s.CreateStructuredNote(ctx, "worklog/pomodoro", "Pomodoro Block", producerFields(t, producer), "# Work-block summary\n", StructuredNoteOptions{
 		IdempotencyKey: "pomodoro:blk-1",
 	})
 	require.NoError(t, err)
@@ -78,8 +88,8 @@ func TestCreateStructuredNoteMergesProducerFrontmatter(t *testing.T) {
 	assert.NotEmpty(t, fm.ID)
 	assert.Equal(t, "Pomodoro 2026-08-05 09:00–09:50", fm.Title)
 	assert.Equal(t, []string{"pomodoro", "work-block"}, fm.Tags)
-	assert.Equal(t, "blk-1", fm.Extra["pomodoro_block_id"])
-	assert.Equal(t, "pomodoro:blk-1", fm.Extra[frontmatter.IdempotencyKeyField])
+	assert.Equal(t, "blk-1", fm.ExtraValue("pomodoro_block_id"))
+	assert.Equal(t, "pomodoro:blk-1", fm.ExtraValue(frontmatter.IdempotencyKeyField))
 	assert.NotEmpty(t, fm.Created)
 	assert.Contains(t, body, "# Work-block summary")
 
@@ -100,12 +110,12 @@ func TestCreateStructuredNoteIdempotent(t *testing.T) {
 	s, ctx, _ := newStructuredTestService(t)
 
 	opts := StructuredNoteOptions{IdempotencyKey: "pomodoro:blk-1"}
-	first, existed, err := s.CreateStructuredNote(ctx, "worklog/pomodoro", "Block One", map[string]any{"pomodoro_block_id": "blk-1"}, "body v1", opts)
+	first, existed, err := s.CreateStructuredNote(ctx, "worklog/pomodoro", "Block One", producerFields(t, map[string]any{"pomodoro_block_id": "blk-1"}), "body v1", opts)
 	require.NoError(t, err)
 	require.False(t, existed)
 
 	// Different title, body, and producer fields: the KEY decides identity.
-	second, existed, err := s.CreateStructuredNote(ctx, "worklog/pomodoro", "Retried Block", map[string]any{"pomodoro_block_id": "blk-1-retry"}, "body v2", opts)
+	second, existed, err := s.CreateStructuredNote(ctx, "worklog/pomodoro", "Retried Block", producerFields(t, map[string]any{"pomodoro_block_id": "blk-1-retry"}), "body v2", opts)
 	require.NoError(t, err)
 	assert.True(t, existed)
 	assert.Equal(t, first.Path, second.Path)
@@ -197,29 +207,29 @@ pomodoro_jobs_completed: 3
 
 	fm, _ := readFrontmatter(t, notePath)
 	assert.Equal(t, "20260805-090000-block", fm.ID)
-	assert.Equal(t, "blk-1", fm.Extra["pomodoro_block_id"], "move rewrite must keep producer keys")
-	assert.Equal(t, 3, fm.Extra["pomodoro_jobs_completed"])
-	assert.Equal(t, "pomodoro:blk-1", fm.Extra[frontmatter.IdempotencyKeyField])
+	assert.Equal(t, "blk-1", fm.ExtraValue("pomodoro_block_id"), "move rewrite must keep producer keys")
+	assert.Equal(t, 3, fm.ExtraValue("pomodoro_jobs_completed"))
+	assert.Equal(t, "pomodoro:blk-1", fm.ExtraValue(frontmatter.IdempotencyKeyField))
 }
 
 func TestUpdateStructuredNoteMergePolicy(t *testing.T) {
 	events := captureNoteEvents(t)
 	s, ctx, _ := newStructuredTestService(t)
 
-	note, _, err := s.CreateStructuredNote(ctx, "worklog/pomodoro", "Block", map[string]any{
+	note, _, err := s.CreateStructuredNote(ctx, "worklog/pomodoro", "Block", producerFields(t, map[string]any{
 		"pomodoro_block_id":       "blk-1",
 		"pomodoro_summary_status": "pending",
-	}, "# v1\n", StructuredNoteOptions{IdempotencyKey: "pomodoro:blk-1"})
+	}), "# v1\n", StructuredNoteOptions{IdempotencyKey: "pomodoro:blk-1"})
 	require.NoError(t, err)
 	fmBefore, _ := readFrontmatter(t, note.Path)
 
 	newBody := "# v2\n\nThe LLM summary arrived.\n"
-	updated, err := s.UpdateStructuredNote(note.Path, map[string]any{
+	updated, err := s.UpdateStructuredNote(note.Path, producerFields(t, map[string]any{
 		"pomodoro_summary_status": "final",
 		"pomodoro_tokens":         1234,
 		"id":                      "forged",               // nb-owned: must lose
 		"created":                 "1999-01-01T00:00:00Z", // nb-owned: must lose
-	}, &newBody)
+	}), &newBody)
 	require.NoError(t, err)
 	// UpdateStructuredNote canonicalizes the path (symlinks, e.g. macOS
 	// /var → /private/var), so compare canonical spellings.
@@ -233,10 +243,10 @@ func TestUpdateStructuredNoteMergePolicy(t *testing.T) {
 	assert.Equal(t, fmBefore.Created, fm.Created)
 	assert.True(t, strings.HasSuffix(fm.Modified, "Z"), "modified should be RFC3339 UTC, got %q", fm.Modified)
 	// Producer fields merged: updated ones replaced, untouched ones kept.
-	assert.Equal(t, "final", fm.Extra["pomodoro_summary_status"])
-	assert.Equal(t, 1234, fm.Extra["pomodoro_tokens"])
-	assert.Equal(t, "blk-1", fm.Extra["pomodoro_block_id"])
-	assert.Equal(t, "pomodoro:blk-1", fm.Extra[frontmatter.IdempotencyKeyField])
+	assert.Equal(t, "final", fm.ExtraValue("pomodoro_summary_status"))
+	assert.Equal(t, 1234, fm.ExtraValue("pomodoro_tokens"))
+	assert.Equal(t, "blk-1", fm.ExtraValue("pomodoro_block_id"))
+	assert.Equal(t, "pomodoro:blk-1", fm.ExtraValue(frontmatter.IdempotencyKeyField))
 	// Body replaced.
 	assert.Contains(t, body, "# v2")
 	assert.NotContains(t, body, "# v1")
@@ -256,11 +266,11 @@ func TestUpdateStructuredNoteKeepsBodyWhenNil(t *testing.T) {
 	note, _, err := s.CreateStructuredNote(ctx, "inbox", "Keep Body", nil, "# The body stays\n", StructuredNoteOptions{})
 	require.NoError(t, err)
 
-	_, err = s.UpdateStructuredNote(note.Path, map[string]any{"custom_field": "x"}, nil)
+	_, err = s.UpdateStructuredNote(note.Path, producerFields(t, map[string]any{"custom_field": "x"}), nil)
 	require.NoError(t, err)
 
 	fm, body := readFrontmatter(t, note.Path)
-	assert.Equal(t, "x", fm.Extra["custom_field"])
+	assert.Equal(t, "x", fm.ExtraValue("custom_field"))
 	assert.Contains(t, body, "# The body stays")
 }
 
@@ -277,7 +287,7 @@ func TestUpdateStructuredNoteRefusesForeignPaths(t *testing.T) {
 	// perfectly valid note lives there.
 	outside := filepath.Join(t.TempDir(), "note.md")
 	require.NoError(t, os.WriteFile(outside, []byte("---\nid: x\ntitle: X\naliases: []\ntags: []\ncreated: 2026-01-01T00:00:00Z\nmodified: 2026-01-01T00:00:00Z\n---\n\nBody\n"), 0o644))
-	_, err = s.UpdateStructuredNote(outside, map[string]any{"k": "v"}, nil)
+	_, err = s.UpdateStructuredNote(outside, producerFields(t, map[string]any{"k": "v"}), nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "notebook root")
 }
@@ -294,10 +304,10 @@ func TestUpdateStructuredNoteAcceptsMarkerNotebook(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(notePath), 0o755))
 	require.NoError(t, os.WriteFile(notePath, []byte("---\nid: m1\ntitle: Marked\naliases: []\ntags: []\ncreated: 2026-01-01T00:00:00Z\nmodified: 2026-01-01T00:00:00Z\n---\n\nBody\n"), 0o644))
 
-	updated, err := s.UpdateStructuredNote(notePath, map[string]any{"source": "test"}, nil)
+	updated, err := s.UpdateStructuredNote(notePath, producerFields(t, map[string]any{"source": "test"}), nil)
 	require.NoError(t, err)
 	fm, _ := readFrontmatter(t, updated.Path)
-	assert.Equal(t, "test", fm.Extra["source"])
+	assert.Equal(t, "test", fm.ExtraValue("source"))
 }
 
 // TestUpdateStructuredNoteRefusesFrontmatterless: updating a file without
@@ -312,7 +322,7 @@ func TestUpdateStructuredNoteRefusesFrontmatterless(t *testing.T) {
 	bare := filepath.Join(filepath.Dir(note.Path), "bare.md")
 	require.NoError(t, os.WriteFile(bare, []byte("# Just markdown\n"), 0o644))
 
-	_, err = s.UpdateStructuredNote(bare, map[string]any{"k": "v"}, nil)
+	_, err = s.UpdateStructuredNote(bare, producerFields(t, map[string]any{"k": "v"}), nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no frontmatter")
 }

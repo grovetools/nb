@@ -58,11 +58,74 @@ type Frontmatter struct {
 	// (yaml.v3 collects unmatched keys into the `,inline` map). Before it
 	// existed, any Parse→Build cycle — move, copy, internal
 	// update-frontmatter — silently stripped producer-owned keys like
-	// `pomodoro_block_id` or flow's `status`, so external producers could
-	// never trust nb with structured metadata. Build re-emits these keys in
-	// sorted order after the known fields, so the round-trip is lossless AND
-	// deterministic.
-	Extra map[string]any `yaml:",inline"`
+	// `pomodoro_block_id`, flow's `status` or grove-gtd's namespaced `gtd:`
+	// block, so no external producer could trust nb with structured metadata.
+	// Build re-emits these keys after the known fields, so the round-trip is
+	// lossless AND deterministic.
+	//
+	// The values are raw yaml.Node, not decoded Go values, so the passthrough
+	// is VERBATIM. Decoding to interface{} would quietly rewrite the data nb
+	// is only supposed to be carrying: yaml.v3 resolves an unquoted
+	// YYYY-MM-DD to time.Time, so a plugin's `defer: 2026-08-10` came back as
+	// an RFC3339 stamp (or worse) on the next unrelated `nb move`. Nodes also
+	// preserve the author's key order and flow/block style, so a rewrite of
+	// one field never churns the spelling of somebody else's block.
+	//
+	// nb assigns no meaning to anything in here. Use ExtraValue/ExtraString
+	// to read and SetExtra to write rather than touching the nodes directly.
+	Extra map[string]yaml.Node `yaml:",inline"`
+}
+
+// ExtraValue decodes the extension key into a plain Go value, or returns nil
+// if the key is absent (or holds something undecodable). Callers that need the
+// raw spelling should read fm.Extra directly — this is the convenience path
+// for the handful of places nb inspects an extension key it does not own.
+func (fm *Frontmatter) ExtraValue(key string) any {
+	node, ok := fm.Extra[key]
+	if !ok {
+		return nil
+	}
+	var v any
+	if err := node.Decode(&v); err != nil {
+		return nil
+	}
+	return v
+}
+
+// ExtraString reads an extension key expected to hold a string scalar. The
+// bool reports whether the key was present AND string-shaped, so callers can
+// tell "no key" from "a key holding a map".
+func (fm *Frontmatter) ExtraString(key string) (string, bool) {
+	node, ok := fm.Extra[key]
+	if !ok {
+		return "", false
+	}
+	var s string
+	if err := node.Decode(&s); err != nil {
+		return "", false
+	}
+	return s, true
+}
+
+// SetExtra stores value under an extension key, encoding it to a node. It
+// rejects keys that name a typed field above: those are owned by the struct,
+// and letting one land in Extra as well would emit the key twice and make the
+// note unparseable-in-practice. Values that came from a file are always
+// encodable; an unencodable programmatic value (a channel, a func) errors
+// rather than corrupting the note.
+func (fm *Frontmatter) SetExtra(key string, value any) error {
+	if knownFieldNames[key] {
+		return fmt.Errorf("frontmatter key %q is a typed field, not an extension key", key)
+	}
+	var node yaml.Node
+	if err := node.Encode(value); err != nil {
+		return fmt.Errorf("encode frontmatter key %q: %w", key, err)
+	}
+	if fm.Extra == nil {
+		fm.Extra = map[string]yaml.Node{}
+	}
+	fm.Extra[key] = node
+	return nil
 }
 
 // IdempotencyKeyField is the frontmatter key `nb new --idempotency-key`
@@ -287,19 +350,27 @@ func Build(fm *Frontmatter) string {
 	return sb.String()
 }
 
-// marshalExtraEntry renders one extension key as YAML. Values go through the
-// real YAML encoder (2-space indent, matching the rest of the codebase) rather
-// than the hand-rolled formatYAMLValue, because producer values can be
-// numbers, booleans, lists, or nested maps — not just strings.
-func marshalExtraEntry(key string, value any) string {
+// marshalExtraEntry renders one extension key as YAML by re-encoding the node
+// the file was parsed into. It goes through the real YAML encoder (2-space
+// indent, matching the rest of the codebase) rather than the hand-rolled
+// formatYAMLValue, because extension values can be numbers, booleans, lists or
+// nested maps — not just strings — and because the node carries its own
+// scalar style, so the value is emitted with the spelling it arrived with.
+//
+// The key is wrapped in a one-entry mapping node rather than a Go map so that
+// nothing on this path re-resolves the value's type.
+func marshalExtraEntry(key string, value yaml.Node) string {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
-	if err := enc.Encode(map[string]any{key: value}); err != nil {
-		// An unencodable value (e.g. a channel smuggled in programmatically)
-		// is dropped rather than corrupting the note file. File-loaded
-		// producer values can never hit this: anything YAML/JSON parsed is
-		// YAML-encodable.
+	entry := yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Value: key},
+		&value,
+	}}
+	if err := enc.Encode(&entry); err != nil {
+		// A malformed node (only reachable by building one by hand rather
+		// than through Parse or SetExtra) is dropped rather than corrupting
+		// the note file.
 		return ""
 	}
 	_ = enc.Close()
@@ -394,20 +465,45 @@ func ExtractPathTags(noteType string) []string {
 	return tags
 }
 
+// ProducerFields is the contents of a producer's --frontmatter-file, held as
+// raw yaml nodes for the same reason Frontmatter.Extra is: decoding to
+// interface{} on the way in would coerce the producer's values (unquoted dates
+// to time.Time, most notably) before nb ever writes them, so a plugin could
+// not round-trip its own metadata through the structured seam.
+type ProducerFields map[string]yaml.Node
+
 // LoadProducerFields reads a producer frontmatter file (--frontmatter-file)
 // and returns its top-level fields. The file may be JSON or YAML — JSON is a
 // subset of YAML, so one unmarshal handles both — but its root must be a
 // mapping; anything else is a malformed producer file, not a note.
-func LoadProducerFields(path string) (map[string]any, error) {
+func LoadProducerFields(path string) (ProducerFields, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read frontmatter file: %w", err)
 	}
-	var fields map[string]any
+	var fields ProducerFields
 	if err := yaml.Unmarshal(data, &fields); err != nil {
 		return nil, fmt.Errorf("parse frontmatter file %s (JSON or YAML mapping expected): %w", path, err)
 	}
 	return fields, nil
+}
+
+// NewProducerFields builds ProducerFields from plain Go values, for in-process
+// callers that have a map rather than a file. The values round-trip through the
+// YAML encoder, so a Go string that looks like a date stays a string.
+func NewProducerFields(fields map[string]any) (ProducerFields, error) {
+	if fields == nil {
+		return nil, nil
+	}
+	data, err := yaml.Marshal(fields)
+	if err != nil {
+		return nil, fmt.Errorf("encode producer fields: %w", err)
+	}
+	var out ProducerFields
+	if err := yaml.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("decode producer fields: %w", err)
+	}
+	return out, nil
 }
 
 // ApplyProducerFields merges producer-supplied frontmatter fields into fm,
@@ -423,7 +519,7 @@ func LoadProducerFields(path string) (map[string]any, error) {
 //   - Every other key is a namespaced producer field (`pomodoro_*`, `hn_*`,
 //     `source`, …) and is carried verbatim into the Extra map, where Build
 //     round-trips it losslessly.
-func ApplyProducerFields(fm *Frontmatter, fields map[string]any) error {
+func ApplyProducerFields(fm *Frontmatter, fields ProducerFields) error {
 	// Deterministic application order so multi-key error reporting is stable.
 	keys := make([]string, 0, len(fields))
 	for k := range fields {
@@ -441,7 +537,7 @@ func ApplyProducerFields(fm *Frontmatter, fields map[string]any) error {
 				return fmt.Errorf("invalid frontmatter key %q (want a letter followed by letters, digits, '_', '.' or '-')", key)
 			}
 			if fm.Extra == nil {
-				fm.Extra = map[string]any{}
+				fm.Extra = map[string]yaml.Node{}
 			}
 			fm.Extra[key] = value
 			continue
@@ -489,47 +585,72 @@ func ApplyProducerFields(fm *Frontmatter, fields map[string]any) error {
 	return nil
 }
 
-// setStringField assigns a producer value to a string-typed known field,
-// rejecting non-string shapes with the offending key named.
-func setStringField(dst *string, key string, value any) error {
-	s, ok := value.(string)
-	if !ok {
-		return fmt.Errorf("frontmatter field %q must be a string, got %T", key, value)
+// setStringField assigns a producer value to a string-typed known field.
+//
+// The shape check is on the node's resolved TAG, not on whether Decode
+// succeeds: yaml.v3 happily decodes an `!!int` scalar into a Go string, so
+// `title: 42` would silently become "42". A producer that means the string
+// "42" can say so by quoting it — which resolves to !!str and passes.
+func setStringField(dst *string, key string, node yaml.Node) error {
+	if node.Kind != yaml.ScalarNode || (node.Tag != "" && node.Tag != strTag) {
+		return fmt.Errorf("frontmatter field %q must be a string, got %s", key, nodeShape(node))
 	}
-	*dst = s
+	*dst = node.Value
 	return nil
 }
 
-// setBoolField is setStringField's boolean sibling.
-func setBoolField(dst *bool, key string, value any) error {
-	b, ok := value.(bool)
-	if !ok {
-		return fmt.Errorf("frontmatter field %q must be a boolean, got %T", key, value)
+// setBoolField is setStringField's boolean sibling, tag-strict for the same
+// reason: `draft: "yes"` is a string, not a request to set the flag.
+func setBoolField(dst *bool, key string, node yaml.Node) error {
+	if node.Kind != yaml.ScalarNode || node.Tag != boolTag {
+		return fmt.Errorf("frontmatter field %q must be a boolean, got %s", key, nodeShape(node))
+	}
+	var b bool
+	if err := node.Decode(&b); err != nil {
+		return fmt.Errorf("frontmatter field %q must be a boolean, got %s", key, nodeShape(node))
 	}
 	*dst = b
 	return nil
 }
 
-// setStringSliceField coerces a producer list into []string. YAML/JSON
-// unmarshal yields []any, so each element is checked individually.
-func setStringSliceField(dst *[]string, key string, value any) error {
-	switch v := value.(type) {
-	case []string:
-		*dst = v
-		return nil
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			s, ok := item.(string)
-			if !ok {
-				return fmt.Errorf("frontmatter field %q must be a list of strings, got element of type %T", key, item)
-			}
-			out = append(out, s)
+// setStringSliceField decodes a producer list into []string, rejecting both a
+// non-list and a list holding a non-string element (element-wise, for the same
+// tag reason as setStringField).
+func setStringSliceField(dst *[]string, key string, node yaml.Node) error {
+	if node.Kind != yaml.SequenceNode {
+		return fmt.Errorf("frontmatter field %q must be a list of strings, got %s", key, nodeShape(node))
+	}
+	out := make([]string, 0, len(node.Content))
+	for _, item := range node.Content {
+		if item.Kind != yaml.ScalarNode || (item.Tag != "" && item.Tag != strTag) {
+			return fmt.Errorf("frontmatter field %q must be a list of strings, got element %s", key, nodeShape(*item))
 		}
-		*dst = out
-		return nil
+		out = append(out, item.Value)
+	}
+	*dst = out
+	return nil
+}
+
+// The yaml tags this package makes decisions on.
+const (
+	strTag  = "!!str"
+	boolTag = "!!bool"
+)
+
+// nodeShape names what a node holds, for producer-facing error messages. The
+// yaml tag (`!!int`, `!!map`) is more useful to someone debugging a
+// frontmatter file than the Go type the value would have decoded to.
+func nodeShape(node yaml.Node) string {
+	if node.Tag != "" {
+		return node.Tag
+	}
+	switch node.Kind {
+	case yaml.MappingNode:
+		return "a mapping"
+	case yaml.SequenceNode:
+		return "a list"
 	default:
-		return fmt.Errorf("frontmatter field %q must be a list of strings, got %T", key, value)
+		return "an unrecognized value"
 	}
 }
 

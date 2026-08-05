@@ -77,7 +77,7 @@ func (s *Service) CreateStructuredNote(
 	ctx *WorkspaceContext,
 	noteType models.NoteType,
 	title string,
-	producer map[string]any,
+	producer frontmatter.ProducerFields,
 	body string,
 	opts StructuredNoteOptions,
 ) (*models.Note, bool, error) {
@@ -169,10 +169,9 @@ func (s *Service) CreateStructuredNote(
 	// back, and because it lives in frontmatter.Extra it survives moves and
 	// copies like every other producer field.
 	if opts.IdempotencyKey != "" {
-		if fm.Extra == nil {
-			fm.Extra = map[string]any{}
+		if err := fm.SetExtra(frontmatter.IdempotencyKeyField, opts.IdempotencyKey); err != nil {
+			return nil, false, err
 		}
-		fm.Extra[frontmatter.IdempotencyKeyField] = opts.IdempotencyKey
 	}
 
 	filename := opts.Filename
@@ -239,7 +238,7 @@ func findNoteByIdempotencyKey(dir, key string) (string, error) {
 		if err != nil || fm == nil {
 			continue // notes without (parseable) frontmatter can't hold a key
 		}
-		if existing, ok := fm.Extra[frontmatter.IdempotencyKeyField].(string); ok && existing == key {
+		if existing, ok := fm.ExtraString(frontmatter.IdempotencyKeyField); ok && existing == key {
 			return path, nil
 		}
 	}
@@ -252,7 +251,7 @@ func findNoteByIdempotencyKey(dir, key string) (string, error) {
 // modified is refreshed, validated producer fields replace/extend the rest.
 // The write goes through UpdateNoteWithContent, so the updated event reaches
 // the EmitNoteEvent funnel.
-func (s *Service) UpdateStructuredNote(path string, producer map[string]any, body *string) (*models.Note, error) {
+func (s *Service) UpdateStructuredNote(path string, producer frontmatter.ProducerFields, body *string) (*models.Note, error) {
 	if !filepath.IsAbs(path) {
 		return nil, fmt.Errorf("--path must be absolute, got %q", path)
 	}

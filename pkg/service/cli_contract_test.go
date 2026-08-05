@@ -154,8 +154,8 @@ func TestPomodoroCreateInvocationVerbatim(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, fm)
 	assert.Equal(t, id, fm.ID)
-	assert.Equal(t, "blk-1", fm.Extra["pomodoro_block_id"])
-	assert.Equal(t, "pomodoro:blk-1", fm.Extra[frontmatter.IdempotencyKeyField])
+	assert.Equal(t, "blk-1", fm.ExtraValue("pomodoro_block_id"))
+	assert.Equal(t, "pomodoro:blk-1", fm.ExtraValue(frontmatter.IdempotencyKeyField))
 	assert.Contains(t, body, "# Work-block summary")
 
 	// Idempotency across full invocations: the retry returns the FIRST
@@ -212,8 +212,8 @@ func TestPomodoroUpdateInvocationVerbatim(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, fm)
 	assert.Equal(t, createdID, fm.ID, "update must preserve the note id")
-	assert.Equal(t, "final", fm.Extra["pomodoro_summary_status"])
-	assert.Equal(t, "pomodoro:blk-1", fm.Extra[frontmatter.IdempotencyKeyField], "the key survives updates")
+	assert.Equal(t, "final", fm.ExtraValue("pomodoro_summary_status"))
+	assert.Equal(t, "pomodoro:blk-1", fm.ExtraValue(frontmatter.IdempotencyKeyField), "the key survives updates")
 	assert.Contains(t, body, "Status: final", "body must be replaced")
 }
 
