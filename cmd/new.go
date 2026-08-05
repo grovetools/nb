@@ -11,6 +11,7 @@ import (
 
 	grovelogging "github.com/grovetools/core/logging"
 
+	"github.com/grovetools/nb/pkg/frontmatter"
 	"github.com/grovetools/nb/pkg/models"
 	"github.com/grovetools/nb/pkg/service"
 )
@@ -21,10 +22,20 @@ func NewNewCmd(svc **service.Service, workspaceOverride *string) *cobra.Command 
 	var (
 		noteType   string
 		noteName   string
+		noteTitle  string
 		noEdit     bool
 		globalNote bool
 		fromStdin  bool
 		priority   string
+
+		// Structured-create flags (the external-producer seam; see ticket
+		// 20260803-nb-structured-idempotent-note-create-update). Any of them
+		// routes creation through CreateStructuredNote.
+		jsonOut         bool
+		frontmatterFile string
+		bodyFile        string
+		idempotencyKey  string
+		customFilename  string
 	)
 
 	cmd := &cobra.Command{
@@ -52,8 +63,25 @@ Examples:
 
   # Explicit stdin control:
   echo "content" | nb new --stdin "title"
-  nb new --stdin "manual" < file.txt`,
+  nb new --stdin "manual" < file.txt
+
+  # Structured creation for external producers (machine receipt on stdout):
+  nb new --json --type worklog/pomodoro --title "Block" \
+    --idempotency-key pomodoro:blk-1 \
+    --frontmatter-file fm.json --body-file body.md --no-edit`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Receipt purity: --json promises a bare {"id","path"} on stdout
+			// and nothing else. The structured console echo writes through
+			// the logging global writer, which defaults to os.Stdout and, in
+			// non-TTY runs (exactly how producers invoke nb), echoes
+			// StructuredOnly entries there. Park it on stderr for the
+			// duration of this command so human/audit chatter can never
+			// corrupt the machine receipt.
+			if jsonOut {
+				prev := grovelogging.SwapGlobalOutput(os.Stderr)
+				defer grovelogging.SwapGlobalOutput(prev)
+			}
+
 			s := *svc // Dereference the pointer to get the service instance
 
 			// Get workspace context, potentially overridden by the -W flag
@@ -80,8 +108,13 @@ Examples:
 				}
 			}
 
-			// Get title from args or flag
+			// Get title from flags or args. --title is the alias external
+			// producers use (pomodoro's CLIWriter passes it); --name is the
+			// historical spelling; a positional title wins over both.
 			title := noteName
+			if noteTitle != "" {
+				title = noteTitle
+			}
 			if len(args) > 0 {
 				title = args[0]
 			}
@@ -105,6 +138,58 @@ Examples:
 				if err != nil {
 					return fmt.Errorf("read stdin: %w", err)
 				}
+			}
+
+			// Structured creation: any structured flag routes through the
+			// external-producer seam. It never opens an editor (producers are
+			// machines; --json additionally promises a bare receipt on
+			// stdout) and merges producer frontmatter under the nb-wins
+			// policy implemented by the service layer.
+			if jsonOut || frontmatterFile != "" || bodyFile != "" || idempotencyKey != "" || customFilename != "" {
+				if actualNoteType == "concepts" {
+					return fmt.Errorf("structured creation flags are not supported for the concepts type")
+				}
+
+				var producer map[string]any
+				if frontmatterFile != "" {
+					producer, err = frontmatter.LoadProducerFields(frontmatterFile)
+					if err != nil {
+						return err
+					}
+				}
+
+				// --body-file wins over stdin; stdin stays usable so the
+				// ticket's "body on stdin or --body-file" both hold.
+				body := string(stdinContent)
+				if bodyFile != "" {
+					data, err := os.ReadFile(bodyFile)
+					if err != nil {
+						return fmt.Errorf("read body file: %w", err)
+					}
+					body = string(data)
+				}
+
+				createCtx := ctx
+				if globalNote {
+					if createCtx, err = s.GetWorkspaceContext("global"); err != nil {
+						return fmt.Errorf("get global workspace context: %w", err)
+					}
+				}
+
+				note, existed, err := s.CreateStructuredNote(createCtx, models.NoteType(actualNoteType), title, producer, body, service.StructuredNoteOptions{
+					IdempotencyKey: idempotencyKey,
+					Filename:       customFilename,
+					Priority:       priority,
+				})
+				if err != nil {
+					return err
+				}
+				if existed {
+					// The idempotency key matched: the receipt points at the
+					// existing note and nothing was written.
+					return emitNoteReceipt(cmd, newUlog, note, jsonOut, "already exists", "Exists:")
+				}
+				return emitNoteReceipt(cmd, newUlog, note, jsonOut, "created", "Created:")
 			}
 
 			// Create options
@@ -198,6 +283,16 @@ Examples:
 	cmd.Flags().BoolVarP(&globalNote, "global", "g", false, "Create note in global workspace")
 	cmd.Flags().BoolVar(&fromStdin, "stdin", false, "Read content from stdin (auto-detected when piped)")
 	cmd.Flags().StringVar(&priority, "priority", "", "Priority level: p0 (most critical) .. p3, empty = none")
+
+	// Structured-create flags for external producers. --title is an alias of
+	// --name (pomodoro's note writer spells it --title); both stay so neither
+	// caller population breaks.
+	cmd.Flags().StringVar(&noteTitle, "title", "", "Note title (alias of --name)")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Print a machine receipt {\"id\",\"path\"} on stdout (implies no editor)")
+	cmd.Flags().StringVar(&frontmatterFile, "frontmatter-file", "", "JSON or YAML file of producer frontmatter fields to merge (nb-owned fields win)")
+	cmd.Flags().StringVar(&bodyFile, "body-file", "", "Read the note body from a file (wins over stdin)")
+	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Repeat-safe creation: a second create with the same key in the same type dir returns the existing note")
+	cmd.Flags().StringVar(&customFilename, "filename", "", "Producer-controlled basename within the type dir (plain *.md, replaces the generated YYYYMMDD-title.md)")
 
 	return cmd
 }

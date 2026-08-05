@@ -38,7 +38,7 @@ func (s *Service) CreateNoteWithContent(
 	fm *frontmatter.Frontmatter,
 	body string,
 ) (*models.Note, error) {
-	// 1. Ensure directory exists
+	// Ensure directory exists
 	noteDir, err := s.getNotePathForContext(ctx, string(noteType))
 	if err != nil {
 		return nil, fmt.Errorf("get note path: %w", err)
@@ -47,19 +47,33 @@ func (s *Service) CreateNoteWithContent(
 		return nil, fmt.Errorf("ensure directories: %w", err)
 	}
 
-	// 2. Generate filename from title
-	filename := GenerateFilename(title)
-	notePath := filepath.Join(noteDir, filename)
+	// Generate filename from title; the write and event emission are shared
+	// with the structured-create path (CreateStructuredNote), which differs
+	// only in how it picks the filename.
+	notePath := filepath.Join(noteDir, GenerateFilename(title))
+	return s.writeNewNoteFile(ctx, noteType, notePath, fm, body)
+}
 
-	// 3. Build complete content with frontmatter + body
+// writeNewNoteFile is the shared tail of programmatic note creation: it
+// renders frontmatter + body to notePath, aligns the file mtime with the
+// frontmatter's modified stamp, and emits the created event through the
+// EmitNoteEvent funnel so every creation path is observable the same way.
+func (s *Service) writeNewNoteFile(
+	ctx *WorkspaceContext,
+	noteType models.NoteType,
+	notePath string,
+	fm *frontmatter.Frontmatter,
+	body string,
+) (*models.Note, error) {
+	// 1. Build complete content with frontmatter + body
 	content := frontmatter.BuildContent(fm, body)
 
-	// 4. Write file to disk
+	// 2. Write file to disk
 	if err := os.WriteFile(notePath, []byte(content), 0o644); err != nil {
 		return nil, fmt.Errorf("write note: %w", err)
 	}
 
-	// 5. Set file modification time to match frontmatter if specified
+	// 3. Set file modification time to match frontmatter if specified
 	if fm.Modified != "" {
 		if modTime, err := frontmatter.ParseTimestamp(fm.Modified); err == nil {
 			// Use the same time for both atime and mtime
@@ -67,7 +81,7 @@ func (s *Service) CreateNoteWithContent(
 		}
 	}
 
-	// 6. Parse the note and return it
+	// 4. Parse the note and return it
 	note, err := ParseNote(notePath)
 	if err != nil {
 		return nil, fmt.Errorf("parse created note: %w", err)

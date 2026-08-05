@@ -1,6 +1,8 @@
 package frontmatter
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -526,6 +528,218 @@ func TestPlanJobRoundTrip(t *testing.T) {
 	}
 	if fm2.PlanRef != fm.PlanRef || fm2.PlanJob != fm.PlanJob {
 		t.Errorf("round-trip changed link fields: %q/%q -> %q/%q", fm.PlanRef, fm.PlanJob, fm2.PlanRef, fm2.PlanJob)
+	}
+}
+
+// TestExtraRoundTripPreservesProducerKeys pins the core promise of the
+// structured-note contract: unknown frontmatter keys survive a Parse→Build
+// cycle. Before the Extra inline map, every such cycle (move, copy, internal
+// update-frontmatter) silently stripped producer keys like pomodoro_*.
+func TestExtraRoundTripPreservesProducerKeys(t *testing.T) {
+	content := `---
+id: n1
+title: Pomodoro Block
+aliases: []
+tags: [pomodoro, work-block]
+created: 2026-08-05T09:00:00Z
+modified: 2026-08-05T09:50:00Z
+idempotency_key: pomodoro:blk-1
+pomodoro_block_id: blk-1
+pomodoro_jobs_completed: 3
+source: pomodoro-panel
+---
+
+Body.
+`
+	fm, body, err := Parse(content)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if fm.Extra["pomodoro_block_id"] != "blk-1" {
+		t.Errorf("Extra[pomodoro_block_id] = %v, want blk-1", fm.Extra["pomodoro_block_id"])
+	}
+	if fm.Extra["pomodoro_jobs_completed"] != 3 {
+		t.Errorf("Extra[pomodoro_jobs_completed] = %v (%T), want 3", fm.Extra["pomodoro_jobs_completed"], fm.Extra["pomodoro_jobs_completed"])
+	}
+	if fm.Extra[IdempotencyKeyField] != "pomodoro:blk-1" {
+		t.Errorf("Extra[%s] = %v, want pomodoro:blk-1", IdempotencyKeyField, fm.Extra[IdempotencyKeyField])
+	}
+
+	rebuilt := BuildContent(fm, body)
+	for _, want := range []string{
+		"idempotency_key: pomodoro:blk-1",
+		"pomodoro_block_id: blk-1",
+		"pomodoro_jobs_completed: 3",
+		"source: pomodoro-panel",
+	} {
+		if !strings.Contains(rebuilt, want) {
+			t.Errorf("rebuilt missing %q; got:\n%s", want, rebuilt)
+		}
+	}
+
+	// The rebuild must be stable: a second cycle produces identical bytes
+	// (extras are emitted in sorted order, so map iteration cannot churn).
+	fm2, body2, err := Parse(rebuilt)
+	if err != nil {
+		t.Fatalf("re-Parse: %v", err)
+	}
+	if again := BuildContent(fm2, body2); again != rebuilt {
+		t.Errorf("Parse→Build not stable:\nfirst:\n%s\nsecond:\n%s", rebuilt, again)
+	}
+	if !reflect.DeepEqual(fm2.Extra, fm.Extra) {
+		t.Errorf("Extra changed across round-trip: %#v -> %#v", fm.Extra, fm2.Extra)
+	}
+}
+
+// TestBuildKnownFieldPrefixUnchanged guards against churn: a note that Build
+// itself produced (no extension keys) must Parse→Build byte-identically, so
+// landing the Extra map rewrites nothing in existing notebooks.
+func TestBuildKnownFieldPrefixUnchanged(t *testing.T) {
+	fm := &Frontmatter{
+		ID:         "stable-1",
+		Title:      "Stable Note",
+		Aliases:    []string{},
+		Tags:       []string{"issues"},
+		Repository: "myrepo",
+		Branch:     "main",
+		Created:    "2026-01-01T00:00:00Z",
+		Modified:   "2026-01-02T00:00:00Z",
+		Priority:   "p2",
+	}
+	content := BuildContent(fm, "# Stable Note\n")
+	parsed, body, err := Parse(content)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if rebuilt := BuildContent(parsed, body); rebuilt != content {
+		t.Errorf("round-trip churned a Build-produced note:\nbefore:\n%s\nafter:\n%s", content, rebuilt)
+	}
+}
+
+// TestBuildEmitsName pins the fix for the name field: it was parsed into the
+// struct but never re-emitted, so Parse→Build cycles stripped it — the same
+// silent-loss class as the unknown-key drop.
+func TestBuildEmitsName(t *testing.T) {
+	fm := &Frontmatter{
+		ID: "n1", Title: "Skill", Aliases: []string{}, Tags: []string{},
+		Created: "2026-01-01T00:00:00Z", Modified: "2026-01-01T00:00:00Z",
+		Name: "my-skill",
+	}
+	built := Build(fm)
+	if !strings.Contains(built, "name: my-skill") {
+		t.Errorf("Build dropped name:\n%s", built)
+	}
+	parsed, _, err := Parse(built + "\n\nBody")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if parsed.Name != "my-skill" {
+		t.Errorf("name did not round-trip: %q", parsed.Name)
+	}
+}
+
+// TestBuildSkipsCollidingExtraKeys: an Extra entry that names a known field
+// must not produce a duplicate YAML key.
+func TestBuildSkipsCollidingExtraKeys(t *testing.T) {
+	fm := &Frontmatter{
+		ID: "n1", Title: "Real Title", Aliases: []string{}, Tags: []string{},
+		Created: "2026-01-01T00:00:00Z", Modified: "2026-01-01T00:00:00Z",
+		Extra: map[string]any{"title": "Smuggled", "custom_key": "kept"},
+	}
+	built := Build(fm)
+	if strings.Count(built, "title:") != 1 {
+		t.Errorf("duplicate title key emitted:\n%s", built)
+	}
+	if !strings.Contains(built, "custom_key: kept") {
+		t.Errorf("legitimate extra key dropped:\n%s", built)
+	}
+}
+
+// TestApplyProducerFields pins the merge policy of the structured contract:
+// nb-owned fields are skipped (nb wins), known fields are typed and replaced,
+// namespaced fields land in Extra, malformed keys and shapes are rejected.
+func TestApplyProducerFields(t *testing.T) {
+	fm := &Frontmatter{
+		ID:       "keep-id",
+		Title:    "Old Title",
+		Aliases:  []string{},
+		Tags:     []string{"seed"},
+		Created:  "2026-01-01T00:00:00Z",
+		Modified: "2026-01-01T00:00:00Z",
+	}
+	err := ApplyProducerFields(fm, map[string]any{
+		"id":                "forged-id",             // nb-owned: ignored
+		"created":           "1999-01-01T00:00:00Z",  // nb-owned: ignored
+		"type":              "somewhere/else",        // nb-owned: ignored
+		"title":             "New Title",             // known: replaced
+		"tags":              []any{"pomodoro", "wb"}, // known: replaced, coerced
+		"priority":          "p1",                    // known: replaced
+		"pomodoro_block_id": "blk-1",                 // producer: Extra
+		"pomodoro_tokens":   1234,                    // producer: Extra
+	})
+	if err != nil {
+		t.Fatalf("ApplyProducerFields: %v", err)
+	}
+	if fm.ID != "keep-id" || fm.Created != "2026-01-01T00:00:00Z" || fm.Type != "" {
+		t.Errorf("nb-owned fields not preserved: id=%q created=%q type=%q", fm.ID, fm.Created, fm.Type)
+	}
+	if fm.Title != "New Title" || fm.Priority != "p1" {
+		t.Errorf("known fields not replaced: title=%q priority=%q", fm.Title, fm.Priority)
+	}
+	if !reflect.DeepEqual(fm.Tags, []string{"pomodoro", "wb"}) {
+		t.Errorf("tags not coerced/replaced: %v", fm.Tags)
+	}
+	if fm.Extra["pomodoro_block_id"] != "blk-1" || fm.Extra["pomodoro_tokens"] != 1234 {
+		t.Errorf("producer fields not carried into Extra: %#v", fm.Extra)
+	}
+
+	// Shape violations are named errors, not silent coercions.
+	if err := ApplyProducerFields(fm, map[string]any{"title": 42}); err == nil {
+		t.Error("expected non-string title to be rejected")
+	}
+	if err := ApplyProducerFields(fm, map[string]any{"tags": "not-a-list"}); err == nil {
+		t.Error("expected non-list tags to be rejected")
+	}
+	if err := ApplyProducerFields(fm, map[string]any{"bad key!": "x"}); err == nil {
+		t.Error("expected malformed extension key to be rejected")
+	}
+}
+
+// TestLoadProducerFields verifies both accepted encodings (JSON is a YAML
+// subset) and the mapping-root requirement.
+func TestLoadProducerFields(t *testing.T) {
+	dir := t.TempDir()
+
+	jsonPath := filepath.Join(dir, "fm.json")
+	if err := os.WriteFile(jsonPath, []byte(`{"pomodoro_block_id":"blk-1","pomodoro_jobs_completed":3}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fields, err := LoadProducerFields(jsonPath)
+	if err != nil {
+		t.Fatalf("LoadProducerFields(json): %v", err)
+	}
+	if fields["pomodoro_block_id"] != "blk-1" || fields["pomodoro_jobs_completed"] != 3 {
+		t.Errorf("json fields = %#v", fields)
+	}
+
+	yamlPath := filepath.Join(dir, "fm.yml")
+	if err := os.WriteFile(yamlPath, []byte("hn_item_id: 42\ntags:\n  - hn\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fields, err = LoadProducerFields(yamlPath)
+	if err != nil {
+		t.Fatalf("LoadProducerFields(yaml): %v", err)
+	}
+	if fields["hn_item_id"] != 42 {
+		t.Errorf("yaml fields = %#v", fields)
+	}
+
+	badPath := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(badPath, []byte(`["not","a","mapping"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadProducerFields(badPath); err == nil {
+		t.Error("expected non-mapping root to be rejected")
 	}
 }
 
