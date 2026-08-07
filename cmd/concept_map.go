@@ -188,10 +188,14 @@ func newConceptMapUpdateCmd(svc **service.Service, workspaceOverride *string) *c
 	cmd := &cobra.Command{
 		Use:   "update <concept-id|workspace:concept-id>",
 		Short: "Re-scaffold a concept map's generated files (idempotent)",
-		Long: `Rewrite likec4.config.json and package.json when their generated content
-changed (e.g. a likec4 pin bump) and create any missing scaffold files.
-Existing src/*.c4 files are never touched — map content refresh is
-agent-driven, not scaffolded.`,
+		Long: `Refresh a concept map's generated files.
+
+package.json is rewritten when its generated content changed (e.g. a likec4
+pin bump). likec4.config.json is merge-rewritten: only the generated keys
+($schema, name, title) are updated and every user-added key (include,
+exclude, ...) is preserved. The seed src/*.c4 files are only created when
+src/ contains no .c4 files at all — existing map content is never touched;
+content refresh is agent-driven, not scaffolded.`,
 		Example: `  nb concept map update payments
   nb concept map update payments --json`,
 		Args: cobra.ExactArgs(1),
@@ -238,6 +242,9 @@ agent-driven, not scaffolded.`,
 			}
 			for _, file := range scaffold.Skipped {
 				fmt.Printf("  kept    %s\n", file)
+			}
+			for _, warning := range scaffold.Warnings {
+				fmt.Printf("  warning %s\n", warning)
 			}
 			fmt.Printf("Content refresh is agent-driven: %s\n", hint)
 			return nil
