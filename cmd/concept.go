@@ -39,6 +39,7 @@ func NewConceptCmd(svc **service.Service, workspaceOverride *string) *cobra.Comm
 	cmd.AddCommand(newConceptPathCmd(svc, workspaceOverride))
 	cmd.AddCommand(newConceptSearchCmd(svc, workspaceOverride))
 	cmd.AddCommand(newConceptGapCmd(svc, workspaceOverride))
+	cmd.AddCommand(newConceptMapCmd(svc, workspaceOverride))
 
 	return cmd
 }

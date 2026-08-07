@@ -1,0 +1,12 @@
+model {
+  placeholder = system 'Placeholder System' {
+    description 'Replace this with the first real system of the map.'
+  }
+}
+
+views {
+  view index {
+    title 'Landscape'
+    include *
+  }
+}

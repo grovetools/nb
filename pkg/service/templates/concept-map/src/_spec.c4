@@ -1,0 +1,22 @@
+// Shared element kinds for this concept map.
+// Add kinds sparingly; every kind should earn its place in the legend.
+specification {
+  element actor {
+    style {
+      shape person
+    }
+  }
+  element system
+  element container
+  element component
+  element database {
+    style {
+      shape storage
+    }
+  }
+  element webapp {
+    style {
+      shape browser
+    }
+  }
+}
