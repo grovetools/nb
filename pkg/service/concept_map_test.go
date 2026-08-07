@@ -558,6 +558,219 @@ func TestAttachConceptToMapRejectsBadInput(t *testing.T) {
 	}
 }
 
+// conceptMapFixtureConcepts is what ListAllConcepts would report for the
+// federation fixture: the map concept and the contributor concept, each in its
+// own workspace.
+func conceptMapFixtureConcepts(mapDir, conceptDir string) []ConceptInfo {
+	return []ConceptInfo{
+		{ID: "grove-architecture", Title: "Grove Architecture", Path: mapDir, Workspace: "grovetools"},
+		{ID: "embeddable-panel-system", Title: "Embeddable Panel System", Path: conceptDir, Workspace: "tuimux"},
+	}
+}
+
+func TestConceptRefIndexReverseMapsIncludePaths(t *testing.T) {
+	mapDir, conceptDir := newConceptMapFederationFixture(t)
+	index := newConceptRefIndex(conceptMapFixtureConcepts(mapDir, conceptDir))
+
+	detailDir := filepath.Join(conceptDir, ConceptMapDetailDir)
+	cases := []struct {
+		name string
+		dir  string
+		want string
+	}{
+		{"concept dir itself", conceptDir, "tuimux:embeddable-panel-system"},
+		{"the concept's likec4/ folder", detailDir, "tuimux:embeddable-panel-system"},
+		{"nested under likec4/", filepath.Join(detailDir, "views", "deep"), "tuimux:embeddable-panel-system"},
+		{"the map's own dir", mapDir, "grovetools:grove-architecture"},
+		{"the map's src tree", filepath.Join(mapDir, "src"), "grovetools:grove-architecture"},
+		{"outside every concept", filepath.Join(mapDir, "..", "..", "..", "elsewhere", "likec4"), ""},
+	}
+	for _, tc := range cases {
+		if got := index.lookup(tc.dir); got != tc.want {
+			t.Errorf("%s: lookup(%s) = %q, want %q", tc.name, tc.dir, got, tc.want)
+		}
+	}
+
+	// The include.paths entry attach writes reverse-maps back to the concept
+	// it came from — the round trip the listing depends on.
+	attachment, err := attachConceptToMap(mapDir, conceptDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := filepath.Join(mapDir, filepath.FromSlash(attachment.Path))
+	if got := index.lookup(resolved); got != "tuimux:embeddable-panel-system" {
+		t.Fatalf("attach path %q reverse-maps to %q", attachment.Path, got)
+	}
+}
+
+func TestConceptRefIndexUnqualifiedWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	index := newConceptRefIndex([]ConceptInfo{{ID: "orphan", Path: dir}})
+	if got := index.lookup(filepath.Join(dir, ConceptMapDetailDir)); got != "orphan" {
+		t.Fatalf("lookup = %q, want the bare id for a workspace-less concept", got)
+	}
+}
+
+func TestConceptMapListingResolvesAndFlagsIncludes(t *testing.T) {
+	mapDir, conceptDir := newConceptMapFederationFixture(t)
+	if _, err := attachConceptToMap(mapDir, conceptDir); err != nil {
+		t.Fatal(err)
+	}
+	detailDir := filepath.Join(conceptDir, ConceptMapDetailDir)
+	if err := os.WriteFile(filepath.Join(detailDir, "panel-system.c4"), []byte("// detail\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Alongside the live attachment: an entry whose concept still exists but
+	// whose likec4/ folder never will, and one pointing outside the notebook.
+	config := readConceptMapConfig(t, filepath.Join(mapDir, conceptMapConfigFile))
+	config["include"] = map[string]any{"paths": []any{
+		wantFederationPath,
+		"../../../tuimux/concepts/embeddable-panel-system/likec4-gone",
+		"../../../../nowhere/likec4",
+	}}
+	writeConceptMapConfigForTest(t, mapDir, config)
+
+	info := ConceptMapInfo{
+		ConceptInfo: ConceptInfo{ID: "grove-architecture", Title: "Grove Architecture", Path: mapDir, Workspace: "grovetools"},
+		MapDir:      mapDir,
+	}
+	index := newConceptRefIndex(conceptMapFixtureConcepts(mapDir, conceptDir))
+	listing, err := conceptMapListing(info, index, ConceptMapListOptions{Federated: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The map's own seed model still counts as its src/ content.
+	if listing.SrcFiles != 2 {
+		t.Fatalf("srcFiles = %d, want the two seed .c4 files", listing.SrcFiles)
+	}
+	if len(listing.Includes) != 3 {
+		t.Fatalf("includes = %+v, want 3 entries", listing.Includes)
+	}
+
+	live := listing.Includes[0]
+	if live.Dead {
+		t.Fatalf("live include flagged dead: %+v", live)
+	}
+	if live.Concept != "tuimux:embeddable-panel-system" {
+		t.Fatalf("live include concept = %q", live.Concept)
+	}
+	if !reflect.DeepEqual(live.Files, []string{"panel-system.c4"}) {
+		t.Fatalf("live include files = %v", live.Files)
+	}
+
+	// A dead entry still names the concept it was meant to pull from: that is
+	// what tells you whether to re-attach or drop the line.
+	detached := listing.Includes[1]
+	if !detached.Dead || len(detached.Files) != 0 {
+		t.Fatalf("missing detail folder must be dead with no files: %+v", detached)
+	}
+	if detached.Concept != "tuimux:embeddable-panel-system" {
+		t.Fatalf("dead include concept = %q, want the owning concept", detached.Concept)
+	}
+
+	stray := listing.Includes[2]
+	if !stray.Dead || stray.Concept != "" {
+		t.Fatalf("out-of-notebook include = %+v, want dead and unattributed", stray)
+	}
+
+	if len(listing.Warnings) != 2 {
+		t.Fatalf("warnings = %v, want one per dead include", listing.Warnings)
+	}
+	for i, want := range []string{"likec4-gone", "nowhere/likec4"} {
+		if !strings.Contains(listing.Warnings[i], want) {
+			t.Fatalf("warning %q does not mention %q", listing.Warnings[i], want)
+		}
+	}
+	// The wording is the one `nb concept map update` already warns with.
+	scaffold := &ConceptMapScaffold{}
+	warnConceptMapIncludePaths(mapDir, scaffold)
+	if !reflect.DeepEqual(scaffold.Warnings, listing.Warnings) {
+		t.Fatalf("list warnings %v diverge from update warnings %v", listing.Warnings, scaffold.Warnings)
+	}
+}
+
+func TestConceptMapListingWithoutIncludesOrFederation(t *testing.T) {
+	mapDir, conceptDir := newConceptMapFederationFixture(t)
+	info := ConceptMapInfo{
+		ConceptInfo: ConceptInfo{ID: "grove-architecture", Path: mapDir, Workspace: "grovetools"},
+		MapDir:      mapDir,
+	}
+	index := newConceptRefIndex(conceptMapFixtureConcepts(mapDir, conceptDir))
+
+	listing, err := conceptMapListing(info, index, ConceptMapListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listing.Includes) != 0 || len(listing.Warnings) != 0 {
+		t.Fatalf("unattached map must have no includes or warnings: %+v", listing)
+	}
+
+	// Contributor files are federated-only detail; a plain listing skips them.
+	if _, err := attachConceptToMap(mapDir, conceptDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(conceptDir, ConceptMapDetailDir, "panel.c4"), []byte("// detail\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	listing, err = conceptMapListing(info, index, ConceptMapListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listing.Includes) != 1 || listing.Includes[0].Files != nil {
+		t.Fatalf("non-federated listing must not walk contributor files: %+v", listing.Includes)
+	}
+	if listing.Includes[0].Concept != "tuimux:embeddable-panel-system" {
+		t.Fatalf("concept = %q", listing.Includes[0].Concept)
+	}
+}
+
+func TestConceptMapC4FilesIsSortedAndRecursive(t *testing.T) {
+	dir := t.TempDir()
+	if got, err := conceptMapC4Files(filepath.Join(dir, "missing")); err != nil || got != nil {
+		t.Fatalf("missing dir = %v, %v; want nil, nil", got, err)
+	}
+	for _, rel := range []string{"z.c4", "a.c4", "README.md", filepath.Join("views", "b.c4")} {
+		path := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("// x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := conceptMapC4Files(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, []string{"a.c4", "views/b.c4", "z.c4"}) {
+		t.Fatalf("files = %v", got)
+	}
+}
+
+func TestConceptMapsInKeepsOnlyMapsSorted(t *testing.T) {
+	mapDir, conceptDir := newConceptMapFederationFixture(t)
+	second := filepath.Join(filepath.Dir(mapDir), "billing-map")
+	if err := os.MkdirAll(second, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scaffoldConceptMap(second, "billing-map", "Billing"); err != nil {
+		t.Fatal(err)
+	}
+
+	concepts := append(conceptMapFixtureConcepts(mapDir, conceptDir),
+		ConceptInfo{ID: "billing-map", Title: "Billing", Path: second, Workspace: "grovetools"})
+	maps := conceptMapsIn(concepts)
+	got := make([]string, 0, len(maps))
+	for _, m := range maps {
+		got = append(got, m.Workspace+":"+m.ID)
+	}
+	if !reflect.DeepEqual(got, []string{"grovetools:billing-map", "grovetools:grove-architecture"}) {
+		t.Fatalf("maps = %v, want the two scaffolded maps sorted by workspace then id", got)
+	}
+}
+
 func writeConceptMapConfigForTest(t *testing.T, mapDir string, config map[string]any) {
 	t.Helper()
 	data, err := json.MarshalIndent(config, "", "  ")

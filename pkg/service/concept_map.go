@@ -255,6 +255,12 @@ func (s *Service) ListConceptMaps() ([]ConceptMapInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	return conceptMapsIn(concepts), nil
+}
+
+// conceptMapsIn keeps the concepts that carry a LikeC4 project, sorted by
+// workspace then id.
+func conceptMapsIn(concepts []ConceptInfo) []ConceptMapInfo {
 	var maps []ConceptMapInfo
 	for _, concept := range concepts {
 		info, err := os.Stat(filepath.Join(concept.Path, conceptMapConfigFile))
@@ -269,7 +275,188 @@ func (s *Service) ListConceptMaps() ([]ConceptMapInfo, error) {
 		}
 		return maps[i].ID < maps[j].ID
 	})
-	return maps, nil
+	return maps
+}
+
+// ConceptMapInclude is one include.paths entry of a concept map, resolved
+// against disk and reverse-mapped to the concept that contributes it.
+type ConceptMapInclude struct {
+	// Path is the verbatim include.paths entry.
+	Path string `json:"path"`
+	// Dir is Path resolved against the folder holding likec4.config.json.
+	Dir string `json:"dir"`
+	// Concept is the "<workspace>:<concept-id>" the entry lives under; empty
+	// when the path lands outside every concept directory nb knows about.
+	Concept string `json:"concept,omitempty"`
+	// Dead reports an entry with nothing behind it: LikeC4 contributes no
+	// files for it. A dead entry can still carry a Concept — that is exactly
+	// the "attached but the detail folder went away" case.
+	Dead bool `json:"dead"`
+	// Files are the contributor .c4 files under Dir, relative to it and
+	// sorted. Only populated for a federated listing.
+	Files []string `json:"files,omitempty"`
+}
+
+// ConceptMapListing is a concept map plus the federation state that makes its
+// ownership visible: how much model the map carries itself, and which concepts
+// contribute detail into it.
+type ConceptMapListing struct {
+	ConceptMapInfo
+	// SrcFiles counts the .c4 files under the map's own src/ tree.
+	SrcFiles int                 `json:"srcFiles"`
+	Includes []ConceptMapInclude `json:"includes"`
+	// Warnings carries one message per dead include, in the same wording
+	// `nb concept map update` reports it with.
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// ConceptMapListOptions tunes ListConceptMapsDetailed.
+type ConceptMapListOptions struct {
+	// Federated keeps only the maps that actually have include.paths entries,
+	// and fills in each entry's contributor .c4 files.
+	Federated bool
+}
+
+// ListConceptMapsDetailed lists the concept maps with their federation state.
+// Include paths are reverse-mapped against every concept directory nb
+// discovers, so a map in one workspace shows the concepts federating into it
+// from another.
+func (s *Service) ListConceptMapsDetailed(opts ConceptMapListOptions) ([]ConceptMapListing, error) {
+	concepts, err := s.ListAllConcepts()
+	if err != nil {
+		return nil, err
+	}
+	index := newConceptRefIndex(concepts)
+
+	var listings []ConceptMapListing
+	for _, info := range conceptMapsIn(concepts) {
+		listing, err := conceptMapListing(info, index, opts)
+		if err != nil {
+			return nil, err
+		}
+		if opts.Federated && len(listing.Includes) == 0 {
+			continue
+		}
+		listings = append(listings, *listing)
+	}
+	return listings, nil
+}
+
+// conceptMapListing builds one map's listing: its own .c4 count plus every
+// include.paths entry resolved, reverse-mapped and dead-flagged.
+func conceptMapListing(info ConceptMapInfo, index conceptRefIndex, opts ConceptMapListOptions) (*ConceptMapListing, error) {
+	srcFiles, err := conceptMapC4Files(filepath.Join(info.MapDir, "src"))
+	if err != nil {
+		return nil, err
+	}
+	listing := &ConceptMapListing{ConceptMapInfo: info, SrcFiles: len(srcFiles)}
+
+	for _, status := range conceptMapIncludeStatuses(info.MapDir) {
+		include := ConceptMapInclude{
+			Path:    status.Path,
+			Dir:     status.Resolved,
+			Concept: index.lookup(status.Resolved),
+			Dead:    !status.IsDir,
+		}
+		switch {
+		case include.Dead:
+			listing.Warnings = append(listing.Warnings, conceptMapDeadIncludeWarning(status.Path, status.Resolved))
+		case opts.Federated:
+			files, err := conceptMapC4Files(status.Resolved)
+			if err != nil {
+				return nil, err
+			}
+			include.Files = files
+		}
+		listing.Includes = append(listing.Includes, include)
+	}
+	return listing, nil
+}
+
+// conceptRefIndex reverse-maps a directory to the "<workspace>:<concept-id>"
+// whose concept directory contains it. Each concept is keyed both cleaned and
+// symlink-resolved, so a lookup works whether the include path was computed
+// through a symlinked notebook root or not.
+type conceptRefIndex map[string]string
+
+func newConceptRefIndex(concepts []ConceptInfo) conceptRefIndex {
+	index := make(conceptRefIndex, 2*len(concepts))
+	for _, concept := range concepts {
+		ref := concept.ID
+		if concept.Workspace != "" {
+			ref = concept.Workspace + ":" + concept.ID
+		}
+		for _, key := range conceptRefKeys(concept.Path) {
+			if _, taken := index[key]; !taken {
+				index[key] = ref
+			}
+		}
+	}
+	return index
+}
+
+// lookup walks up from dir until it hits a known concept directory, so a
+// concept's likec4/ folder — and anything nested under it — maps back to the
+// concept itself. It returns "" when the path lands outside every concept.
+// dir need not exist: a dead include under a live concept still reverse-maps.
+func (index conceptRefIndex) lookup(dir string) string {
+	for _, candidate := range conceptRefKeys(dir) {
+		for {
+			if ref, ok := index[candidate]; ok {
+				return ref
+			}
+			parent := filepath.Dir(candidate)
+			if parent == candidate {
+				break
+			}
+			candidate = parent
+		}
+	}
+	return ""
+}
+
+// conceptRefKeys is the set of forms a directory can be recognised by: its
+// cleaned absolute path, plus its symlink-resolved path when it exists and
+// differs.
+func conceptRefKeys(dir string) []string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil
+	}
+	keys := []string{filepath.Clean(abs)}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil && resolved != keys[0] {
+		keys = append(keys, resolved)
+	}
+	return keys
+}
+
+// conceptMapC4Files lists the .c4 files under dir, relative to it, sorted. A
+// missing directory is an empty list, not an error: an unattached concept and
+// an empty src/ are both legitimate.
+func conceptMapC4Files(dir string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fs.SkipAll
+			}
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".c4") {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		files = append(files, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan %s for .c4 files: %w", dir, err)
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 // AttachConceptToMap adds the concept's likec4/ detail folder to the map's
@@ -522,9 +709,33 @@ func conceptMapSrcHasC4(dir string) (bool, error) {
 // fails the scaffold: an unreadable or unparseable config is simply skipped
 // (the latter already carries its own warning).
 func warnConceptMapIncludePaths(dir string, result *ConceptMapScaffold) {
+	for _, status := range conceptMapIncludeStatuses(dir) {
+		if !status.IsDir {
+			result.Warnings = append(result.Warnings, conceptMapDeadIncludeWarning(status.Path, status.Resolved))
+		}
+	}
+}
+
+// conceptMapIncludeStatus is one include.paths entry resolved against the
+// folder holding likec4.config.json.
+type conceptMapIncludeStatus struct {
+	// Path is the verbatim entry.
+	Path string
+	// Resolved is Path made absolute against the config's folder.
+	Resolved string
+	// IsDir reports that Resolved is an existing directory — i.e. that LikeC4
+	// will find something there.
+	IsDir bool
+}
+
+// conceptMapIncludeStatuses reads the on-disk config's include.paths and
+// resolves each entry. An unreadable or unparseable config yields no entries:
+// callers that care about a broken config report it on their own (the
+// scaffold already does).
+func conceptMapIncludeStatuses(dir string) []conceptMapIncludeStatus {
 	data, err := os.ReadFile(filepath.Join(dir, conceptMapConfigFile))
 	if err != nil {
-		return
+		return nil
 	}
 	var config struct {
 		Include struct {
@@ -532,19 +743,29 @@ func warnConceptMapIncludePaths(dir string, result *ConceptMapScaffold) {
 		} `json:"include"`
 	}
 	if err := json.Unmarshal(data, &config); err != nil {
-		return
+		return nil
 	}
+	statuses := make([]conceptMapIncludeStatus, 0, len(config.Include.Paths))
 	for _, p := range config.Include.Paths {
 		resolved := p
 		if !filepath.IsAbs(resolved) {
 			resolved = filepath.Join(dir, resolved)
 		}
 		info, err := os.Stat(resolved)
-		if err != nil || !info.IsDir() {
-			result.Warnings = append(result.Warnings, fmt.Sprintf(
-				"%s include.paths entry %q does not resolve to a directory (%s)", conceptMapConfigFile, p, resolved))
-		}
+		statuses = append(statuses, conceptMapIncludeStatus{
+			Path:     p,
+			Resolved: resolved,
+			IsDir:    err == nil && info.IsDir(),
+		})
 	}
+	return statuses
+}
+
+// conceptMapDeadIncludeWarning is the single wording both `update` and `list`
+// use for an include.paths entry with nothing behind it.
+func conceptMapDeadIncludeWarning(entry, resolved string) string {
+	return fmt.Sprintf("%s include.paths entry %q does not resolve to a directory (%s)",
+		conceptMapConfigFile, entry, resolved)
 }
 
 // renderConceptMapFiles produces the full scaffold file set for a map.

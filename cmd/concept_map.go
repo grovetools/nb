@@ -25,6 +25,7 @@ machinery, then scaffolds a LikeC4 project inside the concept directory.
 LikeC4 is the only supported backend for now; running or validating a map
 requires Node.js >= 22 (for npx).`,
 		Example: `  nb concept map new payments --title "Payments Landscape"
+  nb concept map list --federated
   nb concept map run payments --port 4001
   nb concept map validate payments --file src/model.c4
   nb concept map update payments
@@ -32,6 +33,7 @@ requires Node.js >= 22 (for npx).`,
 	}
 
 	cmd.AddCommand(newConceptMapNewCmd(svc, workspaceOverride))
+	cmd.AddCommand(newConceptMapListCmd(svc, workspaceOverride))
 	cmd.AddCommand(newConceptMapRunCmd(svc, workspaceOverride))
 	cmd.AddCommand(newConceptMapValidateCmd(svc, workspaceOverride))
 	cmd.AddCommand(newConceptMapUpdateCmd(svc, workspaceOverride))
@@ -123,6 +125,121 @@ so it must not be "default" and cannot contain '.', '@', or '#'.`,
 	cmd.Flags().StringVar(&backend, "backend", service.ConceptMapBackendLikeC4, "Map backend (only likec4 is supported)")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output result as JSON")
 	return cmd
+}
+
+func newConceptMapListCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	var jsonOutput bool
+	var federated bool
+
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List concept maps and the concepts federating detail into them",
+		Long: `List every concept that carries a LikeC4 project.
+
+For each map: its workspace-qualified id, its title, how many .c4 files its
+own src/ tree holds, and every likec4.config.json include.paths entry. Each
+entry is reverse-mapped to the concept that owns it (<workspace>:<concept-id>)
+by matching the resolved path against the concept directories nb discovers
+across the notebook's workspaces. An entry with nothing behind it is flagged
+dead and reported with the same wording 'nb concept map update' warns with.
+
+--federated narrows the listing to maps that actually have include.paths
+entries, and lists each entry's contributor .c4 files.
+
+Maps are discovered across every workspace nb knows about — the same universe
+'attach'/'detach' default their --map to — so -W only selects the workspace
+context, it does not scope the listing.`,
+		Example: `  nb concept map list
+  nb concept map list --json
+  nb concept map list --federated`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, err := (*svc).GetWorkspaceContext(*workspaceOverride); err != nil {
+				return fmt.Errorf("get workspace context: %w", err)
+			}
+			listings, err := (*svc).ListConceptMapsDetailed(service.ConceptMapListOptions{Federated: federated})
+			if err != nil {
+				return fmt.Errorf("list concept maps: %w", err)
+			}
+
+			if jsonOutput {
+				if listings == nil {
+					listings = []service.ConceptMapListing{}
+				}
+				data, err := json.Marshal(listings)
+				if err != nil {
+					return fmt.Errorf("marshal json: %w", err)
+				}
+				fmt.Println(string(data))
+				return nil
+			}
+
+			printConceptMapListings(listings, federated)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output result as JSON")
+	cmd.Flags().BoolVar(&federated, "federated", false, "Only maps with include.paths entries; list contributor files per include")
+	return cmd
+}
+
+// printConceptMapListings renders the human form of `concept map list`: one
+// block per map, with a '!' marker on dead includes and the canonical
+// dead-include warnings underneath.
+func printConceptMapListings(listings []service.ConceptMapListing, federated bool) {
+	if len(listings) == 0 {
+		if federated {
+			fmt.Println("No federated concept maps found.")
+		} else {
+			fmt.Println("No concept maps found.")
+		}
+		return
+	}
+
+	fmt.Printf("Concept maps (%d):\n", len(listings))
+	for _, listing := range listings {
+		fmt.Printf("  - %s\n", conceptMapRef(listing.ConceptMapInfo))
+		if listing.Title != "" && listing.Title != listing.ID {
+			fmt.Printf("    %s\n", listing.Title)
+		}
+		fmt.Printf("    src/: %d .c4 file(s)\n", listing.SrcFiles)
+		if len(listing.Includes) == 0 {
+			fmt.Printf("    include.paths: (none)\n")
+			continue
+		}
+		fmt.Printf("    include.paths (%d):\n", len(listing.Includes))
+		for _, include := range listing.Includes {
+			marker := " "
+			owner := include.Concept
+			if owner == "" {
+				owner = "(no concept)"
+			}
+			if include.Dead {
+				marker = "!"
+				owner += " — dead"
+			}
+			fmt.Printf("      %s %s -> %s\n", marker, include.Path, owner)
+			for _, file := range include.Files {
+				fmt.Printf("          %s\n", file)
+			}
+			if federated && !include.Dead && len(include.Files) == 0 {
+				fmt.Printf("          (no .c4 files)\n")
+			}
+		}
+		for _, warning := range listing.Warnings {
+			fmt.Printf("    warning %s\n", warning)
+		}
+	}
+}
+
+// conceptMapRef is the workspace-qualified reference for a map, falling back
+// to the bare id for concepts nb could not attribute to a workspace.
+func conceptMapRef(info service.ConceptMapInfo) string {
+	if info.Workspace == "" {
+		return info.ID
+	}
+	return info.Workspace + ":" + info.ID
 }
 
 func newConceptMapRunCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
@@ -380,7 +497,7 @@ func resolveConceptMapAttachTarget(svc **service.Service, workspaceOverride *str
 		default:
 			refs := make([]string, 0, len(maps))
 			for _, m := range maps {
-				refs = append(refs, m.Workspace+":"+m.ID)
+				refs = append(refs, conceptMapRef(m))
 			}
 			return nil, "", fmt.Errorf("--map is required: %d concept maps exist (%s)", len(maps), strings.Join(refs, ", "))
 		}
