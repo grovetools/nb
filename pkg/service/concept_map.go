@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -211,6 +213,281 @@ func scaffoldConceptMapConfig(dir string, rendered []byte, result *ConceptMapSca
 	}
 	result.Updated = append(result.Updated, conceptMapConfigFile)
 	return nil
+}
+
+// ConceptMapDetailDir is the folder inside a concept that holds its federated
+// LikeC4 detail files. Attaching a concept to a map adds this folder to the
+// map config's include.paths, so the concept can decompose "its" element
+// without touching the map's own sources.
+const ConceptMapDetailDir = "likec4"
+
+// ConceptMapAttachment reports the outcome of an attach/detach pass over a
+// map's likec4.config.json.
+type ConceptMapAttachment struct {
+	MapDir     string `json:"mapDir"`
+	ConceptDir string `json:"conceptDir"`
+	// DetailDir is the concept's likec4/ folder, as an absolute-or-caller-
+	// relative path (the same form the caller passed for the concept).
+	DetailDir string `json:"detailDir"`
+	// Path is DetailDir expressed relative to the map's likec4.config.json
+	// folder — exactly the string that lives in include.paths.
+	Path string `json:"path"`
+	// Changed reports whether the config was rewritten; a repeated attach or a
+	// detach of something that was never attached leaves it false.
+	Changed bool `json:"changed"`
+	// CreatedDetailDir reports that attach had to create the concept's likec4/
+	// folder.
+	CreatedDetailDir bool     `json:"createdDetailDir"`
+	IncludePaths     []string `json:"includePaths"`
+}
+
+// ConceptMapInfo is a concept that carries a LikeC4 project.
+type ConceptMapInfo struct {
+	ConceptInfo
+	MapDir string `json:"mapDir"`
+}
+
+// ListConceptMaps returns every concept across the known workspaces that
+// carries a LikeC4 project (i.e. a likec4.config.json), sorted by workspace
+// then id. It is what lets `attach`/`detach` default to the sole map.
+func (s *Service) ListConceptMaps() ([]ConceptMapInfo, error) {
+	concepts, err := s.ListAllConcepts()
+	if err != nil {
+		return nil, err
+	}
+	var maps []ConceptMapInfo
+	for _, concept := range concepts {
+		info, err := os.Stat(filepath.Join(concept.Path, conceptMapConfigFile))
+		if err != nil || info.IsDir() {
+			continue
+		}
+		maps = append(maps, ConceptMapInfo{ConceptInfo: concept, MapDir: concept.Path})
+	}
+	sort.Slice(maps, func(i, j int) bool {
+		if maps[i].Workspace != maps[j].Workspace {
+			return maps[i].Workspace < maps[j].Workspace
+		}
+		return maps[i].ID < maps[j].ID
+	})
+	return maps, nil
+}
+
+// AttachConceptToMap adds the concept's likec4/ detail folder to the map's
+// include.paths, creating the folder when missing. The config is merge-
+// rewritten: every user key (and every other include key) survives. Attaching
+// an already-attached concept is a no-op.
+func (s *Service) AttachConceptToMap(mapDir, conceptDir string) (*ConceptMapAttachment, error) {
+	return attachConceptToMap(mapDir, conceptDir)
+}
+
+// DetachConceptFromMap removes the concept's likec4/ detail folder from the
+// map's include.paths, leaving every other entry — and every user key — in
+// place. Detaching something that was never attached is a no-op.
+func (s *Service) DetachConceptFromMap(mapDir, conceptDir string) (*ConceptMapAttachment, error) {
+	return detachConceptFromMap(mapDir, conceptDir)
+}
+
+func attachConceptToMap(mapDir, conceptDir string) (*ConceptMapAttachment, error) {
+	result, err := newConceptMapAttachment(mapDir, conceptDir)
+	if err != nil {
+		return nil, err
+	}
+
+	switch info, err := os.Stat(result.DetailDir); {
+	case errors.Is(err, os.ErrNotExist):
+		if err := os.MkdirAll(result.DetailDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create concept detail directory: %w", err)
+		}
+		result.CreatedDetailDir = true
+	case err != nil:
+		return nil, fmt.Errorf("stat concept detail directory: %w", err)
+	case !info.IsDir():
+		return nil, fmt.Errorf("%s exists and is not a directory", result.DetailDir)
+	}
+
+	config, err := loadConceptMapConfig(mapDir)
+	if err != nil {
+		return nil, err
+	}
+	paths, err := conceptMapIncludePaths(config)
+	if err != nil {
+		return nil, err
+	}
+	for _, existing := range paths {
+		if conceptMapPathsEqual(existing, result.Path) {
+			result.IncludePaths = paths
+			return result, nil
+		}
+	}
+
+	paths = append(paths, result.Path)
+	if err := writeConceptMapIncludePaths(mapDir, config, paths); err != nil {
+		return nil, err
+	}
+	result.Changed = true
+	result.IncludePaths = paths
+	return result, nil
+}
+
+func detachConceptFromMap(mapDir, conceptDir string) (*ConceptMapAttachment, error) {
+	result, err := newConceptMapAttachment(mapDir, conceptDir)
+	if err != nil {
+		return nil, err
+	}
+
+	config, err := loadConceptMapConfig(mapDir)
+	if err != nil {
+		return nil, err
+	}
+	paths, err := conceptMapIncludePaths(config)
+	if err != nil {
+		return nil, err
+	}
+	kept := make([]string, 0, len(paths))
+	for _, existing := range paths {
+		if conceptMapPathsEqual(existing, result.Path) {
+			continue
+		}
+		kept = append(kept, existing)
+	}
+	result.IncludePaths = kept
+	if len(kept) == len(paths) {
+		return result, nil
+	}
+
+	if err := writeConceptMapIncludePaths(mapDir, config, kept); err != nil {
+		return nil, err
+	}
+	result.Changed = true
+	return result, nil
+}
+
+// newConceptMapAttachment resolves the two directories and computes the
+// include.paths entry: the concept's likec4/ folder relative to the folder
+// holding the map's likec4.config.json.
+func newConceptMapAttachment(mapDir, conceptDir string) (*ConceptMapAttachment, error) {
+	mapAbs, err := conceptMapRealPath(mapDir)
+	if err != nil {
+		return nil, err
+	}
+	conceptAbs, err := conceptMapRealPath(conceptDir)
+	if err != nil {
+		return nil, err
+	}
+	if mapAbs == conceptAbs {
+		return nil, fmt.Errorf("cannot attach a concept map to itself (%s)", mapDir)
+	}
+
+	rel, err := filepath.Rel(mapAbs, filepath.Join(conceptAbs, ConceptMapDetailDir))
+	if err != nil {
+		return nil, fmt.Errorf("compute path from map %s to concept %s: %w", mapDir, conceptDir, err)
+	}
+	return &ConceptMapAttachment{
+		MapDir:     mapDir,
+		ConceptDir: conceptDir,
+		DetailDir:  filepath.Join(conceptDir, ConceptMapDetailDir),
+		Path:       filepath.ToSlash(rel),
+	}, nil
+}
+
+// conceptMapRealPath makes a directory absolute and resolves symlinks so that
+// the relative path between a map and a concept is computed over the same
+// physical tree LikeC4 will walk (macOS /var -> /private/var, notebooks
+// reached through symlinked workspace roots).
+func conceptMapRealPath(dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", dir, err)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", dir, err)
+	}
+	return resolved, nil
+}
+
+// loadConceptMapConfig reads the map's likec4.config.json as a generic object
+// so a rewrite can preserve every key it does not own. Unlike the scaffold,
+// attach/detach refuse to touch an unparseable config.
+func loadConceptMapConfig(mapDir string) (map[string]any, error) {
+	path := filepath.Join(mapDir, conceptMapConfigFile)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%s has no %s; run 'nb concept map update' to scaffold one", mapDir, conceptMapConfigFile)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", conceptMapConfigFile, err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("%s is not valid JSON (%v); fix it and re-run", path, err)
+	}
+	if config == nil {
+		config = map[string]any{}
+	}
+	return config, nil
+}
+
+// conceptMapIncludePaths reads include.paths out of a parsed config. A missing
+// include block is an empty list; a malformed one is an error rather than
+// something to silently overwrite.
+func conceptMapIncludePaths(config map[string]any) ([]string, error) {
+	raw, ok := config["include"]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	include, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s: include must be an object", conceptMapConfigFile)
+	}
+	rawPaths, ok := include["paths"]
+	if !ok || rawPaths == nil {
+		return nil, nil
+	}
+	list, ok := rawPaths.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s: include.paths must be an array of strings", conceptMapConfigFile)
+	}
+	paths := make([]string, 0, len(list))
+	for _, item := range list {
+		path, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s: include.paths must contain only strings (found %T)", conceptMapConfigFile, item)
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
+}
+
+// writeConceptMapIncludePaths rewrites the config with a new include.paths,
+// preserving every other top-level key and every other key inside include.
+func writeConceptMapIncludePaths(mapDir string, config map[string]any, paths []string) error {
+	include, _ := config["include"].(map[string]any)
+	if include == nil {
+		include = map[string]any{}
+	}
+	list := make([]any, 0, len(paths))
+	for _, path := range paths {
+		list = append(list, path)
+	}
+	include["paths"] = list
+	config["include"] = include
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal %s: %w", conceptMapConfigFile, err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(filepath.Join(mapDir, conceptMapConfigFile), data, 0o644); err != nil {
+		return fmt.Errorf("rewrite %s: %w", conceptMapConfigFile, err)
+	}
+	return nil
+}
+
+// conceptMapPathsEqual compares two include.paths entries as paths, so that
+// "./x/y", "x/y" and "x//y" all count as the same attachment.
+func conceptMapPathsEqual(a, b string) bool {
+	return path.Clean(filepath.ToSlash(a)) == path.Clean(filepath.ToSlash(b))
 }
 
 // conceptMapSrcHasC4 reports whether the map's src/ tree already contains any

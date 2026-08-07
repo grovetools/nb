@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -326,6 +327,245 @@ func TestScaffoldConceptMapWarnsOnDeadIncludePaths(t *testing.T) {
 	}
 	if want := "../missing-concept"; !strings.Contains(result.Warnings[0], want) {
 		t.Fatalf("warning %q does not mention %q", result.Warnings[0], want)
+	}
+}
+
+// newConceptMapFederationFixture builds the notebook shape attach/detach runs
+// against — a scaffolded map concept in one workspace and a plain concept in
+// another — and returns their directories.
+func newConceptMapFederationFixture(t *testing.T) (mapDir, conceptDir string) {
+	t.Helper()
+	root := t.TempDir()
+	mapDir = filepath.Join(root, "workspaces", "grovetools", "concepts", "grove-architecture")
+	conceptDir = filepath.Join(root, "workspaces", "tuimux", "concepts", "embeddable-panel-system")
+	for _, dir := range []string{mapDir, conceptDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := scaffoldConceptMap(mapDir, "grove-architecture", "Grove Architecture"); err != nil {
+		t.Fatal(err)
+	}
+	return mapDir, conceptDir
+}
+
+// wantFederationPath is the include.paths entry for the fixture's concept:
+// out of the map's concept dir, its concepts dir and its workspace, then back
+// down into the other workspace.
+const wantFederationPath = "../../../tuimux/concepts/embeddable-panel-system/likec4"
+
+func TestAttachConceptToMapComputesRelativePath(t *testing.T) {
+	mapDir, conceptDir := newConceptMapFederationFixture(t)
+
+	result, err := attachConceptToMap(mapDir, conceptDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Path != wantFederationPath {
+		t.Fatalf("path = %q, want %q", result.Path, wantFederationPath)
+	}
+	if !result.Changed || !result.CreatedDetailDir {
+		t.Fatalf("first attach must change the config and create likec4/: %+v", result)
+	}
+	if !reflect.DeepEqual(result.IncludePaths, []string{wantFederationPath}) {
+		t.Fatalf("includePaths = %v", result.IncludePaths)
+	}
+
+	// The detail folder exists and the recorded path resolves back to it from
+	// the config's folder — the contract LikeC4 itself relies on.
+	info, err := os.Stat(filepath.Join(conceptDir, ConceptMapDetailDir))
+	if err != nil || !info.IsDir() {
+		t.Fatalf("concept likec4/ not created: %v", err)
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Join(mapDir, filepath.FromSlash(result.Path)))
+	if err != nil {
+		t.Fatalf("include path does not resolve from the map dir: %v", err)
+	}
+	wantResolved, err := filepath.EvalSymlinks(filepath.Join(conceptDir, ConceptMapDetailDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != wantResolved {
+		t.Fatalf("include path resolves to %s, want %s", resolved, wantResolved)
+	}
+
+	config := readConceptMapConfig(t, filepath.Join(mapDir, conceptMapConfigFile))
+	include, ok := config["include"].(map[string]any)
+	if !ok || !reflect.DeepEqual(include["paths"], []any{wantFederationPath}) {
+		t.Fatalf("on-disk include block = %v", config["include"])
+	}
+	if config["name"] != "grove-architecture" {
+		t.Fatalf("attach clobbered the generated keys: %v", config)
+	}
+}
+
+func TestAttachConceptToMapIsIdempotent(t *testing.T) {
+	mapDir, conceptDir := newConceptMapFederationFixture(t)
+
+	if _, err := attachConceptToMap(mapDir, conceptDir); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(mapDir, conceptMapConfigFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := attachConceptToMap(mapDir, conceptDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Changed || result.CreatedDetailDir {
+		t.Fatalf("second attach must be a no-op: %+v", result)
+	}
+	if !reflect.DeepEqual(result.IncludePaths, []string{wantFederationPath}) {
+		t.Fatalf("includePaths = %v, want one entry", result.IncludePaths)
+	}
+	after, err := os.ReadFile(filepath.Join(mapDir, conceptMapConfigFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("second attach rewrote the config:\n%s", after)
+	}
+
+	// An equivalent entry written by hand ("./x", trailing slash) is the same
+	// attachment, not a second one.
+	config := readConceptMapConfig(t, filepath.Join(mapDir, conceptMapConfigFile))
+	config["include"] = map[string]any{"paths": []any{"./" + wantFederationPath + "/"}}
+	writeConceptMapConfigForTest(t, mapDir, config)
+	result, err = attachConceptToMap(mapDir, conceptDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Changed || len(result.IncludePaths) != 1 {
+		t.Fatalf("equivalent path re-attached: %+v", result)
+	}
+}
+
+func TestDetachConceptFromMapRemovesOnlyItsEntry(t *testing.T) {
+	mapDir, conceptDir := newConceptMapFederationFixture(t)
+
+	config := readConceptMapConfig(t, filepath.Join(mapDir, conceptMapConfigFile))
+	config["include"] = map[string]any{"paths": []any{"../other-concept/likec4"}}
+	writeConceptMapConfigForTest(t, mapDir, config)
+
+	if _, err := attachConceptToMap(mapDir, conceptDir); err != nil {
+		t.Fatal(err)
+	}
+	result, err := detachConceptFromMap(mapDir, conceptDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Changed {
+		t.Fatalf("detach of an attached concept must change the config: %+v", result)
+	}
+	if !reflect.DeepEqual(result.IncludePaths, []string{"../other-concept/likec4"}) {
+		t.Fatalf("includePaths = %v, want the unrelated entry only", result.IncludePaths)
+	}
+	config = readConceptMapConfig(t, filepath.Join(mapDir, conceptMapConfigFile))
+	include, ok := config["include"].(map[string]any)
+	if !ok || !reflect.DeepEqual(include["paths"], []any{"../other-concept/likec4"}) {
+		t.Fatalf("on-disk include block = %v", config["include"])
+	}
+	// The concept keeps its own detail files; only the map's reference went.
+	if _, err := os.Stat(filepath.Join(conceptDir, ConceptMapDetailDir)); err != nil {
+		t.Fatalf("detach removed the concept's likec4/ folder: %v", err)
+	}
+
+	// Detaching again changes nothing.
+	result, err = detachConceptFromMap(mapDir, conceptDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Changed {
+		t.Fatalf("second detach must be a no-op: %+v", result)
+	}
+}
+
+func TestAttachDetachPreserveUserConfigKeys(t *testing.T) {
+	mapDir, conceptDir := newConceptMapFederationFixture(t)
+
+	config := readConceptMapConfig(t, filepath.Join(mapDir, conceptMapConfigFile))
+	config["exclude"] = map[string]any{"paths": []any{"node_modules"}}
+	config["x-custom"] = "kept verbatim"
+	config["include"] = map[string]any{
+		"maxDepth": float64(3),
+		"paths":    []any{"../other-concept/likec4"},
+	}
+	writeConceptMapConfigForTest(t, mapDir, config)
+
+	assertUserKeys := func(stage string) {
+		t.Helper()
+		got := readConceptMapConfig(t, filepath.Join(mapDir, conceptMapConfigFile))
+		if got["x-custom"] != "kept verbatim" {
+			t.Fatalf("%s: unknown user key lost: %v", stage, got)
+		}
+		exclude, ok := got["exclude"].(map[string]any)
+		if !ok || !reflect.DeepEqual(exclude["paths"], []any{"node_modules"}) {
+			t.Fatalf("%s: exclude block lost: %v", stage, got["exclude"])
+		}
+		include, ok := got["include"].(map[string]any)
+		if !ok || include["maxDepth"] != float64(3) {
+			t.Fatalf("%s: sibling include key lost: %v", stage, got["include"])
+		}
+		if got["$schema"] != "https://likec4.dev/schemas/config.json" ||
+			got["name"] != "grove-architecture" || got["title"] != "Grove Architecture" {
+			t.Fatalf("%s: generated keys mangled: %v", stage, got)
+		}
+	}
+
+	if _, err := attachConceptToMap(mapDir, conceptDir); err != nil {
+		t.Fatal(err)
+	}
+	assertUserKeys("after attach")
+	if _, err := detachConceptFromMap(mapDir, conceptDir); err != nil {
+		t.Fatal(err)
+	}
+	assertUserKeys("after detach")
+
+	// And the scaffold's own merge-rewrite still agrees with what we wrote.
+	result, err := scaffoldConceptMap(mapDir, "grove-architecture", "Grove Architecture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsString(result.Updated, conceptMapConfigFile) {
+		t.Fatalf("update rewrote a config attach/detach had converged: %+v", result)
+	}
+	assertUserKeys("after update")
+}
+
+func TestAttachConceptToMapRejectsBadInput(t *testing.T) {
+	mapDir, conceptDir := newConceptMapFederationFixture(t)
+
+	if _, err := attachConceptToMap(mapDir, mapDir); err == nil {
+		t.Fatal("attaching a map to itself must fail")
+	}
+
+	configPath := filepath.Join(mapDir, conceptMapConfigFile)
+	garbage := []byte("{ this is not json\n")
+	if err := os.WriteFile(configPath, garbage, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := attachConceptToMap(mapDir, conceptDir); err == nil {
+		t.Fatal("attaching against an unparseable config must fail")
+	}
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, garbage) {
+		t.Fatalf("unparseable config was modified:\n%s", got)
+	}
+}
+
+func writeConceptMapConfigForTest(t *testing.T, mapDir string, config map[string]any) {
+	t.Helper()
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mapDir, conceptMapConfigFile), append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

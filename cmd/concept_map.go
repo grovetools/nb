@@ -27,13 +27,16 @@ requires Node.js >= 22 (for npx).`,
 		Example: `  nb concept map new payments --title "Payments Landscape"
   nb concept map run payments --port 4001
   nb concept map validate payments --file src/model.c4
-  nb concept map update payments`,
+  nb concept map update payments
+  nb concept map attach tuimux:embeddable-panel-system`,
 	}
 
 	cmd.AddCommand(newConceptMapNewCmd(svc, workspaceOverride))
 	cmd.AddCommand(newConceptMapRunCmd(svc, workspaceOverride))
 	cmd.AddCommand(newConceptMapValidateCmd(svc, workspaceOverride))
 	cmd.AddCommand(newConceptMapUpdateCmd(svc, workspaceOverride))
+	cmd.AddCommand(newConceptMapAttachCmd(svc, workspaceOverride))
+	cmd.AddCommand(newConceptMapDetachCmd(svc, workspaceOverride))
 
 	return cmd
 }
@@ -255,6 +258,223 @@ content refresh is agent-driven, not scaffolded.`,
 	return cmd
 }
 
+func newConceptMapAttachCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	var mapRef string
+	var jsonOutput bool
+
+	cmd := &cobra.Command{
+		Use:   "attach <concept-id|workspace:concept-id>",
+		Short: "Include a concept's likec4/ detail files in a map",
+		Long: `Attach a concept to a concept map as federated detail.
+
+The concept's likec4/ folder (created when missing) is added to the map's
+likec4.config.json include.paths, as a path relative to the config's folder.
+The config is merge-rewritten: every other include entry and every user key is
+preserved. Attaching twice changes nothing.
+
+Federated files become full project members: they may extend main-model
+elements, add relationships to them, and define views — using only the kinds
+already declared in the map's src/_spec.c4. The map is validated afterwards so
+a bad detail file surfaces immediately.
+
+--map defaults to the only concept map found; with several maps it is
+required.`,
+		Example: `  nb concept map attach tuimux:embeddable-panel-system
+  nb concept map attach embeddable-panel-system --map grove-architecture
+  nb concept map attach payments-detail --map payments --json`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, conceptDir, err := resolveConceptMapAttachTarget(svc, workspaceOverride, mapRef, args[0])
+			if err != nil {
+				return err
+			}
+			attachment, err := (*svc).AttachConceptToMap(target.MapDir, conceptDir)
+			if err != nil {
+				return err
+			}
+			validation := validateConceptMapDir(target.MapDir)
+			printConceptMapAttachment(attachment, validation, target.ID, args[0], "Attached", jsonOutput)
+			if validation.Ran && !validation.OK {
+				return fmt.Errorf("map '%s' does not validate after attaching '%s' (see the report above)", target.ID, args[0])
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&mapRef, "map", "", "Concept map to attach to (default: the only map found)")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output result as JSON")
+	return cmd
+}
+
+func newConceptMapDetachCmd(svc **service.Service, workspaceOverride *string) *cobra.Command {
+	var mapRef string
+	var jsonOutput bool
+
+	cmd := &cobra.Command{
+		Use:   "detach <concept-id|workspace:concept-id>",
+		Short: "Stop including a concept's likec4/ detail files in a map",
+		Long: `Detach a concept from a concept map.
+
+Only the entry pointing at this concept's likec4/ folder is removed from
+include.paths; every other entry and every user key in likec4.config.json is
+preserved, and the concept's own likec4/ files are left on disk. Detaching a
+concept that was never attached changes nothing.
+
+--map defaults to the only concept map found; with several maps it is
+required.`,
+		Example: `  nb concept map detach tuimux:embeddable-panel-system
+  nb concept map detach embeddable-panel-system --map grove-architecture --json`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, conceptDir, err := resolveConceptMapAttachTarget(svc, workspaceOverride, mapRef, args[0])
+			if err != nil {
+				return err
+			}
+			attachment, err := (*svc).DetachConceptFromMap(target.MapDir, conceptDir)
+			if err != nil {
+				return err
+			}
+			printConceptMapAttachment(attachment, nil, target.ID, args[0], "Detached", jsonOutput)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&mapRef, "map", "", "Concept map to detach from (default: the only map found)")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output result as JSON")
+	return cmd
+}
+
+// resolveConceptMapAttachTarget resolves both sides of an attach/detach: the
+// map (explicit --map, else the sole map in the notebook) and the concept
+// whose likec4/ detail folder is being (un)federated.
+func resolveConceptMapAttachTarget(svc **service.Service, workspaceOverride *string, mapRef, conceptRef string) (*service.ConceptMapInfo, string, error) {
+	ctx, err := (*svc).GetWorkspaceContext(*workspaceOverride)
+	if err != nil {
+		return nil, "", fmt.Errorf("get workspace context: %w", err)
+	}
+
+	var target *service.ConceptMapInfo
+	if mapRef != "" {
+		dir, err := conceptMapDirForRef(svc, ctx, mapRef)
+		if err != nil {
+			return nil, "", err
+		}
+		id := mapRef
+		if _, unqualified, qualified := strings.Cut(mapRef, ":"); qualified {
+			id = unqualified
+		}
+		target = &service.ConceptMapInfo{
+			ConceptInfo: service.ConceptInfo{ID: id, Path: dir},
+			MapDir:      dir,
+		}
+	} else {
+		maps, err := (*svc).ListConceptMaps()
+		if err != nil {
+			return nil, "", fmt.Errorf("list concept maps: %w", err)
+		}
+		switch len(maps) {
+		case 0:
+			return nil, "", fmt.Errorf("no concept map found; create one with 'nb concept map new <id>' or pass --map")
+		case 1:
+			target = &maps[0]
+		default:
+			refs := make([]string, 0, len(maps))
+			for _, m := range maps {
+				refs = append(refs, m.Workspace+":"+m.ID)
+			}
+			return nil, "", fmt.Errorf("--map is required: %d concept maps exist (%s)", len(maps), strings.Join(refs, ", "))
+		}
+	}
+
+	conceptDir, err := (*svc).ResolveConceptPath(ctx, conceptRef)
+	if err != nil {
+		return nil, "", err
+	}
+	return target, conceptDir, nil
+}
+
+// printConceptMapAttachment renders an attach/detach result (verb is the past
+// tense used in the human line), including the resulting include.paths.
+func printConceptMapAttachment(attachment *service.ConceptMapAttachment, validation *conceptMapValidation, mapID, conceptRef, verb string, jsonOutput bool) {
+	if jsonOutput {
+		result := struct {
+			*service.ConceptMapAttachment
+			Map        string                `json:"map"`
+			Concept    string                `json:"concept"`
+			Validation *conceptMapValidation `json:"validation,omitempty"`
+		}{attachment, mapID, conceptRef, validation}
+		data, err := json.Marshal(result)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "marshal json: %v\n", err)
+			return
+		}
+		fmt.Println(string(data))
+		return
+	}
+
+	switch {
+	case attachment.Changed:
+		fmt.Printf("%s concept '%s' %s map '%s'\n", verb, conceptRef, attachPreposition(verb), mapID)
+	case verb == "Attached":
+		fmt.Printf("No change: concept '%s' is already attached to map '%s'\n", conceptRef, mapID)
+	default:
+		fmt.Printf("No change: concept '%s' was not attached to map '%s'\n", conceptRef, mapID)
+	}
+	if attachment.CreatedDetailDir {
+		fmt.Printf("  created %s\n", attachment.DetailDir)
+	}
+	fmt.Printf("  include.paths:\n")
+	if len(attachment.IncludePaths) == 0 {
+		fmt.Printf("    (none)\n")
+	}
+	for _, path := range attachment.IncludePaths {
+		marker := " "
+		if path == attachment.Path {
+			marker = "*"
+		}
+		fmt.Printf("    %s %s\n", marker, path)
+	}
+	if validation == nil {
+		return
+	}
+	switch {
+	case !validation.Ran:
+		fmt.Printf("  warning validation skipped: %s\n", validation.Skipped)
+	case validation.OK:
+		fmt.Printf("  map validates\n")
+	default:
+		fmt.Fprintf(os.Stderr, "map validation failed:\n%s\n", validation.Output)
+	}
+}
+
+func attachPreposition(verb string) string {
+	if verb == "Attached" {
+		return "to"
+	}
+	return "from"
+}
+
+// conceptMapValidation is the outcome of the post-attach validation pass.
+type conceptMapValidation struct {
+	Ran     bool   `json:"ran"`
+	OK      bool   `json:"ok"`
+	Output  string `json:"output,omitempty"`
+	Skipped string `json:"skipped,omitempty"`
+}
+
+// validateConceptMapDir runs likec4 validate over the map and captures the
+// report instead of streaming it, so attach can decide what to surface. A
+// missing npx is reported as skipped rather than failing the attach: the
+// config edit already succeeded.
+func validateConceptMapDir(dir string) *conceptMapValidation {
+	npxPath, err := exec.LookPath("npx")
+	if err != nil {
+		return &conceptMapValidation{Skipped: "'npx' not found in PATH (the likec4 backend requires Node.js >= 22)"}
+	}
+	output, err := exec.Command(npxPath, "likec4", "validate", "--json", "--no-layout", dir).CombinedOutput()
+	return &conceptMapValidation{Ran: true, OK: err == nil, Output: strings.TrimSpace(string(output))}
+}
+
 // resolveConceptMapDir resolves a concept reference exactly like
 // `nb concept path` and verifies the concept actually contains a LikeC4
 // project scaffold.
@@ -263,6 +483,12 @@ func resolveConceptMapDir(svc **service.Service, workspaceOverride *string, ref 
 	if err != nil {
 		return "", fmt.Errorf("get workspace context: %w", err)
 	}
+	return conceptMapDirForRef(svc, ctx, ref)
+}
+
+// conceptMapDirForRef is resolveConceptMapDir over an already-resolved
+// workspace context.
+func conceptMapDirForRef(svc **service.Service, ctx *service.WorkspaceContext, ref string) (string, error) {
 	dir, err := (*svc).ResolveConceptPath(ctx, ref)
 	if err != nil {
 		return "", err
